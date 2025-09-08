@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { LogOut, User, Settings, Moon, Sun } from 'lucide-react';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface HeaderProps {
   user: {
@@ -17,11 +18,36 @@ interface HeaderProps {
 }
 
 export function Header({ user, currentView, onViewChange, onLogout }: HeaderProps) {
+  const router = useRouter();
   const [darkMode, setDarkMode] = useState(false);
 
   const toggleDarkMode = () => {
     setDarkMode(!darkMode);
     document.documentElement.classList.toggle('dark');
+  };
+
+  const handleViewChange = (view: string) => {
+    // Usar o router para navegação em vez de onViewChange
+    switch (view) {
+      case 'client-dashboard':
+        router.push('/client/dashboard');
+        break;
+      case 'admin-dashboard':
+        router.push('/admin/dashboard');
+        break;
+      case 'cluster-management':
+        router.push('/admin/clusters');
+        break;
+      case 'client-view':
+        router.push('/admin/client-view');
+        break;
+      default:
+        if (user?.type === 'admin') {
+          router.push('/admin/dashboard');
+        } else {
+          router.push('/client/dashboard');
+        }
+    }
   };
 
   if (!user) return null;
@@ -36,7 +62,7 @@ export function Header({ user, currentView, onViewChange, onLogout }: HeaderProp
             {user.type === 'client' && (
               <Button
                 variant={currentView === 'client-dashboard' ? 'default' : 'ghost'}
-                onClick={() => onViewChange('client-dashboard')}
+                onClick={() => handleViewChange('client-dashboard')}
               >
                 Dashboard
               </Button>
@@ -46,19 +72,19 @@ export function Header({ user, currentView, onViewChange, onLogout }: HeaderProp
               <>
                 <Button
                   variant={currentView === 'admin-dashboard' ? 'default' : 'ghost'}
-                  onClick={() => onViewChange('admin-dashboard')}
+                  onClick={() => handleViewChange('admin-dashboard')}
                 >
                   Dashboard Admin
                 </Button>
                 <Button
                   variant={currentView === 'cluster-management' ? 'default' : 'ghost'}
-                  onClick={() => onViewChange('cluster-management')}
+                  onClick={() => handleViewChange('cluster-management')}
                 >
                   Gerenciar Clusters
                 </Button>
                 <Button
                   variant={currentView === 'client-view' ? 'default' : 'ghost'}
-                  onClick={() => onViewChange('client-view')}
+                  onClick={() => handleViewChange('client-view')}
                 >
                   Visão do Cliente
                 </Button>

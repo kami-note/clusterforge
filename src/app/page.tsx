@@ -1,93 +1,47 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Login } from '@/components/auth/Login';
-import { ClientDashboard } from '@/components/client/ClientDashboard';
-import { AdminDashboard } from '@/components/admin/AdminDashboard';
-import { ClusterManagement } from '@/components/clusters/ClusterManagement';
-import { ClusterDetails } from '@/components/clusters/ClusterDetails';
-import { Header } from '@/components/layout/Header';
 
-type User = {
-  email: string;
-  type: 'client' | 'admin';
-} | null;
+export default function LoginPage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(true);
 
-type View = 'login' | 'client-dashboard' | 'admin-dashboard' | 'cluster-management' | 'client-view' | 'cluster-details';
-
-export default function Home() {
-  const [user, setUser] = useState<User>(null);
-  const [currentView, setCurrentView] = useState<View>('login');
-  const [selectedClusterId, setSelectedClusterId] = useState<string>('');
+  useEffect(() => {
+    // Verificar se o usuário já está autenticado
+    const user = localStorage.getItem('user');
+    if (user) {
+      const userData = JSON.parse(user);
+      if (userData.type === 'admin') {
+        router.push('/admin/dashboard');
+      } else {
+        router.push('/client/dashboard');
+      }
+    } else {
+      setIsLoading(false);
+    }
+  }, [router]);
 
   const handleLogin = (email: string, userType: 'client' | 'admin') => {
-    setUser({ email, type: userType });
-    setCurrentView(userType === 'admin' ? 'admin-dashboard' : 'client-dashboard');
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setCurrentView('login');
-    setSelectedClusterId('');
-  };
-
-  const handleViewChange = (view: string) => {
-    setCurrentView(view as View);
-  };
-
-  const handleViewCluster = (clusterId: string) => {
-    setSelectedClusterId(clusterId);
-    setCurrentView('cluster-details');
-  };
-
-  const handleBackFromCluster = () => {
-    setCurrentView(user?.type === 'admin' ? 'admin-dashboard' : 'client-dashboard');
-  };
-
-  const renderCurrentView = () => {
-    switch (currentView) {
-      case 'login':
-        return <Login onLogin={handleLogin} />;
-      
-      case 'client-dashboard':
-        return <ClientDashboard onViewCluster={handleViewCluster} />;
-      
-      case 'admin-dashboard':
-        return <AdminDashboard onNavigate={handleViewChange} />;
-      
-      case 'cluster-management':
-        return <ClusterManagement />;
-      
-      case 'client-view':
-        return <ClientDashboard onViewCluster={handleViewCluster} />;
-      
-      case 'cluster-details':
-        return (
-          <ClusterDetails 
-            clusterId={selectedClusterId} 
-            onBack={handleBackFromCluster}
-          />
-        );
-      
-      default:
-        return <Login onLogin={handleLogin} />;
+    // Salvar dados do usuário no localStorage
+    localStorage.setItem('user', JSON.stringify({ email, type: userType }));
+    
+    // Redirecionar para o dashboard apropriado
+    if (userType === 'admin') {
+      router.push('/admin/dashboard');
+    } else {
+      router.push('/client/dashboard');
     }
   };
 
+  if (isLoading) {
+    return <div className="min-h-screen bg-background flex items-center justify-center">Carregando...</div>;
+  }
+
   return (
     <div className="min-h-screen bg-background">
-      {user && (
-        <Header
-          user={user}
-          currentView={currentView}
-          onViewChange={handleViewChange}
-          onLogout={handleLogout}
-        />
-      )}
-      
-      <main className={user ? '' : 'min-h-screen'}>
-        {renderCurrentView()}
-      </main>
+      <Login onLogin={handleLogin} />
     </div>
   );
 }
