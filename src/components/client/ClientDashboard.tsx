@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick } from 'lucide-react';
+import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick, Plus } from 'lucide-react';
 
 interface ClientDashboardProps {
   onViewCluster: (clusterId: string) => void;
+  onCreateCluster?: () => void;
 }
 
 const mockClusters = [
@@ -49,8 +51,13 @@ const usageData = [
   { name: 'Rede', value: 25 }
 ];
 
-export function ClientDashboard({ onViewCluster }: ClientDashboardProps) {
+export function ClientDashboard({ onViewCluster, onCreateCluster }: ClientDashboardProps) {
+  const router = useRouter();
   const [clusters, setClusters] = useState(mockClusters);
+
+  const handleCreateCluster = () => {
+    router.push('/client/clusters/create');
+  };
 
   const handleClusterAction = (clusterId: string, action: 'start' | 'stop' | 'restart') => {
     setClusters(prev => prev.map(cluster => 
@@ -97,6 +104,10 @@ export function ClientDashboard({ onViewCluster }: ClientDashboardProps) {
           <h1>Dashboard do Cliente</h1>
           <p className="text-muted-foreground">Visão geral dos seus serviços e clusters</p>
         </div>
+        <Button className="flex items-center space-x-2" onClick={handleCreateCluster}>
+          <Plus className="h-4 w-4" />
+          <span>Novo Cluster</span>
+        </Button>
       </div>
 
       {/* Resumo de Recursos */}

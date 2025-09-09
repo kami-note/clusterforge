@@ -31,6 +31,10 @@ export default function ClusterManagementPage() {
     router.push('/');
   };
 
+  const handleCreateCluster = () => {
+    router.push('/admin/clusters/create');
+  };
+
   if (!user) {
     return <div className="min-h-screen bg-background flex items-center justify-center">Carregando...</div>;
   }
@@ -58,7 +62,7 @@ export default function ClusterManagementPage() {
         onLogout={handleLogout}
       />
       <main>
-        <ClusterManagement />
+        <ClusterManagement onCreateCluster={handleCreateCluster} />
       </main>
     </div>
   );

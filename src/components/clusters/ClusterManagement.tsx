@@ -178,13 +178,22 @@ const owners = [
   ...Array.from(new Set(mockClusters.map(cluster => cluster.owner)))
 ];
 
-export function ClusterManagement() {
+interface ClusterManagementProps {
+  onCreateCluster?: () => void;
+}
+
+export function ClusterManagement({ onCreateCluster }: ClusterManagementProps = {}) {
   const [clusters, setClusters] = useState<Cluster[]>(mockClusters);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('Todos os Donos');
   const [serviceFilter, setServiceFilter] = useState('Todos os Serviços');
   const [alertFilter, setAlertFilter] = useState('all');
+
+  const handleCreateCluster = () => {
+    // Navegar para a página de criação de cluster
+    window.location.href = '/admin/clusters/create';
+  };
 
   const filteredClusters = useMemo(() => {
     return clusters.filter(cluster => {
@@ -288,7 +297,7 @@ export function ClusterManagement() {
             Controle total sobre todos os serviços hospedados • {filteredClusters.length} de {clusters.length} clusters
           </p>
         </div>
-        <Button className="flex items-center space-x-2">
+        <Button className="flex items-center space-x-2" onClick={handleCreateCluster}>
           <Plus className="h-4 w-4" />
           <span>Novo Cluster</span>
         </Button>

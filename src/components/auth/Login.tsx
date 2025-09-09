@@ -1,16 +1,14 @@
 "use client";
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
-interface LoginProps {
-  onLogin: (email: string, userType: 'client' | 'admin') => void;
-}
-
-export function Login({ onLogin }: LoginProps) {
+export function Login() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,7 +22,16 @@ export function Login({ onLogin }: LoginProps) {
     
     // Determinar tipo de usuário baseado no email
     const userType = email.includes('admin') ? 'admin' : 'client';
-    onLogin(email, userType);
+    
+    // Salvar dados do usuário no localStorage
+    localStorage.setItem('user', JSON.stringify({ email, type: userType }));
+    
+    // Redirecionar para o dashboard apropriado
+    if (userType === 'admin') {
+      router.push('/admin/dashboard');
+    } else {
+      router.push('/client/dashboard');
+    }
     
     setLoading(false);
   };

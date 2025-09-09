@@ -12,12 +12,9 @@ interface HeaderProps {
     email: string;
     type: 'client' | 'admin';
   } | null;
-  currentView: string;
-  onViewChange: (view: string) => void;
-  onLogout: () => void;
 }
 
-export function Header({ user, currentView, onViewChange, onLogout }: HeaderProps) {
+export function Header({ user }: HeaderProps) {
   const router = useRouter();
   const [darkMode, setDarkMode] = useState(false);
 
@@ -26,8 +23,14 @@ export function Header({ user, currentView, onViewChange, onLogout }: HeaderProp
     document.documentElement.classList.toggle('dark');
   };
 
+  const handleLogout = () => {
+    // Remover dados do usuário do localStorage
+    localStorage.removeItem('user');
+    // Redirecionar para a página de login
+    router.push('/');
+  };
+
   const handleViewChange = (view: string) => {
-    // Usar o router para navegação em vez de onViewChange
     switch (view) {
       case 'client-dashboard':
         router.push('/client/dashboard');
@@ -42,11 +45,7 @@ export function Header({ user, currentView, onViewChange, onLogout }: HeaderProp
         router.push('/admin/client-view');
         break;
       default:
-        if (user?.type === 'admin') {
-          router.push('/admin/dashboard');
-        } else {
-          router.push('/client/dashboard');
-        }
+        router.push('/' + view);
     }
   };
 
@@ -61,7 +60,7 @@ export function Header({ user, currentView, onViewChange, onLogout }: HeaderProp
           <nav className="flex space-x-1">
             {user.type === 'client' && (
               <Button
-                variant={currentView === 'client-dashboard' ? 'default' : 'ghost'}
+                variant="ghost"
                 onClick={() => handleViewChange('client-dashboard')}
               >
                 Dashboard
@@ -71,19 +70,19 @@ export function Header({ user, currentView, onViewChange, onLogout }: HeaderProp
             {user.type === 'admin' && (
               <>
                 <Button
-                  variant={currentView === 'admin-dashboard' ? 'default' : 'ghost'}
+                  variant="ghost"
                   onClick={() => handleViewChange('admin-dashboard')}
                 >
                   Dashboard Admin
                 </Button>
                 <Button
-                  variant={currentView === 'cluster-management' ? 'default' : 'ghost'}
+                  variant="ghost"
                   onClick={() => handleViewChange('cluster-management')}
                 >
                   Gerenciar Clusters
                 </Button>
                 <Button
-                  variant={currentView === 'client-view' ? 'default' : 'ghost'}
+                  variant="ghost"
                   onClick={() => handleViewChange('client-view')}
                 >
                   Visão do Cliente
@@ -114,7 +113,7 @@ export function Header({ user, currentView, onViewChange, onLogout }: HeaderProp
                 <Settings className="h-4 w-4 mr-2" />
                 Configurações
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={onLogout}>
+              <DropdownMenuItem onClick={handleLogout}>
                 <LogOut className="h-4 w-4 mr-2" />
                 Sair
               </DropdownMenuItem>

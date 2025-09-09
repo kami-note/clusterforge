@@ -23,25 +23,13 @@ export default function LoginPage() {
     }
   }, [router]);
 
-  const handleLogin = (email: string, userType: 'client' | 'admin') => {
-    // Salvar dados do usuário no localStorage
-    localStorage.setItem('user', JSON.stringify({ email, type: userType }));
-    
-    // Redirecionar para o dashboard apropriado
-    if (userType === 'admin') {
-      router.push('/admin/dashboard');
-    } else {
-      router.push('/client/dashboard');
-    }
-  };
-
   if (isLoading) {
     return <div className="min-h-screen bg-background flex items-center justify-center">Carregando...</div>;
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <Login onLogin={handleLogin} />
+      <Login />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -78,6 +79,7 @@ const criticalAlerts = [
 ];
 
 export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
+  const router = useRouter();
   const [activityData, setActivityData] = useState(generateActivityData());
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
@@ -116,6 +118,25 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const criticalAlertsCount = criticalAlerts.filter(alert => 
     alert.severity === 'critical' || alert.severity === 'high'
   ).length;
+
+  const handleNavigate = (view: string) => {
+    switch (view) {
+      case 'admin-dashboard':
+        router.push('/admin/dashboard');
+        break;
+      case 'cluster-management':
+        router.push('/admin/clusters');
+        break;
+      case 'client-view':
+        router.push('/admin/client-view');
+        break;
+      case 'cluster-create':
+        router.push('/admin/clusters/create');
+        break;
+      default:
+        router.push('/admin/dashboard');
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -377,7 +398,10 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Button className="h-16 flex flex-col items-center justify-center space-y-2">
+            <Button 
+              className="h-16 flex flex-col items-center justify-center space-y-2"
+              onClick={() => handleNavigate('cluster-create')}
+            >
               <Plus className="h-5 w-5" />
               <span>Criar Novo Cluster</span>
             </Button>
@@ -385,13 +409,17 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
             <Button 
               variant="outline" 
               className="h-16 flex flex-col items-center justify-center space-y-2"
-              onClick={() => onNavigate?.('cluster-management')}
+              onClick={() => handleNavigate('cluster-management')}
             >
               <Server className="h-5 w-5" />
               <span>Gerenciar Clusters</span>
             </Button>
             
-            <Button variant="outline" className="h-16 flex flex-col items-center justify-center space-y-2">
+            <Button 
+              variant="outline" 
+              className="h-16 flex flex-col items-center justify-center space-y-2"
+              onClick={() => handleNavigate('client-view')}
+            >
               <Users className="h-5 w-5" />
               <span>Gerenciar Clientes</span>
             </Button>
