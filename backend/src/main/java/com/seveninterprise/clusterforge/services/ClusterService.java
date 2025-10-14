@@ -16,6 +16,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -31,6 +32,21 @@ public class ClusterService implements IClusterService {
     
     @Value("${system.directory.cluster}")
     private String clustersBasePath;
+    
+    @Value("${system.directory.scripts}")
+    private String scriptsBasePath;
+    
+    @Value("${system.default.cpu.limit}")
+    private Double defaultCpuLimit;
+    
+    @Value("${system.default.memory.limit}")
+    private Long defaultMemoryLimit;
+    
+    @Value("${system.default.disk.limit}")
+    private Long defaultDiskLimit;
+    
+    @Value("${system.default.network.limit}")
+    private Long defaultNetworkLimit;
     
     private final ClusterRepository clusterRepository;
     private final ClusterNamingService clusterNamingService;
@@ -89,6 +105,9 @@ public class ClusterService implements IClusterService {
             // Copia template para o diretório do cluster
             copyTemplateFiles(template, clusterPath);
             
+            // Copia scripts centralizados (init-limits.sh, etc.) para o cluster
+            copySystemScripts(clusterPath);
+            
             // Cria a entrada no banco de dados
             Cluster cluster = new Cluster();
             cluster.setName(clusterName);
@@ -96,10 +115,16 @@ public class ClusterService implements IClusterService {
             cluster.setRootPath(clusterPath);
             cluster.setUser(owner);
             
+            // Define limites de recursos (usa valores do request ou defaults)
+            cluster.setCpuLimit(request.getCpuLimit() != null ? request.getCpuLimit() : defaultCpuLimit);
+            cluster.setMemoryLimit(request.getMemoryLimit() != null ? request.getMemoryLimit() : defaultMemoryLimit);
+            cluster.setDiskLimit(request.getDiskLimit() != null ? request.getDiskLimit() : defaultDiskLimit);
+            cluster.setNetworkLimit(request.getNetworkLimit() != null ? request.getNetworkLimit() : defaultNetworkLimit);
+            
             Cluster savedCluster = clusterRepository.save(cluster);
             
-            // Modifica o arquivo docker-compose para usar a porta dinâmica e nome único
-            updateDockerComposeConfig(clusterPath, port, clusterName);
+            // Modifica o arquivo docker-compose para usar a porta dinâmica, nome único e limites de recursos
+            updateDockerComposeConfig(clusterPath, port, clusterName, savedCluster);
             
             // Instancia o container Docker
             boolean dockerSuccess = instantiateDockerContainer(clusterName, clusterPath);
@@ -210,7 +235,52 @@ public class ClusterService implements IClusterService {
         }
     }
     
-    private void updateDockerComposeConfig(String clusterPath, int port, String clusterName) {
+    /**
+     * Copia scripts do sistema (centralizados) para o diretório do cluster
+     * Isso torna os scripts reutilizáveis para QUALQUER template
+     */
+    private void copySystemScripts(String clusterPath) {
+        try {
+            Path scriptsSourcePath = Paths.get(scriptsBasePath);
+            
+            if (!Files.exists(scriptsSourcePath)) {
+                System.err.println("AVISO: Diretório de scripts não encontrado: " + scriptsBasePath);
+                return;
+            }
+            
+            // Copia todos os scripts do diretório centralizado para o cluster
+            Files.walk(scriptsSourcePath)
+                .filter(Files::isRegularFile)
+                .forEach(source -> {
+                    try {
+                        Path target = Paths.get(clusterPath).resolve(source.getFileName());
+                        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                        
+                        // Torna o script executável
+                        Files.setPosixFilePermissions(target, 
+                            java.util.Set.of(
+                                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+                                java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE,
+                                java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+                                java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE,
+                                java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
+                                java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE
+                            ));
+                        
+                        System.out.println("✓ Script copiado: " + source.getFileName());
+                    } catch (Exception e) {
+                        System.err.println("Erro ao copiar script " + source.getFileName() + ": " + e.getMessage());
+                    }
+                });
+                
+        } catch (Exception e) {
+            System.err.println("Erro ao copiar scripts do sistema: " + e.getMessage());
+            // Não lança exceção - scripts são opcionais
+        }
+    }
+    
+    private void updateDockerComposeConfig(String clusterPath, int port, String clusterName, Cluster cluster) {
         try {
             String composePath = clusterPath + "/" + DOCKER_COMPOSE_FILE;
             String originalContent = new String(Files.readAllBytes(Paths.get(composePath)));
@@ -232,10 +302,133 @@ public class ClusterService implements IClusterService {
                 "container_name: " + uniqueContainerName
             );
             
+            // Adiciona limites de recursos ao docker-compose
+            updatedContent = addResourceLimitsToDockerCompose(updatedContent, cluster);
+            
             Files.write(Paths.get(composePath), updatedContent.getBytes());
         } catch (Exception e) {
             throw new ClusterException("Erro ao atualizar configuração do Docker Compose: " + e.getMessage(), e);
         }
+    }
+    
+    /**
+     * Adiciona ou atualiza limites de recursos no arquivo docker-compose
+     */
+    private String addResourceLimitsToDockerCompose(String content, Cluster cluster) {
+        // Converte memória de MB para formato Docker (com sufixo 'm')
+        String memoryLimit = cluster.getMemoryLimit() + "m";
+        
+        // Monta a seção de deploy resources (CPU e Memória via CGroups)
+        String resourcesSection = String.format(
+            "    deploy:\n" +
+            "      resources:\n" +
+            "        limits:\n" +
+            "          cpus: '%.2f'\n" +
+            "          memory: %s\n" +
+            "        reservations:\n" +
+            "          cpus: '%.2f'\n" +
+            "          memory: %s\n",
+            cluster.getCpuLimit(),
+            memoryLimit,
+            cluster.getCpuLimit() * 0.5,  // Reserva 50% do limite
+            (cluster.getMemoryLimit() / 2) + "m"  // Reserva 50% da memória
+        );
+        
+        // Adiciona variáveis de ambiente para os limites (usado pelo script init-limits.sh)
+        String environmentSection = String.format(
+            "    environment:\n" +
+            "      - CPU_LIMIT=%.2f\n" +
+            "      - MEMORY_LIMIT_MB=%d\n" +
+            "      - DISK_LIMIT_GB=%d\n" +
+            "      - NETWORK_LIMIT_MBPS=%d\n",
+            cluster.getCpuLimit(),
+            cluster.getMemoryLimit(),
+            cluster.getDiskLimit(),
+            cluster.getNetworkLimit()
+        );
+        
+        // Adiciona cap_add para permitir configuração de rede (tc)
+        String capsSection = 
+            "    cap_add:\n" +
+            "      - NET_ADMIN      # Permite configurar traffic control (tc)\n";
+        
+        // Adiciona tmpfs para diretórios temporários com limite de tamanho
+        String tmpfsSection = String.format(
+            "    tmpfs:\n" +
+            "      - /tmp:size=%dm,mode=1777       # Limita /tmp\n" +
+            "      - /var/tmp:size=%dm,mode=1777   # Limita /var/tmp\n",
+            Math.min(cluster.getDiskLimit() * 100, 500),  // Máx 500MB para tmp
+            Math.min(cluster.getDiskLimit() * 100, 500)   // Máx 500MB para var/tmp
+        );
+        
+        // Adiciona storage_opt para limitar tamanho do container (overlay2)
+        // Nota: Requer Docker daemon configurado com storage driver overlay2 e pquota
+        String storageOptsSection = String.format(
+            "    storage_opt:\n" +
+            "      size: '%dG'    # Limite total do container filesystem\n",
+            cluster.getDiskLimit()
+        );
+        
+        // Modifica o comando para usar o script de inicialização
+        if (content.contains("command:")) {
+            // Salva o comando original
+            String originalCommand = content.replaceAll("(?s).*command:\\s*([^\n]+).*", "$1");
+            originalCommand = originalCommand.trim();
+            
+            // Novo comando que executa init-limits.sh primeiro
+            String newCommand = String.format(
+                "    command: >\n" +
+                "      bash -c '\n" +
+                "        if [ -f /init-limits.sh ]; then\n" +
+                "          chmod +x /init-limits.sh;\n" +
+                "          /init-limits.sh %s;\n" +
+                "        else\n" +
+                "          %s;\n" +
+                "        fi\n" +
+                "      '\n",
+                originalCommand,
+                originalCommand
+            );
+            
+            content = content.replaceAll("(?s)    command:.*?\\n(?=\\s{0,4}[a-z])", newCommand);
+        }
+        
+        // Adiciona volume do script init-limits.sh
+        String volumeEntry = "      - ./init-limits.sh:/init-limits.sh:ro\n";
+        if (content.contains("    volumes:")) {
+            content = content.replace("    volumes:\n", "    volumes:\n" + volumeEntry);
+        } else {
+            content = content.replace("    working_dir:", "    volumes:\n" + volumeEntry + "    working_dir:");
+        }
+        
+        // Remove seções existentes se houver
+        if (content.contains("deploy:")) {
+            content = content.replaceAll("(?s)    deploy:.*?(?=\\n  [a-z]|\\z)", "");
+        }
+        if (content.contains("environment:")) {
+            content = content.replaceAll("(?s)    environment:.*?(?=\\n    [a-z])", "");
+        }
+        if (content.contains("cap_add:")) {
+            content = content.replaceAll("(?s)    cap_add:.*?(?=\\n    [a-z])", "");
+        }
+        if (content.contains("tmpfs:")) {
+            content = content.replaceAll("(?s)    tmpfs:.*?(?=\\n    [a-z])", "");
+        }
+        if (content.contains("storage_opt:")) {
+            content = content.replaceAll("(?s)    storage_opt:.*?(?=\\n    [a-z])", "");
+        }
+        
+        // Monta todas as seções na ordem correta
+        String allSections = capsSection + tmpfsSection + storageOptsSection + environmentSection + resourcesSection;
+        
+        // Adiciona antes de volumes (ou working_dir se não tiver volumes)
+        if (content.contains("    volumes:")) {
+            content = content.replace("    volumes:", allSections + "    volumes:");
+        } else {
+            content = content.replaceFirst("(    )(working_dir:|command:)", allSections + "$1$2");
+        }
+        
+        return content;
     }
     
     private String generateUniqueContainerName(String clusterName) {

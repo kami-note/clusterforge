@@ -24,6 +24,12 @@ public class Cluster {
 
     private int port;
     private String rootPath;
+    
+    // Resource Limits
+    private Double cpuLimit;      // CPU limit in cores (e.g., 1.5 = 1.5 cores)
+    private Long memoryLimit;     // Memory limit in MB
+    private Long diskLimit;       // Disk limit in GB
+    private Long networkLimit;    // Network bandwidth limit in MB/s (optional)
 
     // Getters and Setters
     public Long getId() {
@@ -64,5 +70,37 @@ public class Cluster {
 
     public void setRootPath(String rootPath) {
         this.rootPath = rootPath;
+    }
+
+    public Double getCpuLimit() {
+        return cpuLimit;
+    }
+
+    public void setCpuLimit(Double cpuLimit) {
+        this.cpuLimit = cpuLimit;
+    }
+
+    public Long getMemoryLimit() {
+        return memoryLimit;
+    }
+
+    public void setMemoryLimit(Long memoryLimit) {
+        this.memoryLimit = memoryLimit;
+    }
+
+    public Long getDiskLimit() {
+        return diskLimit;
+    }
+
+    public void setDiskLimit(Long diskLimit) {
+        this.diskLimit = diskLimit;
+    }
+
+    public Long getNetworkLimit() {
+        return networkLimit;
+    }
+
+    public void setNetworkLimit(Long networkLimit) {
+        this.networkLimit = networkLimit;
     }
 }

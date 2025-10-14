@@ -59,17 +59,15 @@ class PortManagementServiceTest {
     
     @Test
     void testIsPortAvailableForNewCluster_WithUnusedPort_ShouldReturnTrue() {
-        // Given
-        int port = 8080;
+        // Given - Use high port unlikely to be in use
+        int port = 45678;  // High port number unlikely to be in use
         when(clusterRepository.existsByPort(port)).thenReturn(false);
         
         // When
         boolean result = portManagementService.isPortAvailableForNewCluster(port);
         
         // Then
-        // Note: This might return false if port 8080 is actually in use in the system
-        // This test validates the logic working correctly
-        assertTrue(result);
+        assertTrue(result, "Port " + port + " should be available for new cluster");
     }
     
     @Test
