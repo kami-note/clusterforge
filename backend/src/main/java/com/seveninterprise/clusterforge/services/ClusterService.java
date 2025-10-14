@@ -3,6 +3,7 @@ package com.seveninterprise.clusterforge.services;
 import com.seveninterprise.clusterforge.dto.ClusterListItemDto;
 import com.seveninterprise.clusterforge.dto.CreateClusterRequest;
 import com.seveninterprise.clusterforge.dto.CreateClusterResponse;
+import com.seveninterprise.clusterforge.dto.UpdateClusterLimitsRequest;
 import com.seveninterprise.clusterforge.exceptions.ClusterException;
 import com.seveninterprise.clusterforge.model.Cluster;
 import com.seveninterprise.clusterforge.model.Role;
@@ -609,5 +610,104 @@ public class ClusterService implements IClusterService {
             status,
             message
         );
+    }
+    
+    @Override
+    public CreateClusterResponse updateClusterLimits(Long clusterId, UpdateClusterLimitsRequest request, 
+                                                     User authenticatedUser, boolean isAdmin) {
+        // Valida que apenas administradores podem atualizar limites de recursos
+        // Usuários regulares não têm permissão para modificar limites
+        if (!isAdmin) {
+            throw new ClusterException("Apenas administradores podem atualizar limites de recursos");
+        }
+        
+        // Busca cluster no banco de dados
+        Cluster cluster = clusterRepository.findById(clusterId)
+            .orElseThrow(() -> new ClusterException("Cluster não encontrado com ID: " + clusterId));
+        
+        // Atualiza apenas os campos fornecidos (null = mantém valor atual)
+        boolean hasChanges = false;
+        
+        if (request.getCpuLimit() != null) {
+            cluster.setCpuLimit(request.getCpuLimit());
+            hasChanges = true;
+        }
+        
+        if (request.getMemoryLimit() != null) {
+            cluster.setMemoryLimit(request.getMemoryLimit());
+            hasChanges = true;
+        }
+        
+        if (request.getDiskLimit() != null) {
+            cluster.setDiskLimit(request.getDiskLimit());
+            hasChanges = true;
+        }
+        
+        if (request.getNetworkLimit() != null) {
+            cluster.setNetworkLimit(request.getNetworkLimit());
+            hasChanges = true;
+        }
+        
+        if (!hasChanges) {
+            return buildResponse(cluster, "NO_CHANGES", 
+                "Nenhuma alteração foi especificada");
+        }
+        
+        try {
+            // Salva alterações no banco
+            Cluster savedCluster = clusterRepository.save(cluster);
+            
+            // Atualiza arquivo docker-compose.yml com novos limites
+            updateDockerComposeConfig(
+                cluster.getRootPath(), 
+                cluster.getPort(), 
+                cluster.getName(), 
+                savedCluster
+            );
+            
+            // 6. Reinicia container para aplicar mudanças (se estiver rodando)
+            boolean containerWasRunning = isContainerRunning(cluster.getName());
+            
+            if (containerWasRunning) {
+                // Para o container
+                try {
+                    dockerService.stopContainer(cluster.getName());
+                } catch (Exception e) {
+                    System.err.println("Warning: Failed to stop container before update: " + e.getMessage());
+                }
+                
+                // Inicia novamente com novos limites
+                boolean restartSuccess = instantiateDockerContainer(cluster.getName(), cluster.getRootPath());
+                
+                if (restartSuccess) {
+                    return buildResponse(savedCluster, "UPDATED", 
+                        "Limites atualizados e cluster reiniciado com sucesso");
+                } else {
+                    return buildResponse(savedCluster, "UPDATED_PARTIAL", 
+                        "Limites atualizados mas falha ao reiniciar container. Execute start manualmente");
+                }
+            } else {
+                return buildResponse(savedCluster, "UPDATED", 
+                    "Limites atualizados com sucesso. Execute start para aplicar");
+            }
+            
+        } catch (ClusterException e) {
+            throw e; // Re-throw ClusterException
+        } catch (Exception e) {
+            throw new ClusterException("Erro ao atualizar limites do cluster: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Verifica se um container está rodando
+     */
+    private boolean isContainerRunning(String clusterName) {
+        try {
+            String result = dockerService.runCommand("docker ps --filter name=" + clusterName + " --format '{{.Names}}'");
+            return result.contains(clusterName);
+        } catch (Exception e) {
+            System.err.println("Warning: Failed to check container status: " + e.getMessage());
+            return false;
+        }
     }
 }

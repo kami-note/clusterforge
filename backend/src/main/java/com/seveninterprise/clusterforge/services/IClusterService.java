@@ -149,6 +149,39 @@ public interface IClusterService {
      * @return CreateClusterResponse com status da operação
      */
     CreateClusterResponse stopCluster(Long clusterId, Long userId);
+    
+    /**
+     * Atualiza os limites de recursos de um cluster existente
+     * 
+     * Processo:
+     * 1. Valida que apenas administradores podem atualizar limites
+     * 2. Busca cluster no banco de dados
+     * 3. Atualiza apenas os campos fornecidos (null = mantém valor atual)
+     * 4. Salva alterações no banco
+     * 5. Atualiza arquivo docker-compose.yml com novos limites
+     * 6. Reinicia container para aplicar mudanças (se estiver rodando)
+     * 
+     * Atualização Parcial:
+     * - Campos não fornecidos (null) mantêm seus valores atuais
+     * - Permite atualizar apenas CPU sem alterar RAM, Disco ou Rede
+     * 
+     * Controle de Acesso:
+     * - APENAS Administradores podem atualizar limites de recursos
+     * - Usuários regulares recebem erro 403 Forbidden
+     * 
+     * Aplicação dos Limites:
+     * - CPU e RAM: Aplicados via Docker CGroups (hard limit)
+     * - Disco: Aplicado via storage_opt + tmpfs (hard limit)
+     * - Rede: Aplicado via Traffic Control/tc (hard limit)
+     * 
+     * @param clusterId ID do cluster a atualizar
+     * @param request Request com novos limites (campos opcionais)
+     * @param authenticatedUser Usuário fazendo a requisição (não usado, validação é apenas isAdmin)
+     * @param isAdmin Se o usuário é administrador (OBRIGATÓRIO ser true)
+     * @return CreateClusterResponse com status da operação
+     * @throws ClusterException se cluster não existe ou usuário não é admin
+     */
+    CreateClusterResponse updateClusterLimits(Long clusterId, com.seveninterprise.clusterforge.dto.UpdateClusterLimitsRequest request, User authenticatedUser, boolean isAdmin);
 }
 
 

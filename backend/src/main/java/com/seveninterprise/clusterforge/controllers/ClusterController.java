@@ -3,11 +3,13 @@ package com.seveninterprise.clusterforge.controllers;
 import com.seveninterprise.clusterforge.dto.ClusterListItemDto;
 import com.seveninterprise.clusterforge.dto.CreateClusterRequest;
 import com.seveninterprise.clusterforge.dto.CreateClusterResponse;
+import com.seveninterprise.clusterforge.dto.UpdateClusterLimitsRequest;
 import com.seveninterprise.clusterforge.model.Cluster;
 import com.seveninterprise.clusterforge.model.User;
 import com.seveninterprise.clusterforge.repository.UserRepository;
 import com.seveninterprise.clusterforge.services.IClusterService;
 
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -114,5 +116,38 @@ public class ClusterController {
     public CreateClusterResponse stopCluster(@PathVariable Long clusterId) {
         User authenticatedUser = getAuthenticatedUser();
         return clusterService.stopCluster(clusterId, authenticatedUser.getId());
+    }
+    
+    /**
+     * Atualiza os limites de recursos de um cluster
+     * 
+     * PATCH /api/clusters/{clusterId}
+     * 
+     * Permite atualização parcial - apenas os campos fornecidos serão alterados.
+     * Campos não fornecidos mantêm seus valores atuais.
+     * 
+     * Controle de Acesso:
+     * - Admin: Pode atualizar qualquer cluster
+     * - Usuário: NÃO tem permissão (apenas administradores podem atualizar limites)
+     * 
+     * @param clusterId ID do cluster a atualizar
+     * @param request Request com novos limites (todos campos opcionais)
+     * @return CreateClusterResponse com status da operação
+     */
+    @PatchMapping("/{clusterId}")
+    public ResponseEntity<?> updateClusterLimits(
+            @PathVariable Long clusterId,
+            @Valid @RequestBody UpdateClusterLimitsRequest request) {
+        try {
+            CreateClusterResponse response = clusterService.updateClusterLimits(
+                clusterId, 
+                request, 
+                getAuthenticatedUser(), 
+                isAdmin()
+            );
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            return handleException(e);
+        }
     }
 }
