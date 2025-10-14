@@ -6,6 +6,7 @@ public class CreateClusterResponse {
     private int port;
     private String status;
     private String message;
+    private UserCredentialsDto ownerCredentials; // Credenciais do usuário dono (quando admin cria)
     
     public CreateClusterResponse() {}
     
@@ -15,6 +16,15 @@ public class CreateClusterResponse {
         this.port = port;
         this.status = status;
         this.message = message;
+    }
+    
+    public CreateClusterResponse(Long clusterId, String clusterName, int port, String status, String message, UserCredentialsDto ownerCredentials) {
+        this.clusterId = clusterId;
+        this.clusterName = clusterName;
+        this.port = port;
+        this.status = status;
+        this.message = message;
+        this.ownerCredentials = ownerCredentials;
     }
     
     public Long getClusterId() {
@@ -55,6 +65,45 @@ public class CreateClusterResponse {
     
     public void setMessage(String message) {
         this.message = message;
+    }
+    
+    public UserCredentialsDto getOwnerCredentials() {
+        return ownerCredentials;
+    }
+    
+    public void setOwnerCredentials(UserCredentialsDto ownerCredentials) {
+        this.ownerCredentials = ownerCredentials;
+    }
+    
+    /**
+     * DTO interno para retornar credenciais do usuário
+     */
+    public static class UserCredentialsDto {
+        private String username;
+        private String password;
+        
+        public UserCredentialsDto() {}
+        
+        public UserCredentialsDto(String username, String password) {
+            this.username = username;
+            this.password = password;
+        }
+        
+        public String getUsername() {
+            return username;
+        }
+        
+        public void setUsername(String username) {
+            this.username = username;
+        }
+        
+        public String getPassword() {
+            return password;
+        }
+        
+        public void setPassword(String password) {
+            this.password = password;
+        }
     }
 }
 

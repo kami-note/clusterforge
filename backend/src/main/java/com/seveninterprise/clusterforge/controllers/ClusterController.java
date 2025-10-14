@@ -1,11 +1,17 @@
 package com.seveninterprise.clusterforge.controllers;
 
+import com.seveninterprise.clusterforge.dto.ClusterListItemDto;
 import com.seveninterprise.clusterforge.dto.CreateClusterRequest;
 import com.seveninterprise.clusterforge.dto.CreateClusterResponse;
 import com.seveninterprise.clusterforge.model.Cluster;
+import com.seveninterprise.clusterforge.model.User;
+import com.seveninterprise.clusterforge.repository.UserRepository;
 import com.seveninterprise.clusterforge.services.IClusterService;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,16 +21,44 @@ import java.util.List;
 public class ClusterController {
     
     private final IClusterService clusterService;
+    private final UserRepository userRepository;
     
-    public ClusterController(IClusterService clusterService) {
+    public ClusterController(IClusterService clusterService, UserRepository userRepository) {
         this.clusterService = clusterService;
+        this.userRepository = userRepository;
+    }
+    
+    /**
+     * Obtém o usuário autenticado do contexto de segurança
+     */
+    private User getAuthenticatedUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuário autenticado não encontrado"));
+    }
+    
+    /**
+     * Verifica se o usuário autenticado é admin
+     */
+    private boolean isAdmin() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(role -> role.equals("ROLE_ADMIN"));
     }
     
     @PostMapping
     public CreateClusterResponse createCluster(@RequestBody CreateClusterRequest request) {
-        // TODO: Implementar autenticação adequada - por enquanto usando userId fixo para teste
-        Long userId = 1L; // Temporário até implementar autenticação real
-        return clusterService.createCluster(request, userId);
+        User authenticatedUser = getAuthenticatedUser();
+        return clusterService.createCluster(request, authenticatedUser);
+    }
+    
+    @GetMapping
+    public List<ClusterListItemDto> listClusters() {
+        User authenticatedUser = getAuthenticatedUser();
+        boolean isUserAdmin = isAdmin();
+        return clusterService.listClusters(authenticatedUser, isUserAdmin);
     }
     
     @GetMapping("/user/{userId}")
@@ -49,8 +83,9 @@ public class ClusterController {
     @DeleteMapping("/{clusterId}")
     public ResponseEntity<?> deleteCluster(@PathVariable Long clusterId) {
         try {
-            Long userId = 1L; // Temporário até implementar autenticação real
-            clusterService.deleteCluster(clusterId, userId);
+            User authenticatedUser = getAuthenticatedUser();
+            boolean isUserAdmin = isAdmin();
+            clusterService.deleteCluster(clusterId, authenticatedUser, isUserAdmin);
             return ResponseEntity.noContent().build();
         } catch (RuntimeException e) {
             if (e.getMessage().contains("não encontrado")) {
@@ -65,13 +100,13 @@ public class ClusterController {
     
     @PostMapping("/{clusterId}/start")
     public CreateClusterResponse startCluster(@PathVariable Long clusterId) {
-        Long userId = 1L; // Temporário até implementar autenticação real
-        return clusterService.startCluster(clusterId, userId);
+        User authenticatedUser = getAuthenticatedUser();
+        return clusterService.startCluster(clusterId, authenticatedUser.getId());
     }
     
     @PostMapping("/{clusterId}/stop")
     public CreateClusterResponse stopCluster(@PathVariable Long clusterId) {
-        Long userId = 1L; // Temporário até implementar autenticação real
-        return clusterService.stopCluster(clusterId, userId);
+        User authenticatedUser = getAuthenticatedUser();
+        return clusterService.stopCluster(clusterId, authenticatedUser.getId());
     }
 }

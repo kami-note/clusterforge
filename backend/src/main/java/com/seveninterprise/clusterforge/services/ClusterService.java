@@ -1,9 +1,11 @@
 package com.seveninterprise.clusterforge.services;
 
+import com.seveninterprise.clusterforge.dto.ClusterListItemDto;
 import com.seveninterprise.clusterforge.dto.CreateClusterRequest;
 import com.seveninterprise.clusterforge.dto.CreateClusterResponse;
 import com.seveninterprise.clusterforge.exceptions.ClusterException;
 import com.seveninterprise.clusterforge.model.Cluster;
+import com.seveninterprise.clusterforge.model.Role;
 import com.seveninterprise.clusterforge.model.Template;
 import com.seveninterprise.clusterforge.model.User;
 import com.seveninterprise.clusterforge.repository.ClusterRepository;
@@ -15,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class ClusterService implements IClusterService {
@@ -34,26 +37,41 @@ public class ClusterService implements IClusterService {
     private final PortManagementService portManagementService;
     private final TemplateService templateService;
     private final DockerService dockerService;
+    private final UserService userService;
     
     public ClusterService(ClusterRepository clusterRepository,
                          ClusterNamingService clusterNamingService,
                          PortManagementService portManagementService,
                          TemplateService templateService,
-                         DockerService dockerService) {
+                         DockerService dockerService,
+                         UserService userService) {
         this.clusterRepository = clusterRepository;
         this.clusterNamingService = clusterNamingService;
         this.portManagementService = portManagementService;
         this.templateService = templateService;
         this.dockerService = dockerService;
+        this.userService = userService;
     }
     
     @Override
-    public CreateClusterResponse createCluster(CreateClusterRequest request, Long userId) {
+    public CreateClusterResponse createCluster(CreateClusterRequest request, User authenticatedUser) {
         try {
             // Valida se o template existe
             Template template = templateService.getTemplateByName(request.getTemplateName());
             if (template == null) {
                 throw new ClusterException("Template não encontrado: " + request.getTemplateName());
+            }
+            
+            // Determina o dono do cluster e captura credenciais se admin criar
+            UserService.UserCredentials ownerCredentials = null;
+            User owner;
+            
+            if (authenticatedUser.getRole() == Role.ADMIN) {
+                ownerCredentials = userService.createRandomUser();
+                ownerCredentials.printCredentials();
+                owner = ownerCredentials.getUser();
+            } else {
+                owner = authenticatedUser;
             }
             
             // Gera nome único para o cluster
@@ -76,11 +94,7 @@ public class ClusterService implements IClusterService {
             cluster.setName(clusterName);
             cluster.setPort(port);
             cluster.setRootPath(clusterPath);
-            
-            // Cria objeto User temporário com ID
-            User user = new User();
-            user.setId(userId);
-            cluster.setUser(user);
+            cluster.setUser(owner);
             
             Cluster savedCluster = clusterRepository.save(cluster);
             
@@ -96,6 +110,24 @@ public class ClusterService implements IClusterService {
                 message = "Cluster criado e iniciado com sucesso";
             } else {
                 message = "Cluster criado mas falha ao iniciar container Docker. Verifique se o Docker está rodando e se o usuário tem permissão sudo";
+            }
+            
+            // Se admin criou, inclui credenciais no response
+            if (ownerCredentials != null) {
+                CreateClusterResponse.UserCredentialsDto credentialsDto = 
+                    new CreateClusterResponse.UserCredentialsDto(
+                        ownerCredentials.getUsername(),
+                        ownerCredentials.getPlainPassword()
+                    );
+                
+                return new CreateClusterResponse(
+                    savedCluster.getId(),
+                    clusterName,
+                    port,
+                    status,
+                    message,
+                    credentialsDto
+                );
             }
             
             return new CreateClusterResponse(
@@ -116,6 +148,7 @@ public class ClusterService implements IClusterService {
             );
         }
     }
+    
     
     private String createClusterDirectory(String clusterName) {
         String clusterPath = clustersBasePath + "/" + clusterName;
@@ -270,28 +303,66 @@ public class ClusterService implements IClusterService {
     }
     
     @Override
+    public List<ClusterListItemDto> listClusters(User authenticatedUser, boolean isAdmin) {
+        List<Cluster> clusters;
+        
+        if (isAdmin) {
+            // Admin vê todos os clusters
+            clusters = clusterRepository.findAll();
+            
+            // Inclui informações do dono para cada cluster
+            return clusters.stream()
+                .map(cluster -> {
+                    User owner = cluster.getUser();
+                    ClusterListItemDto.OwnerInfoDto ownerInfo = new ClusterListItemDto.OwnerInfoDto(
+                        owner.getId()
+                    );
+                    
+                    return new ClusterListItemDto(
+                        cluster.getId(),
+                        cluster.getName(),
+                        cluster.getPort(),
+                        cluster.getRootPath(),
+                        ownerInfo
+                    );
+                })
+                .collect(Collectors.toList());
+        } else {
+            // Usuário comum vê apenas seus clusters
+            clusters = clusterRepository.findByUserId(authenticatedUser.getId());
+            
+            // Não inclui credenciais para usuário comum
+            return clusters.stream()
+                .map(cluster -> new ClusterListItemDto(
+                    cluster.getId(),
+                    cluster.getName(),
+                    cluster.getPort(),
+                    cluster.getRootPath()
+                ))
+                .collect(Collectors.toList());
+        }
+    }
+    
+    @Override
     public Cluster getClusterById(Long clusterId) {
         return clusterRepository.findById(clusterId)
             .orElseThrow(() -> new ClusterException("Cluster não encontrado com ID: " + clusterId));
     }
     
     @Override
-    public void deleteCluster(Long clusterId, Long userId) {
+    public void deleteCluster(Long clusterId, User authenticatedUser, boolean isAdmin) {
         Cluster cluster = clusterRepository.findById(clusterId)
             .orElseThrow(() -> new ClusterException("Cluster não encontrado com ID: " + clusterId));
         
-        validateClusterOwnership(cluster, userId);
+        // Admin pode deletar qualquer cluster, usuário normal só os próprios
+        if (!isAdmin && !cluster.getUser().getId().equals(authenticatedUser.getId())) {
+            throw new ClusterException("Não autorizado a deletar este cluster");
+        }
         
         cleanupClusterResources(cluster);
         
         // Remove a entrada do banco
         clusterRepository.delete(cluster);
-    }
-    
-    private void validateClusterOwnership(Cluster cluster, Long userId) {
-        if (!cluster.getUser().getId().equals(userId)) {
-            throw new ClusterException("Não autorizado a deletar este cluster");
-        }
     }
     
     private void cleanupClusterResources(Cluster cluster) {

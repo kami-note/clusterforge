@@ -36,20 +36,32 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody RegisterRequest registerRequest) {
-        if (userRepository.count() > 0) {
-            return ResponseEntity.badRequest().body("Admin user already registered!");
-        }
-
+        // Verifica se o username já existe
         if (userRepository.findByUsername(registerRequest.getUsername()).isPresent()) {
             return ResponseEntity.badRequest().body("Username is already taken!");
         }
 
+        // Verifica se é o primeiro usuário do sistema
+        boolean isFirstUser = userRepository.count() == 0;
+        
         User user = new User();
         user.setUsername(registerRequest.getUsername());
         user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));
-        user.setRole(Role.ADMIN);
+        
+        // Primeiro usuário é ADMIN, demais são USER
+        user.setRole(isFirstUser ? Role.ADMIN : Role.USER);
 
         userRepository.save(user);
+        
+        if (isFirstUser) {
+            System.out.println("╔════════════════════════════════════════════════════════════╗");
+            System.out.println("║          PRIMEIRO USUÁRIO CRIADO COMO ADMIN               ║");
+            System.out.println("╠════════════════════════════════════════════════════════════╣");
+            System.out.println("║ Username: " + String.format("%-47s", user.getUsername()) + "║");
+            System.out.println("║ Role:     ADMIN                                            ║");
+            System.out.println("╚════════════════════════════════════════════════════════════╝");
+            return ResponseEntity.ok("First user registered successfully as ADMIN!");
+        }
 
         return ResponseEntity.ok("User registered successfully!");
     }
