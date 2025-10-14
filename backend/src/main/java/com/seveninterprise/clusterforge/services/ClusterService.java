@@ -304,43 +304,41 @@ public class ClusterService implements IClusterService {
     
     @Override
     public List<ClusterListItemDto> listClusters(User authenticatedUser, boolean isAdmin) {
-        List<Cluster> clusters;
+        List<Cluster> clusters = isAdmin 
+            ? clusterRepository.findAll() 
+            : clusterRepository.findByUserId(authenticatedUser.getId());
         
-        if (isAdmin) {
-            // Admin vê todos os clusters
-            clusters = clusterRepository.findAll();
-            
-            // Inclui informações do dono para cada cluster
-            return clusters.stream()
-                .map(cluster -> {
-                    User owner = cluster.getUser();
-                    ClusterListItemDto.OwnerInfoDto ownerInfo = new ClusterListItemDto.OwnerInfoDto(
-                        owner.getId()
-                    );
-                    
-                    return new ClusterListItemDto(
-                        cluster.getId(),
-                        cluster.getName(),
-                        cluster.getPort(),
-                        cluster.getRootPath(),
-                        ownerInfo
-                    );
-                })
-                .collect(Collectors.toList());
-        } else {
-            // Usuário comum vê apenas seus clusters
-            clusters = clusterRepository.findByUserId(authenticatedUser.getId());
-            
-            // Não inclui credenciais para usuário comum
-            return clusters.stream()
-                .map(cluster -> new ClusterListItemDto(
-                    cluster.getId(),
-                    cluster.getName(),
-                    cluster.getPort(),
-                    cluster.getRootPath()
-                ))
-                .collect(Collectors.toList());
+        return clusters.stream()
+            .map(cluster -> toClusterListItemDto(cluster, isAdmin))
+            .collect(Collectors.toList());
+    }
+    
+    /**
+     * Converte um Cluster em ClusterListItemDto
+     * @param cluster O cluster a ser convertido
+     * @param includeOwner Se true, inclui informações do dono (para admins)
+     * @return DTO do cluster
+     */
+    private ClusterListItemDto toClusterListItemDto(Cluster cluster, boolean includeOwner) {
+        if (includeOwner) {
+            ClusterListItemDto.OwnerInfoDto ownerInfo = new ClusterListItemDto.OwnerInfoDto(
+                cluster.getUser().getId()
+            );
+            return new ClusterListItemDto(
+                cluster.getId(),
+                cluster.getName(),
+                cluster.getPort(),
+                cluster.getRootPath(),
+                ownerInfo
+            );
         }
+        
+        return new ClusterListItemDto(
+            cluster.getId(),
+            cluster.getName(),
+            cluster.getPort(),
+            cluster.getRootPath()
+        );
     }
     
     @Override

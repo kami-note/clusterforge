@@ -32,18 +32,24 @@ public class ClusterController {
      * Obtém o usuário autenticado do contexto de segurança
      */
     private User getAuthenticatedUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication = getAuthentication();
         String username = authentication.getName();
         return userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuário autenticado não encontrado"));
     }
     
     /**
+     * Obtém a authentication do contexto de segurança
+     */
+    private Authentication getAuthentication() {
+        return SecurityContextHolder.getContext().getAuthentication();
+    }
+    
+    /**
      * Verifica se o usuário autenticado é admin
      */
     private boolean isAdmin() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        return authentication.getAuthorities().stream()
+        return getAuthentication().getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .anyMatch(role -> role.equals("ROLE_ADMIN"));
     }
@@ -56,9 +62,7 @@ public class ClusterController {
     
     @GetMapping
     public List<ClusterListItemDto> listClusters() {
-        User authenticatedUser = getAuthenticatedUser();
-        boolean isUserAdmin = isAdmin();
-        return clusterService.listClusters(authenticatedUser, isUserAdmin);
+        return clusterService.listClusters(getAuthenticatedUser(), isAdmin());
     }
     
     @GetMapping("/user/{userId}")
@@ -72,29 +76,31 @@ public class ClusterController {
             Cluster cluster = clusterService.getClusterById(clusterId);
             return ResponseEntity.ok(cluster);
         } catch (RuntimeException e) {
-            if (e.getMessage().contains("não encontrado")) {
-                return ResponseEntity.notFound().build();
-            } else {
-                return ResponseEntity.status(500).body("Erro interno: " + e.getMessage());
-            }
+            return handleException(e);
         }
     }
     
     @DeleteMapping("/{clusterId}")
     public ResponseEntity<?> deleteCluster(@PathVariable Long clusterId) {
         try {
-            User authenticatedUser = getAuthenticatedUser();
-            boolean isUserAdmin = isAdmin();
-            clusterService.deleteCluster(clusterId, authenticatedUser, isUserAdmin);
+            clusterService.deleteCluster(clusterId, getAuthenticatedUser(), isAdmin());
             return ResponseEntity.noContent().build();
         } catch (RuntimeException e) {
-            if (e.getMessage().contains("não encontrado")) {
-                return ResponseEntity.notFound().build();
-            } else if (e.getMessage().contains("não autorizado")) {
-                return ResponseEntity.status(403).body("Não autorizado");
-            } else {
-                return ResponseEntity.status(500).body("Erro interno: " + e.getMessage());
-            }
+            return handleException(e);
+        }
+    }
+    
+    /**
+     * Trata exceções e retorna a resposta HTTP apropriada
+     */
+    private ResponseEntity<?> handleException(RuntimeException e) {
+        String message = e.getMessage();
+        if (message.contains("não encontrado")) {
+            return ResponseEntity.notFound().build();
+        } else if (message.contains("não autorizado")) {
+            return ResponseEntity.status(403).body("Não autorizado");
+        } else {
+            return ResponseEntity.status(500).body("Erro interno: " + message);
         }
     }
     
