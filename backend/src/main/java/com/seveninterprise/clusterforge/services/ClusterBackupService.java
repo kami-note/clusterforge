@@ -2,7 +2,7 @@ package com.seveninterprise.clusterforge.services;
 
 import com.seveninterprise.clusterforge.model.Cluster;
 import com.seveninterprise.clusterforge.model.ClusterBackup;
-import com.seveninterprise.clusterforge.repositories.ClusterRepository;
+import com.seveninterprise.clusterforge.repository.ClusterRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterBackupRepository;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -54,7 +54,7 @@ public class ClusterBackupService implements IClusterBackupService {
         this.clusterRepository = clusterRepository;
         this.backupRepository = backupRepository;
         this.dockerService = dockerService;
-        this.executorService = Executors.newFixedThreadPool(maxConcurrentBackups);
+        this.executorService = Executors.newFixedThreadPool(Math.max(1, maxConcurrentBackups));
         
         // Criar diretório de backups se não existir
         try {
@@ -84,14 +84,16 @@ public class ClusterBackupService implements IClusterBackupService {
         backup = backupRepository.save(backup);
         
         // Executar backup em thread separada
+        final ClusterBackup finalBackup = backup;
+        final Long finalClusterId = clusterId;
         CompletableFuture.runAsync(() -> {
             try {
-                performBackup(backup);
+                performBackup(finalBackup);
             } catch (Exception e) {
-                backup.setStatus(ClusterBackup.BackupStatus.FAILED);
-                backup.setErrorMessage(e.getMessage());
-                backupRepository.save(backup);
-                System.err.println("Erro durante backup do cluster " + clusterId + ": " + e.getMessage());
+                finalBackup.setStatus(ClusterBackup.BackupStatus.FAILED);
+                finalBackup.setErrorMessage(e.getMessage());
+                backupRepository.save(finalBackup);
+                System.err.println("Erro durante backup do cluster " + finalClusterId + ": " + e.getMessage());
             }
         }, executorService);
         
@@ -376,7 +378,11 @@ public class ClusterBackupService implements IClusterBackupService {
             backup.setAutomatic(false);
             
             // Calcular tamanho e checksum
-            backup.setBackupSizeBytes(Files.size(targetPath));
+            try {
+                backup.setBackupSizeBytes(Files.size(targetPath));
+            } catch (IOException e) {
+                backup.setBackupSizeBytes(0L);
+            }
             backup.setChecksum(calculateChecksum(targetPath));
             
             backup = backupRepository.save(backup);
@@ -442,7 +448,11 @@ public class ClusterBackupService implements IClusterBackupService {
             if (success) {
                 backup.setStatus(ClusterBackup.BackupStatus.COMPLETED);
                 backup.setCompletedAt(LocalDateTime.now());
-                backup.setBackupSizeBytes(Files.size(backupPath));
+                try {
+                    backup.setBackupSizeBytes(Files.size(backupPath));
+                } catch (IOException e) {
+                    backup.setBackupSizeBytes(0L);
+                }
                 backup.setChecksum(calculateChecksum(backupPath));
                 
                 if (compressionEnabled) {

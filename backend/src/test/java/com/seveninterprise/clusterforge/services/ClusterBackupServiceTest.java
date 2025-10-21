@@ -2,7 +2,7 @@ package com.seveninterprise.clusterforge.services;
 
 import com.seveninterprise.clusterforge.model.Cluster;
 import com.seveninterprise.clusterforge.model.ClusterBackup;
-import com.seveninterprise.clusterforge.repositories.ClusterRepository;
+import com.seveninterprise.clusterforge.repository.ClusterRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterBackupRepository;
 
 import org.junit.jupiter.api.BeforeEach;

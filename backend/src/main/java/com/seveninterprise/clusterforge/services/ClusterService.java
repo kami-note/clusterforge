@@ -6,6 +6,8 @@ import com.seveninterprise.clusterforge.dto.CreateClusterResponse;
 import com.seveninterprise.clusterforge.dto.UpdateClusterLimitsRequest;
 import com.seveninterprise.clusterforge.exceptions.ClusterException;
 import com.seveninterprise.clusterforge.model.Cluster;
+import com.seveninterprise.clusterforge.model.ClusterBackup;
+import com.seveninterprise.clusterforge.model.ClusterHealthStatus;
 import com.seveninterprise.clusterforge.model.Role;
 import com.seveninterprise.clusterforge.model.Template;
 import com.seveninterprise.clusterforge.model.User;
@@ -56,18 +58,26 @@ public class ClusterService implements IClusterService {
     private final DockerService dockerService;
     private final UserService userService;
     
+    // Serviços de recuperação ante falha
+    private final ClusterHealthService clusterHealthService;
+    private final ClusterBackupService clusterBackupService;
+    
     public ClusterService(ClusterRepository clusterRepository,
                          ClusterNamingService clusterNamingService,
                          PortManagementService portManagementService,
                          TemplateService templateService,
                          DockerService dockerService,
-                         UserService userService) {
+                         UserService userService,
+                         ClusterHealthService clusterHealthService,
+                         ClusterBackupService clusterBackupService) {
         this.clusterRepository = clusterRepository;
         this.clusterNamingService = clusterNamingService;
         this.portManagementService = portManagementService;
         this.templateService = templateService;
         this.dockerService = dockerService;
         this.userService = userService;
+        this.clusterHealthService = clusterHealthService;
+        this.clusterBackupService = clusterBackupService;
     }
     
     @Override
@@ -134,6 +144,10 @@ public class ClusterService implements IClusterService {
             String message;
             if (dockerSuccess) {
                 message = "Cluster criado e iniciado com sucesso";
+                
+                // Inicializar monitoramento de saúde e backup para clusters bem-sucedidos
+                initializeHealthMonitoring(savedCluster);
+                createInitialBackup(savedCluster);
             } else {
                 message = "Cluster criado mas falha ao iniciar container Docker. Verifique se o Docker está rodando e se o usuário tem permissão sudo";
             }
@@ -709,5 +723,118 @@ public class ClusterService implements IClusterService {
             System.err.println("Warning: Failed to check container status: " + e.getMessage());
             return false;
         }
+    }
+    
+    // ============================================
+    // MÉTODOS DE INTEGRAÇÃO COM SISTEMA DE RECUPERAÇÃO
+    // ============================================
+    
+    /**
+     * Inicia monitoramento de saúde para um cluster recém-criado
+     */
+    private void initializeHealthMonitoring(Cluster cluster) {
+        try {
+            // Criar status de saúde inicial
+            ClusterHealthStatus healthStatus = new ClusterHealthStatus();
+            healthStatus.setCluster(cluster);
+            healthStatus.setCurrentState(ClusterHealthStatus.HealthState.UNKNOWN);
+            healthStatus.setMonitoringEnabled(true);
+            healthStatus.setMaxRecoveryAttempts(3);
+            healthStatus.setRetryIntervalSeconds(60);
+            healthStatus.setCooldownPeriodSeconds(300);
+            
+            // Executar primeiro health check
+            clusterHealthService.checkClusterHealth(cluster);
+            
+            System.out.println("Health monitoring initialized for cluster " + cluster.getId());
+        } catch (Exception e) {
+            System.err.println("Warning: Failed to initialize health monitoring for cluster " + cluster.getId() + ": " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Cria backup inicial do cluster após criação bem-sucedida
+     */
+    private void createInitialBackup(Cluster cluster) {
+        try {
+            clusterBackupService.createBackup(
+                cluster.getId(), 
+                ClusterBackup.BackupType.CONFIG_ONLY, 
+                "Backup inicial após criação"
+            );
+            System.out.println("Initial backup created for cluster " + cluster.getId());
+        } catch (Exception e) {
+            System.err.println("Warning: Failed to create initial backup for cluster " + cluster.getId() + ": " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Obtém status de saúde de um cluster
+     */
+    public ClusterHealthStatus getClusterHealthStatus(Long clusterId) {
+        Cluster cluster = getClusterById(clusterId);
+        return clusterHealthService.checkClusterHealth(cluster);
+    }
+    
+    /**
+     * Força recuperação de um cluster com falha
+     */
+    public boolean recoverCluster(Long clusterId) {
+        // Verificar se cluster existe
+        getClusterById(clusterId);
+        
+        // Verificar se usuário tem permissão
+        // (implementar validação de permissões conforme necessário)
+        
+        return clusterHealthService.recoverCluster(clusterId);
+    }
+    
+    /**
+     * Cria backup manual de um cluster
+     */
+    public ClusterBackup createClusterBackup(Long clusterId, ClusterBackup.BackupType backupType, String description) {
+        // Verificar se cluster existe
+        getClusterById(clusterId);
+        
+        // Verificar se usuário tem permissão
+        // (implementar validação de permissões conforme necessário)
+        
+        return clusterBackupService.createBackup(clusterId, backupType, description);
+    }
+    
+    /**
+     * Lista backups de um cluster
+     */
+    public List<ClusterBackup> listClusterBackups(Long clusterId) {
+        // Verificar se cluster existe
+        getClusterById(clusterId);
+        return clusterBackupService.listClusterBackups(clusterId);
+    }
+    
+    /**
+     * Restaura cluster a partir de backup
+     */
+    public boolean restoreClusterFromBackup(Long backupId, Long clusterId) {
+        // Verificar se cluster existe
+        getClusterById(clusterId);
+        
+        // Verificar se usuário tem permissão
+        // (implementar validação de permissões conforme necessário)
+        
+        return clusterBackupService.restoreFromBackup(backupId, clusterId);
+    }
+    
+    /**
+     * Obtém estatísticas de saúde do sistema
+     */
+    public ClusterHealthStatus.SystemHealthStats getSystemHealthStats() {
+        return clusterHealthService.getSystemHealthStats();
+    }
+    
+    /**
+     * Obtém estatísticas de backup do sistema
+     */
+    public ClusterBackup.BackupStats getSystemBackupStats() {
+        return clusterBackupService.getBackupStats();
     }
 }

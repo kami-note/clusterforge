@@ -3,7 +3,7 @@ package com.seveninterprise.clusterforge.services;
 import com.seveninterprise.clusterforge.model.Cluster;
 import com.seveninterprise.clusterforge.model.ClusterHealthStatus;
 import com.seveninterprise.clusterforge.model.ClusterHealthMetrics;
-import com.seveninterprise.clusterforge.repositories.ClusterRepository;
+import com.seveninterprise.clusterforge.repository.ClusterRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterHealthStatusRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterHealthMetricsRepository;
 
@@ -341,7 +341,7 @@ public class ClusterHealthService implements IClusterHealthService {
             if (responseCode == 200) {
                 return responseTime;
             } else {
-                return -responseCode; // Código negativo indica erro
+                return -(long)responseCode; // Código negativo indica erro
             }
             
         } catch (Exception e) {
@@ -503,8 +503,8 @@ public class ClusterHealthService implements IClusterHealthService {
         }
         
         // Memória > 90%
-        if (healthStatus.getMemoryUsageMb() != null && healthStatus.getMemoryLimitMb() != null) {
-            double memoryPercent = (double) healthStatus.getMemoryUsageMb() / healthStatus.getMemoryLimitMb() * 100;
+        if (healthStatus.getMemoryUsageMb() != null && healthStatus.getCluster().getMemoryLimit() != null) {
+            double memoryPercent = (double) healthStatus.getMemoryUsageMb() / healthStatus.getCluster().getMemoryLimit() * 100;
             if (memoryPercent > 90) {
                 return true;
             }
