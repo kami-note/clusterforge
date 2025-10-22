@@ -32,9 +32,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * mvnw test -Dtest=ClusterLimitsIntegrationTest
  */
 @SpringBootTest
-@ActiveProfiles("test")
+@ActiveProfiles("integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class ClusterLimitsIntegrationTest {
+class ClusterLimitsIntegrationTest extends BaseTestContainersIntegrationTest {
 
     @Autowired
     private ClusterService clusterService;
@@ -47,7 +47,7 @@ class ClusterLimitsIntegrationTest {
 
     private static Long testClusterId;
     private static String testClusterPath;
-    private static String testContainerName;
+    // Container name will be generated dynamically
 
     private User testAdmin;
 
@@ -108,7 +108,7 @@ class ClusterLimitsIntegrationTest {
         assertEquals(50L, cluster.getNetworkLimit(), "Network limit deve ser 50MB/s");
 
         testClusterPath = cluster.getRootPath();
-        testContainerName = "alpine_test_" + cluster.getName().replaceAll("[^a-zA-Z0-9]", "_");
+        // Container name will be generated dynamically based on cluster name
 
         System.out.println("✅ Limites validados no banco:");
         System.out.println("   CPU: " + cluster.getCpuLimit() + " cores");
@@ -236,7 +236,8 @@ class ClusterLimitsIntegrationTest {
             try {
                 // Parar e remover container
                 try {
-                    Runtime.getRuntime().exec("docker-compose -f " + testClusterPath + "/docker-compose.yml down").waitFor();
+                    ProcessBuilder pb = new ProcessBuilder("docker-compose", "-f", testClusterPath + "/docker-compose.yml", "down");
+                    pb.start().waitFor();
                     System.out.println("✅ Container parado");
                 } catch (Exception e) {
                     System.out.println("⚠️  Erro ao parar container: " + e.getMessage());
