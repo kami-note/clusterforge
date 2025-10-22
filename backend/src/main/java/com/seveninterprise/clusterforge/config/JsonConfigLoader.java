@@ -13,3 +13,5 @@ public class JsonConfigLoader {
     // Esta classe apenas registra o PropertySource do JSON
     // As propriedades ficam disponíveis através do @Value e @ConfigurationProperties
 }
+
+

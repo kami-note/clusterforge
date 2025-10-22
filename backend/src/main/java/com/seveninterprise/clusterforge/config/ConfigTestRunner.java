@@ -36,3 +36,5 @@ public class ConfigTestRunner implements CommandLineRunner {
         System.out.println("✅ === CONFIGURAÇÕES CARREGADAS COM SUCESSO ===\n");
     }
 }
+
+

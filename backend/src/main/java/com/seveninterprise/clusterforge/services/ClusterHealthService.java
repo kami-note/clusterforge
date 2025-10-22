@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.PostConstruct;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -41,7 +43,7 @@ public class ClusterHealthService implements IClusterHealthService {
     private final ClusterHealthStatusRepository healthStatusRepository;
     private final ClusterHealthMetricsRepository metricsRepository;
     private final DockerService dockerService;
-    private final ExecutorService executorService;
+    private ExecutorService executorService;
     
     @Value("${clusterforge.health.check.interval:60}")
     private int healthCheckIntervalSeconds;
@@ -63,6 +65,11 @@ public class ClusterHealthService implements IClusterHealthService {
         this.healthStatusRepository = healthStatusRepository;
         this.metricsRepository = metricsRepository;
         this.dockerService = dockerService;
+        // Inicializar executorService no @PostConstruct para garantir que @Value seja injetado
+    }
+    
+    @PostConstruct
+    public void init() {
         this.executorService = Executors.newFixedThreadPool(maxConcurrentChecks);
     }
     

@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.scheduling.annotation.Scheduled;
 
+import jakarta.annotation.PostConstruct;
+
 import java.io.*;
 import java.nio.file.*;
 import java.security.MessageDigest;
@@ -37,7 +39,7 @@ public class ClusterBackupService implements IClusterBackupService {
     private final ClusterRepository clusterRepository;
     private final ClusterBackupRepository backupRepository;
     private final DockerService dockerService;
-    private final ExecutorService executorService;
+    private ExecutorService executorService;
     
     @Value("${clusterforge.backup.directory:/home/levi/Projects/clusterforge-f/backend/data/backups}")
     private String backupBaseDirectory;
@@ -54,6 +56,11 @@ public class ClusterBackupService implements IClusterBackupService {
         this.clusterRepository = clusterRepository;
         this.backupRepository = backupRepository;
         this.dockerService = dockerService;
+        // Inicializar executorService e diretório no @PostConstruct
+    }
+    
+    @PostConstruct
+    public void init() {
         this.executorService = Executors.newFixedThreadPool(Math.max(1, maxConcurrentBackups));
         
         // Criar diretório de backups se não existir
