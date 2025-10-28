@@ -49,13 +49,31 @@ public class JwtProvider {
     }
 
     public String generateToken(UserDetails userDetails) {
-        return createToken(userDetails.getUsername());
+        // Extrai o role do usuário
+        String role = userDetails.getAuthorities().stream()
+                .findFirst()
+                .map(authority -> {
+                    String auth = authority.getAuthority();
+                    // Remove "ROLE_" prefix se existir
+                    return auth.startsWith("ROLE_") ? auth.substring(5) : auth;
+                })
+                .orElse("USER");
+        
+        return createToken(userDetails.getUsername(), role);
     }
 
-    private String createToken(String subject) {
-        return Jwts.builder().setSubject(subject).setIssuedAt(new Date(System.currentTimeMillis()))
+    private String createToken(String subject, String role) {
+        return Jwts.builder()
+                .setSubject(subject)
+                .claim("role", role) // Adiciona o role como claim
+                .setIssuedAt(new Date(System.currentTimeMillis()))
                 .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10))
-                .signWith(SECRET_KEY).compact();
+                .signWith(SECRET_KEY)
+                .compact();
+    }
+    
+    public String extractRole(String token) {
+        return extractClaim(token, claims -> claims.get("role", String.class));
     }
 
     public Boolean validateToken(String token, UserDetails userDetails) {
