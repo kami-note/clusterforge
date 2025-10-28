@@ -105,7 +105,9 @@ public class DockerComposeService implements IDockerComposeService {
      */
     private String addResourceLimitsToDockerCompose(String content, Cluster cluster) {
         String memoryLimit = cluster.getMemoryLimitForDocker();
-        String memoryReservation = cluster.getMemoryReservationForDocker();
+        
+        // Configura rede para usar bridge existente ao invés de criar nova
+        String networkSection = "    network_mode: bridge\n";
         
         // Seção de deploy resources (CPU e Memória via CGroups)
         String resourcesSection = String.format(
@@ -113,14 +115,9 @@ public class DockerComposeService implements IDockerComposeService {
             "      resources:\n" +
             "        limits:\n" +
             "          cpus: '%.2f'\n" +
-            "          memory: %s\n" +
-            "        reservations:\n" +
-            "          cpus: '%.2f'\n" +
             "          memory: %s\n",
             cluster.getCpuLimit(),
-            memoryLimit,
-            cluster.getCpuLimit() * 0.5,
-            memoryReservation
+            memoryLimit
         );
         
         // Variáveis de ambiente para os limites
@@ -160,7 +157,7 @@ public class DockerComposeService implements IDockerComposeService {
         content = removeExistingSections(content);
         
         // Monta todas as seções na ordem correta
-        String allSections = capsSection + tmpfsSection + environmentSection + resourcesSection;
+        String allSections = networkSection + capsSection + tmpfsSection + environmentSection + resourcesSection;
         
         // Adiciona antes de volumes (ou working_dir se não tiver volumes)
         if (content.contains("    volumes:")) {
@@ -216,6 +213,9 @@ public class DockerComposeService implements IDockerComposeService {
     
     private String removeExistingSections(String content) {
         // Remove seções duplicadas se já existirem
+        if (content.contains("network_mode:")) {
+            content = content.replaceAll("(?m)^    network_mode:.*$", "");
+        }
         if (content.contains("deploy:")) {
             content = content.replaceAll("(?s)    deploy:.*?(?=\\n  [a-z]|\\z)", "");
         }

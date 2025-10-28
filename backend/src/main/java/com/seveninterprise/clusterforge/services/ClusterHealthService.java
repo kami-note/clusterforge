@@ -317,10 +317,9 @@ public class ClusterHealthService implements IClusterHealthService {
     private String checkContainerStatus(Cluster cluster) {
         try {
             String containerName = cluster.getSanitizedContainerName();
-            String command = "docker inspect " + containerName + " --format='{{.State.Status}}'";
-            String result = dockerService.runCommand(command);
+            String result = dockerService.inspectContainer(containerName, "{{.State.Status}}");
             
-            if (result.contains("Process exited with code: 0")) {
+            if (result != null && !result.isEmpty() && result.contains("Process exited with code: 0")) {
                 return extractStatusFromResult(result);
             } else {
                 return "NOT_FOUND";
@@ -360,13 +359,10 @@ public class ClusterHealthService implements IClusterHealthService {
         try {
             String containerName = cluster.getSanitizedContainerName();
             
-            // Coletar métricas do Docker Stats
-            String statsCommand = "docker stats " + containerName + " --no-stream --format " +
-                "'{{.CPUPerc}},{{.MemUsage}},{{.NetIO}},{{.BlockIO}}'";
+            // Coletar métricas do Docker Stats usando método auxiliar
+            String result = dockerService.getContainerStats(containerName);
             
-            String result = dockerService.runCommand(statsCommand);
-            
-            if (result.contains("Process exited with code: 0")) {
+            if (result != null && !result.isEmpty() && result.contains("Process exited with code: 0")) {
                 return parseDockerStats(result, cluster);
             }
             

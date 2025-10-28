@@ -19,10 +19,16 @@ export interface CreateClusterResponse {
   port: number;
   status: string;
   message: string;
-  userCredentials?: {
+  ownerCredentials?: {
     username: string;
     password: string;
   };
+}
+
+// Alias para compatibilidade com o código antigo
+export interface UserCredentials {
+  username: string;
+  password: string;
 }
 
 export interface UpdateClusterLimitsRequest {

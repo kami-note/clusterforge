@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { templateService, type Template } from '@/services/template.service';
+import { clusterService, type CreateClusterRequest } from '@/services/cluster.service';
 
 // Types
 export interface ClusterData {
@@ -70,31 +71,6 @@ export interface ServiceTemplate {
   };
 }
 
-interface Client {
-  id: string;
-  name: string;
-  email: string;
-}
-
-// API Services
-const fetchClients = async (): Promise<Client[]> => {
-  // In a real app, this would be an API call
-  // const response = await fetch('/api/clients');
-  // return response.json();
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve([
-        { id: '1', name: 'João Silva', email: 'joao@example.com' },
-        { id: '2', name: 'Maria Santos', email: 'maria@example.com' },
-        { id: '3', name: 'Carlos Oliveira', email: 'carlos@example.com' },
-        { id: '4', name: 'Ana Costa', email: 'ana@example.com' },
-        { id: '5', name: 'Pedro Lima', email: 'pedro@example.com' },
-        { id: '6', name: 'Lucia Ferreira', email: 'lucia@example.com' }
-      ]);
-    }, 300);
-  });
-};
-
 export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationProps) {
   const [clusterName, setClusterName] = useState('');
   const [selectedService, setSelectedService] = useState<ServiceTemplate | null>(null);
@@ -103,11 +79,8 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   const [diskAllocation, setDiskAllocation] = useState([10]);
   const [startupCommand, setStartupCommand] = useState('');
   const [customPort, setCustomPort] = useState('');
-  const [selectedClient, setSelectedClient] = useState('');
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
-  const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingClients, setLoadingClients] = useState(userType === 'admin');
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
 
@@ -157,34 +130,35 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   };
 
   // Função para obter recursos padrão baseados no tipo de template
+  // CPU: em porcentagem (5-100%) para o slider, será convertido para cores (÷100) ao enviar
   const getDefaultResourcesForTemplate = (templateName: string): { cpu: number; ram: number; disk: number } => {
     const lowerName = templateName.toLowerCase();
     
     // Recursos baseados no tipo de template
     if (lowerName.includes('test') || lowerName.includes('alpine')) {
-      return { cpu: 15, ram: 0.5, disk: 2 };
+      return { cpu: 15, ram: 0.5, disk: 2 }; // 15% CPU
     }
     if (lowerName.includes('php') || lowerName.includes('webserver') || lowerName.includes('wordpress')) {
-      return { cpu: 30, ram: 2, disk: 5 };
+      return { cpu: 30, ram: 2, disk: 5 }; // 30% CPU
     }
     if (lowerName.includes('minecraft') || lowerName.includes('game')) {
-      return { cpu: 50, ram: 4, disk: 10 };
+      return { cpu: 50, ram: 4, disk: 10 }; // 50% CPU
     }
     if (lowerName.includes('database') || lowerName.includes('mysql') || lowerName.includes('postgres')) {
-      return { cpu: 40, ram: 4, disk: 20 };
+      return { cpu: 40, ram: 4, disk: 20 }; // 40% CPU
     }
     if (lowerName.includes('node') || lowerName.includes('api')) {
-      return { cpu: 25, ram: 1, disk: 3 };
+      return { cpu: 25, ram: 1, disk: 3 }; // 25% CPU
     }
     if (lowerName.includes('nginx') || lowerName.includes('apache')) {
-      return { cpu: 20, ram: 1, disk: 2 };
+      return { cpu: 20, ram: 1, disk: 2 }; // 20% CPU
     }
     if (lowerName.includes('redis') || lowerName.includes('cache')) {
-      return { cpu: 15, ram: 1, disk: 1 };
+      return { cpu: 15, ram: 1, disk: 1 }; // 15% CPU
     }
     
     // Recursos padrão para templates desconhecidos
-    return { cpu: 25, ram: 2, disk: 10 };
+    return { cpu: 25, ram: 2, disk: 10 }; // 25% CPU
   };
 
   // Carregar templates do backend
@@ -219,7 +193,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               name: 'Aplicação Docker',
               description: 'Aplicação genérica com Docker',
               icon: Cloud,
-              defaultCommand: 'docker-compose up -d',
+      defaultCommand: 'docker-compose up -d',
               recommendedResources: { cpu: 25, ram: 2, disk: 10 }
             }
           ];
@@ -247,25 +221,6 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     
     loadTemplates();
   }, []);
-
-  useEffect(() => {
-    if (userType === 'admin') {
-      const loadClients = async () => {
-        try {
-          setLoadingClients(true);
-          const data = await fetchClients();
-          setClients(data);
-        } catch (error) {
-          console.error('Error fetching clients:', error);
-          toast.error('Erro ao carregar lista de clientes');
-        } finally {
-          setLoadingClients(false);
-        }
-      };
-      
-      loadClients();
-    }
-  }, [userType]);
 
   const handleServiceChange = (serviceId: string) => {
     const service = serviceTemplates.find(s => s.id === serviceId);
@@ -317,41 +272,69 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       return false;
     }
     
-    if (userType === 'admin' && !selectedClient) {
-      toast.error('Por favor, selecione um cliente para o cluster');
-      return false;
-    }
-    
     return true;
   };
 
   const handleSubmit = async () => {
-    if (!validateForm()) return;
+    console.log('handleSubmit chamado');
     
+    if (!validateForm()) {
+      console.log('Validação falhou');
+      return;
+    }
+    
+    console.log('Iniciando criação do cluster...');
     setLoading(true);
     
     try {
-      const clusterData = {
-        name: clusterName,
-        service: selectedService,
-        resources: {
-          cpu: cpuAllocation[0],
-          ram: ramAllocation[0],
-          disk: diskAllocation[0]
-        },
-        startupCommand,
-        port: customPort || undefined,
-        owner: userType === 'admin' ? selectedClient : undefined
+      // Monta a requisição para o backend
+      const request: CreateClusterRequest = {
+        templateName: selectedService?.name || '',
+        baseName: clusterName,
+        cpuLimit: cpuAllocation[0] / 100, // Converte % para cores (ex: 30% = 0.30 cores)
+        memoryLimit: ramAllocation[0] * 1024, // Converte GB para MB
+        diskLimit: diskAllocation[0]
       };
       
-      // In a real app, we would send this to the API
-      // await createCluster(clusterData);
+      console.log('Request:', request);
       
-      onSubmit(clusterData);
-      toast.success('Cluster criado com sucesso!');
-    } catch (error) {
+      // Envia para o backend
+      const response = await clusterService.createCluster(request);
+      console.log('Response:', response);
+      
+      // Sucesso
+      if (response.clusterId) {
+        toast.success(response.message || 'Cluster criado com sucesso!');
+        
+        // Se admin criou e retornou credenciais, mostra
+        if (response.ownerCredentials) {
+          toast.info(
+            `Credenciais do usuário: ${response.ownerCredentials.username} / ${response.ownerCredentials.password}`,
+            { duration: 10000 }
+          );
+        }
+        
+        // Mantém compatibilidade com a interface antiga para o callback
+        const clusterData = {
+          name: clusterName,
+          service: selectedService,
+          resources: {
+            cpu: cpuAllocation[0],
+            ram: ramAllocation[0],
+            disk: diskAllocation[0]
+          },
+          startupCommand,
+          port: customPort || undefined
+        };
+        
+        onSubmit(clusterData);
+      } else {
+        toast.error(response.message || 'Erro ao criar cluster');
+      }
+    } catch (error: any) {
       console.error('Error creating cluster:', error);
-      toast.error('Erro ao criar cluster. Tente novamente.');
+      const errorMessage = error.message || 'Erro ao criar cluster. Tente novamente.';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -423,39 +406,39 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {serviceTemplates.map((service) => {
-                        const IconComponent = service.icon;
-                        return (
-                          <div
-                            key={service.id}
-                            className={`relative border rounded-lg p-4 cursor-pointer transition-all hover:border-primary ${
-                              selectedService?.id === service.id 
-                                ? 'border-primary bg-primary/5' 
-                                : 'border-border'
-                            }`}
-                            onClick={() => handleServiceChange(service.id)}
-                          >
-                            <div className="flex items-start space-x-3">
-                              <div className="p-2 rounded-lg bg-muted/50">
-                                <IconComponent className="h-6 w-6 text-primary" />
-                              </div>
-                              <div className="flex-1">
-                                <h4 className="font-medium">{service.name}</h4>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                  {service.description}
-                                </p>
-                              </div>
-                              {selectedService?.id === service.id && (
-                                <div className="absolute top-2 right-2">
-                                  <div className="h-2 w-2 bg-primary rounded-full"></div>
-                                </div>
-                              )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {serviceTemplates.map((service) => {
+                      const IconComponent = service.icon;
+                      return (
+                        <div
+                          key={service.id}
+                          className={`relative border rounded-lg p-4 cursor-pointer transition-all hover:border-primary ${
+                            selectedService?.id === service.id 
+                              ? 'border-primary bg-primary/5' 
+                              : 'border-border'
+                          }`}
+                          onClick={() => handleServiceChange(service.id)}
+                        >
+                          <div className="flex items-start space-x-3">
+                            <div className="p-2 rounded-lg bg-muted/50">
+                              <IconComponent className="h-6 w-6 text-primary" />
                             </div>
+                            <div className="flex-1">
+                              <h4 className="font-medium">{service.name}</h4>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {service.description}
+                              </p>
+                            </div>
+                            {selectedService?.id === service.id && (
+                              <div className="absolute top-2 right-2">
+                                <div className="h-2 w-2 bg-primary rounded-full"></div>
+                              </div>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                   )}
                 </div>
               </CardContent>
@@ -604,32 +587,13 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                       </div>
                     )}
 
-                    {/* Dono do Cluster (Admin apenas) */}
+                    {/* Info: Backend cria usuário automaticamente */}
                     {userType === 'admin' && (
                       <div className="space-y-2">
-                        <Label>Dono do Cluster</Label>
-                        {loadingClients ? (
-                          <div className="flex items-center space-x-2 text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span>Carregando clientes...</span>
-                          </div>
-                        ) : (
-                          <Select value={selectedClient} onValueChange={setSelectedClient}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione o cliente responsável" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {clients.map((client) => (
-                                <SelectItem key={client.id} value={client.id}>
-                                  {client.name} ({client.email})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                        <p className="text-sm text-muted-foreground">
-                          Cliente que será responsável por este cluster
-                        </p>
+                        <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                          <AlertCircle className="h-4 w-4" />
+                          <span>O sistema criará automaticamente um usuário para este cluster. As credenciais serão exibidas após a criação.</span>
+                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -690,34 +654,30 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </div>
                 </div>
 
-                <Separator />
-
-                {/* Custo Estimado */}
-                <div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium">Custo Estimado:</span>
-                    <Badge variant="outline">R$ {totalCost}/mês</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Baseado no uso de recursos
-                  </p>
-                </div>
-
-                {userType === 'admin' && selectedClient && (
-                  <>
                     <Separator />
+
+                    {/* Custo Estimado */}
                     <div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium">Cliente:</span>
-                        <span className="text-sm">
-                          {clients.find(c => c.id === selectedClient)?.name || 'Desconhecido'}
-                        </span>
+                        <span className="text-sm font-medium">Custo Estimado:</span>
+                        <Badge variant="outline">R$ {totalCost}/mês</Badge>
                       </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Baseado no uso de recursos
+                      </p>
                     </div>
-                  </>
-                )}
 
-                <Separator />
+                    {userType === 'admin' && (
+                      <>
+                        <Separator />
+                        <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                          <AlertCircle className="h-4 w-4" />
+                          <span>Um usuário será criado automaticamente para este cluster</span>
+                        </div>
+                      </>
+                    )}
+
+                    <Separator />
 
                 {/* Botões de Ação */}
                 <div className="space-y-2">

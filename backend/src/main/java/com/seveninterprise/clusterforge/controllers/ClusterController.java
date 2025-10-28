@@ -72,7 +72,9 @@ public class ClusterController {
             CreateClusterResponse response = clusterService.createCluster(request, authenticatedUser);
             
             // Check if cluster was created successfully
-            if (response.getClusterId() != null && response.getStatus().equals("CREATED")) {
+            // Status can be "RUNNING" (docker started), "CREATED" (only created), or "ERROR"
+            if (response.getClusterId() != null && 
+                (response.getStatus().equals("CREATED") || response.getStatus().equals("RUNNING"))) {
                 return ResponseEntity.status(201).body(response);
             } else {
                 return ResponseEntity.status(400).body(response);

@@ -47,7 +47,7 @@ public class ClusterBackup {
     @Column(nullable = false)
     private BackupStatus status = BackupStatus.IN_PROGRESS;
     
-    @Column(name = "backup_path", nullable = false)
+    @Column(name = "backup_path", nullable = true)
     private String backupPath;
     
     @Column(name = "backup_size_bytes")

@@ -20,4 +20,7 @@ public interface IDockerService {
     public void stopContainer(String containerName);                        // e.g. "my_minecraft_server_1"
     public void removeContainer(String containerName);                      // e.g. "my_minecraft_server_1"
     public String runCommand(String command);                               // Executa comando docker/docker-compose
+    public void pruneUnusedNetworks();                                      // Remove redes não utilizadas do Docker
+    public String inspectContainer(String containerName, String format);    // Executa docker inspect com formato
+    public String getContainerStats(String containerName);                  // Executa docker stats
 }

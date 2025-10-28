@@ -24,6 +24,7 @@ interface ClustersContextType {
   addCluster: (cluster: ClusterData) => Promise<void>;
   findClusterById: (id: string) => Promise<Cluster | null>;
   updateCluster: (id: string, updates: Partial<Cluster>) => Promise<void>;
+  deleteCluster: (id: string) => Promise<void>;
   loading: boolean;
 }
 
@@ -252,8 +253,26 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const deleteCluster = async (id: string) => {
+    try {
+      setLoading(true);
+      
+      // Chama a API para deletar o cluster
+      await clusterService.deleteCluster(parseInt(id));
+      
+      // Remove o cluster da lista local
+      const updatedClusters = clusters.filter(c => c.id !== id);
+      setClusters(updatedClusters);
+    } catch (error) {
+      console.error('Error deleting cluster:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <ClustersContext.Provider value={{ clusters, addCluster, findClusterById, updateCluster, loading }}>
+    <ClustersContext.Provider value={{ clusters, addCluster, findClusterById, updateCluster, deleteCluster, loading }}>
       {children}
     </ClustersContext.Provider>
   );

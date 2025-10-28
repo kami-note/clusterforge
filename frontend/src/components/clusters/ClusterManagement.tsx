@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useClusters } from '@/hooks/useClusters';
+import { toast } from 'sonner';
 
 interface Cluster {
   id: string;
@@ -187,7 +188,7 @@ interface ClusterManagementProps {
 
 export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const router = useRouter();
-  const { clusters: apiClusters, loading } = useClusters();
+  const { clusters: apiClusters, loading, updateCluster, deleteCluster } = useClusters();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('Todos os Donos');
@@ -262,8 +263,6 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     return Math.round((used / limit) * 100);
   };
 
-  const { updateCluster } = useClusters();
-
   const handleAction = async (clusterId: string, action: 'edit' | 'restart' | 'delete' | 'start' | 'stop') => {
     try {
       switch (action) {
@@ -273,19 +272,22 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           break;
         case 'start':
           await updateCluster(clusterId, { status: 'running' });
+          toast.success('Cluster iniciado com sucesso');
           break;
         case 'stop':
           await updateCluster(clusterId, { status: 'stopped' });
+          toast.success('Cluster parado com sucesso');
           break;
         case 'delete':
-          // TODO: Implementar delete usando clusterService
-          console.log('Delete not implemented yet');
+          await deleteCluster(clusterId);
+          toast.success('Cluster excluído com sucesso');
           break;
         default:
           break;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error performing action:', error);
+      toast.error(error.message || 'Erro ao executar ação');
     }
   };
 

@@ -24,6 +24,7 @@ public class Cluster {
 
     private int port;
     private String rootPath;
+    private String status;        // Status do cluster (CREATED, RUNNING, STOPPED, FAILED)
     
     // Resource Limits
     private Double cpuLimit;      // CPU limit in cores (e.g., 1.5 = 1.5 cores)
@@ -102,6 +103,14 @@ public class Cluster {
 
     public void setNetworkLimit(Long networkLimit) {
         this.networkLimit = networkLimit;
+    }
+    
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
     
     // Métodos auxiliares para lógicas básicas

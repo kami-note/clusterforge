@@ -88,6 +88,12 @@ public class ClusterBackupService implements IClusterBackupService {
         // Definir data de expiração baseada na política de retenção
         backup.setExpiresAt(LocalDateTime.now().plusDays(backup.getRetentionDays()));
         
+        // Definir um backupPath temporário para evitar erro de NOT NULL
+        String timestamp = LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String tempBackupPath = String.format("%s/cluster_%d_%s_%s.tmp", 
+            backupBaseDirectory, cluster.getId(), timestamp, backupType.name().toLowerCase());
+        backup.setBackupPath(tempBackupPath);
+        
         backup = backupRepository.save(backup);
         
         // Executar backup em thread separada
@@ -123,6 +129,12 @@ public class ClusterBackupService implements IClusterBackupService {
                     backup.setAutomatic(true);
                     backup.setStatus(ClusterBackup.BackupStatus.IN_PROGRESS);
                     backup.setExpiresAt(LocalDateTime.now().plusDays(backup.getRetentionDays()));
+                    
+                    // Definir um backupPath temporário para evitar erro de NOT NULL
+                    String timestamp = LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+                    String tempBackupPath = String.format("%s/cluster_%d_%s_%s.tmp", 
+                        backupBaseDirectory, cluster.getId(), timestamp, backup.getBackupType().name().toLowerCase());
+                    backup.setBackupPath(tempBackupPath);
                     
                     backup = backupRepository.save(backup);
                     
@@ -422,22 +434,27 @@ public class ClusterBackupService implements IClusterBackupService {
     }
     
     private void performBackup(ClusterBackup backup) {
+        Long backupId = backup.getId();
         try {
-            Cluster cluster = backup.getCluster();
+            // Buscar o backup atualizado para evitar conflitos de concorrência
+            ClusterBackup currentBackup = backupRepository.findById(backupId)
+                .orElseThrow(() -> new RuntimeException("Backup não encontrado: " + backupId));
+            
+            Cluster cluster = currentBackup.getCluster();
             String clusterPath = cluster.getRootPath();
             
             // Criar nome do arquivo de backup
             String timestamp = LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
             String backupFileName = String.format("cluster_%d_%s_%s.tar%s", 
-                cluster.getId(), timestamp, backup.getBackupType().name().toLowerCase(),
+                cluster.getId(), timestamp, currentBackup.getBackupType().name().toLowerCase(),
                 compressionEnabled ? ".gz" : "");
             
             Path backupPath = Paths.get(backupBaseDirectory, backupFileName);
-            backup.setBackupPath(backupPath.toString());
+            currentBackup.setBackupPath(backupPath.toString());
             
             // Executar backup baseado no tipo
             boolean success = false;
-            switch (backup.getBackupType()) {
+            switch (currentBackup.getBackupType()) {
                 case FULL:
                     success = createFullBackup(clusterPath, backupPath);
                     break;
@@ -453,30 +470,36 @@ public class ClusterBackupService implements IClusterBackupService {
             }
             
             if (success) {
-                backup.setStatus(ClusterBackup.BackupStatus.COMPLETED);
-                backup.setCompletedAt(LocalDateTime.now());
+                currentBackup.setStatus(ClusterBackup.BackupStatus.COMPLETED);
+                currentBackup.setCompletedAt(LocalDateTime.now());
                 try {
-                    backup.setBackupSizeBytes(Files.size(backupPath));
+                    currentBackup.setBackupSizeBytes(Files.size(backupPath));
                 } catch (IOException e) {
-                    backup.setBackupSizeBytes(0L);
+                    currentBackup.setBackupSizeBytes(0L);
                 }
-                backup.setChecksum(calculateChecksum(backupPath));
+                currentBackup.setChecksum(calculateChecksum(backupPath));
                 
                 if (compressionEnabled) {
-                    backup.setCompressionRatio(calculateCompressionRatio(backupPath));
+                    currentBackup.setCompressionRatio(calculateCompressionRatio(backupPath));
                 }
             } else {
-                backup.setStatus(ClusterBackup.BackupStatus.FAILED);
-                backup.setErrorMessage("Falha durante criação do backup");
+                currentBackup.setStatus(ClusterBackup.BackupStatus.FAILED);
+                currentBackup.setErrorMessage("Falha durante criação do backup");
             }
             
-            backupRepository.save(backup);
+            backupRepository.save(currentBackup);
             
         } catch (Exception e) {
-            backup.setStatus(ClusterBackup.BackupStatus.FAILED);
-            backup.setErrorMessage(e.getMessage());
-            backupRepository.save(backup);
-            throw e;
+            try {
+                ClusterBackup failedBackup = backupRepository.findById(backupId)
+                    .orElse(backup);
+                failedBackup.setStatus(ClusterBackup.BackupStatus.FAILED);
+                failedBackup.setErrorMessage(e.getMessage());
+                backupRepository.save(failedBackup);
+            } catch (Exception saveError) {
+                System.err.println("Erro ao salvar status de falha do backup " + backupId + ": " + saveError.getMessage());
+            }
+            System.err.println("Erro durante backup do cluster " + backup.getCluster().getId() + ": " + e.getMessage());
         }
     }
     
