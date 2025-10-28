@@ -29,12 +29,11 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning
       >
-                <AuthProvider>
-                  <ClustersProvider>
-                    <ClientLayout>{children}</ClientLayout>
-                  </ClustersProvider>
-                </AuthProvider>
+        <AuthProvider>
+          <ClientLayout>{children}</ClientLayout>
+        </AuthProvider>
       </body>
     </html>
   );

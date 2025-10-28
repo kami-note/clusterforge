@@ -9,9 +9,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const { user, login } = useAuth();
   const router = useRouter();
 
@@ -30,24 +31,39 @@ export default function LoginPage() {
     e.preventDefault();
     
     try {
-      const success = await login(email, password);
-      if (success) {
-        // Redirect based on user type
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          const user = JSON.parse(storedUser);
-          if (user.type === 'admin') {
-            router.push('/admin/dashboard');
-          } else {
-            router.push('/client/dashboard');
-          }
-        }
-      } else {
+      setError('');
+      setIsLoading(true);
+      
+      const authenticatedUser = await login(username, password);
+      if (!authenticatedUser) {
         setError('Credenciais inválidas. Por favor, tente novamente.');
+        return;
       }
-    } catch (err) {
-      setError('Ocorreu um erro durante o login. Por favor, tente novamente.');
-      console.error(err);
+
+      // Redireciona baseado no tipo
+      if (authenticatedUser.type === 'admin') {
+        router.push('/admin/dashboard');
+      } else {
+        router.push('/client/dashboard');
+      }
+    } catch (err: any) {
+      // Extrai a mensagem de erro da API
+      const errorMessage = err?.message || 'Ocorreu um erro durante o login. Por favor, tente novamente.';
+      
+      // Diferencia mensagens de erro
+      if (err?.status === 403) {
+        setError('Acesso negado. Verifique suas credenciais.');
+      } else if (err?.status === 401) {
+        setError('Credenciais inválidas. Por favor, tente novamente.');
+      } else if (err?.status === 400) {
+        setError('Requisição inválida. Por favor, verifique os dados.');
+      } else {
+        setError(errorMessage);
+      }
+      
+      console.error('Login error:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -74,13 +90,14 @@ export default function LoginPage() {
                 </div>
               )}
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="username">Usuário</Label>
                 <Input 
-                  id="email" 
-                  type="email" 
-                  placeholder="seu@email.com" 
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="username" 
+                  type="text" 
+                  placeholder="seu-usuario" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  disabled={isLoading}
                   required 
                 />
               </div>
@@ -91,11 +108,12 @@ export default function LoginPage() {
                   type="password" 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  disabled={isLoading}
                   required 
                 />
               </div>
-              <Button className="w-full" type="submit">
-                Entrar
+              <Button className="w-full" type="submit" disabled={isLoading}>
+                {isLoading ? 'Entrando...' : 'Entrar'}
               </Button>
             </div>
           </CardContent>

@@ -1,58 +1,96 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { authService } from '@/services/auth.service';
 
 interface User {
   email: string;
   type: 'client' | 'admin';
+  username?: string;
+  id?: number;
 }
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<User | null>;
-  logout: () => void;
+  login: (username: string, password: string) => Promise<User | null>;
+  logout: () => Promise<void>;
+  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     // Check if user is stored in localStorage on initial load
-    const storedUser = localStorage.getItem('user');
+    const storedUser = localStorage.getItem('clusterforge_user');
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Error parsing stored user:', e);
+      }
     }
+    setIsLoading(false);
   }, []);
 
-  const login = async (email: string, password: string): Promise<User | null> => {
-    // Simulate API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Mock authentication - in a real app, this would be an API call
-        if (email && password) {
-          const userType: 'client' | 'admin' = 
-            email === 'admin@example.com' || email === 'admin@test.com' || email === 'admin@teste.com' ? 'admin' : 'client';
-          
-          const userData: User = { email, type: userType };
-          setUser(userData);
-          localStorage.setItem('user', JSON.stringify(userData));
-          resolve(userData);
-        } else {
-          resolve(null);
-        }
-      }, 500);
-    });
+  const login = async (username: string, password: string): Promise<User | null> => {
+    try {
+      setIsLoading(true);
+      
+      // Chama a API real
+      const response = await authService.login(username, password);
+      
+      // Obtém informações do usuário do token JWT
+      const apiUser = await authService.getCurrentUser();
+      
+      if (!apiUser) {
+        throw new Error('Não foi possível obter informações do usuário');
+      }
+      
+      const userData: User = {
+        email: apiUser.username,
+        type: apiUser.role === 'ADMIN' ? 'admin' : 'client',
+        username: apiUser.username,
+        id: apiUser.id,
+      };
+      
+      setUser(userData);
+      localStorage.setItem('clusterforge_user', JSON.stringify(userData));
+      
+      return userData;
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('user');
+  const logout = async () => {
+    try {
+      await authService.logout();
+      setUser(null);
+      localStorage.removeItem('clusterforge_user');
+    } catch (error) {
+      console.error('Logout error:', error);
+      throw error;
+    }
+  };
+
+  const contextValue = {
+    user,
+    login,
+    logout,
+    isLoading,
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,7 +3,6 @@
 import { ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { ClientHeader } from '@/components/layout/ClientHeader';
-
 import { ClustersProvider } from '@/hooks/useClusters';
 
 export default function ClientLayout({ 
@@ -17,7 +16,7 @@ export default function ClientLayout({
   return (
     <ClustersProvider>
       {!isAuthPage && <ClientHeader />}
-      <main className={isAuthPage ? '' : ''}>
+      <main>
         {children}
       </main>
     </ClustersProvider>
