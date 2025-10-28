@@ -3,6 +3,8 @@ package com.seveninterprise.clusterforge.integration;
 import com.seveninterprise.clusterforge.model.Role;
 import com.seveninterprise.clusterforge.model.User;
 import org.junit.jupiter.api.BeforeEach;
+
+import java.time.Duration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -32,7 +34,9 @@ public abstract class BaseTestContainersIntegrationTest {
             .withDatabaseName("testdb")
             .withUsername("test")
             .withPassword("test")
-            .withReuse(true);
+            .withReuse(false)  // Não reutilizar para evitar conflitos
+            .withCreateContainerCmdModifier(cmd -> cmd.withName("testcontainers-mysql-" + System.currentTimeMillis()))
+            .withStartupTimeout(Duration.ofMinutes(2));  // Aumentar timeout
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {

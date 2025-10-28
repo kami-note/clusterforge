@@ -57,9 +57,32 @@ public class ClusterController {
     }
     
     @PostMapping
-    public CreateClusterResponse createCluster(@RequestBody CreateClusterRequest request) {
-        User authenticatedUser = getAuthenticatedUser();
-        return clusterService.createCluster(request, authenticatedUser);
+    public ResponseEntity<CreateClusterResponse> createCluster(@RequestBody CreateClusterRequest request) {
+        try {
+            User authenticatedUser = getAuthenticatedUser();
+            
+            // Check if user is admin - only admins can create clusters
+            if (!isAdmin()) {
+                CreateClusterResponse errorResponse = new CreateClusterResponse();
+                errorResponse.setStatus("ERROR");
+                errorResponse.setMessage("Apenas administradores podem criar clusters");
+                return ResponseEntity.status(403).body(errorResponse);
+            }
+            
+            CreateClusterResponse response = clusterService.createCluster(request, authenticatedUser);
+            
+            // Check if cluster was created successfully
+            if (response.getClusterId() != null && response.getStatus().equals("CREATED")) {
+                return ResponseEntity.status(201).body(response);
+            } else {
+                return ResponseEntity.status(400).body(response);
+            }
+        } catch (RuntimeException e) {
+            CreateClusterResponse errorResponse = new CreateClusterResponse();
+            errorResponse.setStatus("ERROR");
+            errorResponse.setMessage(e.getMessage());
+            return ResponseEntity.status(400).body(errorResponse);
+        }
     }
     
     @GetMapping

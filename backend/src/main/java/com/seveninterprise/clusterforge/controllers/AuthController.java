@@ -1,12 +1,5 @@
 package com.seveninterprise.clusterforge.controllers;
 
-import com.seveninterprise.clusterforge.dto.AuthenticationResponse;
-import com.seveninterprise.clusterforge.dto.LoginRequest;
-import com.seveninterprise.clusterforge.dto.RegisterRequest;
-import com.seveninterprise.clusterforge.model.User;
-import com.seveninterprise.clusterforge.model.Role;
-import com.seveninterprise.clusterforge.repository.UserRepository;
-import com.seveninterprise.clusterforge.security.JwtProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -17,6 +10,14 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.seveninterprise.clusterforge.dto.AuthenticationResponse;
+import com.seveninterprise.clusterforge.dto.LoginRequest;
+import com.seveninterprise.clusterforge.dto.RegisterRequest;
+import com.seveninterprise.clusterforge.model.Role;
+import com.seveninterprise.clusterforge.model.User;
+import com.seveninterprise.clusterforge.repository.UserRepository;
+import com.seveninterprise.clusterforge.security.JwtProvider;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -54,12 +55,6 @@ public class AuthController {
         userRepository.save(user);
         
         if (isFirstUser) {
-            System.out.println("╔════════════════════════════════════════════════════════════╗");
-            System.out.println("║          PRIMEIRO USUÁRIO CRIADO COMO ADMIN               ║");
-            System.out.println("╠════════════════════════════════════════════════════════════╣");
-            System.out.println("║ Username: " + String.format("%-47s", user.getUsername()) + "║");
-            System.out.println("║ Role:     ADMIN                                            ║");
-            System.out.println("╚════════════════════════════════════════════════════════════╝");
             return ResponseEntity.ok("First user registered successfully as ADMIN!");
         }
 

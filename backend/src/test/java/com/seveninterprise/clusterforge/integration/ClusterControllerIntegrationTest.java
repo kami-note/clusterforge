@@ -3,12 +3,16 @@ package com.seveninterprise.clusterforge.integration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.seveninterprise.clusterforge.dto.CreateClusterRequest;
 import com.seveninterprise.clusterforge.model.Cluster;
+import com.seveninterprise.clusterforge.model.User;
 import com.seveninterprise.clusterforge.repository.ClusterRepository;
+import com.seveninterprise.clusterforge.repository.UserRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MvcResult;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,10 +24,31 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Integration test for ClusterController using MockMvc.
  * Tests the complete web layer with security and JSON serialization.
  */
+@ActiveProfiles("test") // Use test profile for H2 in-memory database
 class ClusterControllerIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private ClusterRepository clusterRepository;
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    private User testUser;
+    private User testAdmin;
+
+    @BeforeEach
+    void setUp() {
+        // Create test users in the database
+        testAdmin = new User();
+        testAdmin.setUsername("admin");
+        testAdmin.setRole(com.seveninterprise.clusterforge.model.Role.ADMIN);
+        testAdmin = userRepository.save(testAdmin);
+        
+        testUser = new User();
+        testUser.setUsername("client");
+        testUser.setRole(com.seveninterprise.clusterforge.model.Role.USER);
+        testUser = userRepository.save(testUser);
+    }
 
     @Test
     @DisplayName("Should create cluster successfully with valid request")
@@ -89,8 +114,8 @@ class ClusterControllerIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("Should return 401 for unauthenticated request")
-    void shouldReturn401ForUnauthenticatedRequest() throws Exception {
+    @DisplayName("Should return 403 for unauthenticated request")
+    void shouldReturn403ForUnauthenticatedRequest() throws Exception {
         // Arrange
         CreateClusterRequest request = new CreateClusterRequest();
         request.setTemplateName("test-alpine");
@@ -101,7 +126,7 @@ class ClusterControllerIntegrationTest extends BaseIntegrationTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(asJsonString(request)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -146,6 +171,7 @@ class ClusterControllerIntegrationTest extends BaseIntegrationTest {
         testCluster.setNetworkLimit(25L);
         testCluster.setRootPath("/test/path");
         testCluster.setPort(9001);
+        testCluster.setUser(testAdmin); // Set the admin as the owner
         
         Cluster savedCluster = clusterRepository.save(testCluster);
 

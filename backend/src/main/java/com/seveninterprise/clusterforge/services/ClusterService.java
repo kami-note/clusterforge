@@ -376,13 +376,9 @@ public class ClusterService implements IClusterService {
             Math.min(cluster.getDiskLimit() * 100, 500)   // Máx 500MB para var/tmp
         );
         
-        // Adiciona storage_opt para limitar tamanho do container (overlay2)
-        // Nota: Requer Docker daemon configurado com storage driver overlay2 e pquota
-        String storageOptsSection = String.format(
-            "    storage_opt:\n" +
-            "      size: '%dG'    # Limite total do container filesystem\n",
-            cluster.getDiskLimit()
-        );
+        // Removido storage_opt - não é suportado em todas as configurações Docker
+        // O limite de disco será aplicado via tmpfs e monitoramento interno
+        String storageOptsSection = "";
         
         // Modifica o comando para usar o script de inicialização
         if (content.contains("command:")) {
@@ -429,9 +425,7 @@ public class ClusterService implements IClusterService {
         if (content.contains("tmpfs:")) {
             content = content.replaceAll("(?s)    tmpfs:.*?(?=\\n    [a-z])", "");
         }
-        if (content.contains("storage_opt:")) {
-            content = content.replaceAll("(?s)    storage_opt:.*?(?=\\n    [a-z])", "");
-        }
+        // Removido storage_opt - não é mais usado
         
         // Monta todas as seções na ordem correta
         String allSections = capsSection + tmpfsSection + storageOptsSection + environmentSection + resourcesSection;
@@ -447,7 +441,10 @@ public class ClusterService implements IClusterService {
     }
     
     private String generateUniqueContainerName(String clusterName) {
-        return DEFAULT_CONTAINER_NAME + "_" + clusterName.replaceAll("[^a-zA-Z0-9]", "_");
+        // Generate unique container name with timestamp to avoid conflicts
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        String cleanName = clusterName.replaceAll("[^a-zA-Z0-9]", "_");
+        return DEFAULT_CONTAINER_NAME + "_" + cleanName + "_" + timestamp.substring(timestamp.length() - 6);
     }
     
     private boolean instantiateDockerContainer(String clusterName, String clusterPath) {

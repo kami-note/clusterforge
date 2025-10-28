@@ -77,14 +77,15 @@ class ClusterControllerTest {
             .thenReturn(expectedResponse);
         
         // When
-        CreateClusterResponse result = clusterController.createCluster(request);
+        ResponseEntity<CreateClusterResponse> result = clusterController.createCluster(request);
         
         // Then
         assertNotNull(result);
-        assertEquals(expectedResponse.getClusterId(), result.getClusterId());
-        assertEquals(expectedResponse.getClusterName(), result.getClusterName());
-        assertEquals(expectedResponse.getPort(), result.getPort());
-        assertEquals(expectedResponse.getStatus(), result.getStatus());
+        assertNotNull(result.getBody());
+        assertEquals(expectedResponse.getClusterId(), result.getBody().getClusterId());
+        assertEquals(expectedResponse.getClusterName(), result.getBody().getClusterName());
+        assertEquals(expectedResponse.getPort(), result.getBody().getPort());
+        assertEquals(expectedResponse.getStatus(), result.getBody().getStatus());
     }
     
     @Test
