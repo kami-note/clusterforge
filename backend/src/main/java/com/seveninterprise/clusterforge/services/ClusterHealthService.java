@@ -316,8 +316,12 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private String checkContainerStatus(Cluster cluster) {
         try {
-            String containerName = cluster.getSanitizedContainerName();
-            String result = dockerService.inspectContainer(containerName, "{{.State.Status}}");
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
+            
+            String result = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
             
             if (result != null && !result.isEmpty() && result.contains("Process exited with code: 0")) {
                 return extractStatusFromResult(result);
@@ -357,10 +361,13 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private ClusterHealthMetrics collectResourceMetrics(Cluster cluster) {
         try {
-            String containerName = cluster.getSanitizedContainerName();
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
             
             // Coletar métricas do Docker Stats usando método auxiliar
-            String result = dockerService.getContainerStats(containerName);
+            String result = dockerService.getContainerStats(containerIdentifier);
             
             if (result != null && !result.isEmpty() && result.contains("Process exited with code: 0")) {
                 return parseDockerStats(result, cluster);
@@ -585,10 +592,14 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private boolean performRecovery(Cluster cluster) {
         try {
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
+            
             // 1. Parar container se estiver rodando
-            String containerName = cluster.getSanitizedContainerName();
             try {
-                dockerService.stopContainer(containerName);
+                dockerService.stopContainer(containerIdentifier);
                 Thread.sleep(2000); // Aguardar parada completa
             } catch (Exception e) {
                 // Ignora se não conseguir parar
@@ -596,14 +607,14 @@ public class ClusterHealthService implements IClusterHealthService {
             
             // 2. Limpar recursos órfãos
             try {
-                dockerService.removeContainer(containerName);
+                dockerService.removeContainer(containerIdentifier);
                 Thread.sleep(1000);
             } catch (Exception e) {
                 // Ignora se não conseguir remover
             }
             
             // 3. Reiniciar container
-            dockerService.startContainer(containerName);
+            dockerService.startContainer(containerIdentifier);
             Thread.sleep(5000); // Aguardar inicialização
             
             // 4. Verificar se recuperação foi bem-sucedida

@@ -40,36 +40,38 @@ public class DockerService implements IDockerService {
 
     @Override
     public void startContainer(String containerName) {
-        // Encontra o nome completo do container
-        String actualContainerName = findContainerByPattern(containerName);
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerName);
         
-        if (actualContainerName == null) {
+        if (containerId == null) {
             throw new RuntimeException("Container contendo '" + containerName + "' não existe. Não é possível iniciar.");
         }
         
         String dockerCmd = getDockerCommand();
-        String command = dockerCmd + " start " + actualContainerName;
+        // Usa ID do container ao invés de nome
+        String command = dockerCmd + " start " + containerId;
         String result = runCommand(command);
         if (!result.contains("Process exited with code: 0")) {
-            throw new RuntimeException("Failed to start container " + actualContainerName + ": " + result);
+            throw new RuntimeException("Failed to start container (ID: " + containerId + "): " + result);
         }
     }
 
     @Override
     public void stopContainer(String containerName) {
-        // Encontra o nome completo do container
-        String actualContainerName = findContainerByPattern(containerName);
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerName);
         
-        if (actualContainerName == null) {
+        if (containerId == null) {
             System.out.println("Container contendo '" + containerName + "' não existe. Pulando stop.");
             return;
         }
         
         String dockerCmd = getDockerCommand();
-        String command = dockerCmd + " stop " + actualContainerName;
+        // Usa ID do container ao invés de nome
+        String command = dockerCmd + " stop " + containerId;
         String result = runCommand(command);
         if (!result.contains("Process exited with code: 0")) {
-            throw new RuntimeException("Failed to stop container " + actualContainerName + ": " + result);
+            throw new RuntimeException("Failed to stop container (ID: " + containerId + "): " + result);
         }
     }
 
@@ -80,21 +82,21 @@ public class DockerService implements IDockerService {
         // Lista todos os containers para debug
         debugListAllContainers();
         
-        // Encontra o nome completo do container (docker-compose pode adicionar prefixos/sufixos)
-        String actualContainerName = findContainerByPattern(containerName);
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerName);
         
-        if (actualContainerName == null) {
+        if (containerId == null) {
             System.out.println("Container contendo '" + containerName + "' não existe ou já foi removido. Pulando remoção.");
             return;
         }
         
-        System.out.println("DEBUG: Nome completo do container encontrado: " + actualContainerName);
+        System.out.println("DEBUG: ID do container encontrado: " + containerId);
         
         // Para primeiro o container se estiver rodando
-        System.out.println("DEBUG: Parando container: " + actualContainerName);
+        System.out.println("DEBUG: Parando container (ID: " + containerId + ")");
         try {
             String dockerCmd = getDockerCommand();
-            String stopCommand = dockerCmd + " stop " + actualContainerName;
+            String stopCommand = dockerCmd + " stop " + containerId;
             String stopResult = runCommand(stopCommand);
             
             if (!stopResult.contains("Process exited with code: 0")) {
@@ -111,53 +113,78 @@ public class DockerService implements IDockerService {
             // Ignora
         }
         
-        // Remove o container usando o nome completo
-        System.out.println("DEBUG: Removendo container: " + actualContainerName);
+        // Remove o container usando o ID
+        System.out.println("DEBUG: Removendo container (ID: " + containerId + ")");
         try {
             String dockerCmd = getDockerCommand();
-            String command = dockerCmd + " rm -f " + actualContainerName; // -f força a remoção mesmo se rodando
+            String command = dockerCmd + " rm -f " + containerId; // -f força a remoção mesmo se rodando
             String result = runCommand(command);
             
             if (result.contains("Process exited with code: 0")) {
-                System.out.println("DEBUG: Container " + actualContainerName + " removido com sucesso.");
+                System.out.println("DEBUG: Container (ID: " + containerId + ") removido com sucesso.");
             } else {
                 System.err.println("DEBUG: Falha ao remover container: " + result);
-                throw new RuntimeException("Failed to remove container " + actualContainerName + ": " + result);
+                throw new RuntimeException("Failed to remove container (ID: " + containerId + "): " + result);
             }
         } catch (Exception e) {
             System.err.println("DEBUG: Erro ao executar rm no container: " + e.getMessage());
-            throw new RuntimeException("Erro ao remover container " + actualContainerName + ": " + e.getMessage(), e);
+            throw new RuntimeException("Erro ao remover container (ID: " + containerId + "): " + e.getMessage(), e);
         }
     }
     
     /**
-     * Encontra o nome completo do container dado um padrão de busca
-     * Retorna o nome completo encontrado ou null
+     * Encontra o ID do container Docker a partir do nome ou ID
+     * Retorna o ID completo do container ou null
+     * Usar ID é mais preciso que usar nome (evita ambiguidade)
      */
-    private String findContainerByPattern(String pattern) {
+    private String findContainerIdByNameOrId(String nameOrId) {
         try {
             String dockerCmd = getDockerCommand();
-            String command = dockerCmd + " ps -a --format '{{.Names}}'";
+            // Busca tanto ID quanto Name para encontrar o container
+            String command = dockerCmd + " ps -a --format '{{.ID}}\t{{.Names}}'";
             String result = runCommand(command);
             
-            System.out.println("DEBUG: Buscando container com padrão: " + pattern);
+            System.out.println("DEBUG: Buscando container com padrão: " + nameOrId);
             
-            // Procura linhas que contenham o padrão
+            // Procura linhas que contenham o padrão no ID ou no nome
             String[] lines = result.split("\n");
             for (String line : lines) {
                 String trimmed = line.trim();
-                if (trimmed.contains(pattern) && !trimmed.equals("Process exited with code: 0")) {
-                    System.out.println("DEBUG: Container encontrado: " + trimmed);
-                    return trimmed;
+                if (trimmed.isEmpty() || trimmed.equals("Process exited with code: 0")) {
+                    continue;
+                }
+                
+                // Formato: ID<TAB>Name
+                String[] parts = trimmed.split("\t");
+                if (parts.length >= 2) {
+                    String containerId = parts[0].trim();
+                    String containerName = parts[1].trim();
+                    
+                    // Verifica se o padrão corresponde ao ID (completo ou parcial) ou ao nome
+                    if (containerId.equals(nameOrId) || 
+                        containerId.startsWith(nameOrId) ||
+                        containerName.contains(nameOrId)) {
+                        System.out.println("DEBUG: Container encontrado - ID: " + containerId + ", Nome: " + containerName);
+                        return containerId; // Retorna o ID completo
+                    }
                 }
             }
             
-            System.out.println("DEBUG: Container com padrão '" + pattern + "' não encontrado.");
+            System.out.println("DEBUG: Container com padrão '" + nameOrId + "' não encontrado.");
             return null;
         } catch (Exception e) {
-            System.err.println("DEBUG: Erro ao buscar container por padrão '" + pattern + "': " + e.getMessage());
+            System.err.println("DEBUG: Erro ao buscar container por padrão '" + nameOrId + "': " + e.getMessage());
             return null;
         }
+    }
+    
+    /**
+     * Obtém o ID do container a partir do nome sanitizado
+     * @param containerName Nome do container
+     * @return ID do container ou null se não encontrado
+     */
+    public String getContainerId(String containerName) {
+        return findContainerIdByNameOrId(containerName);
     }
     
     /**
@@ -237,29 +264,31 @@ public class DockerService implements IDockerService {
     
     @Override
     public String inspectContainer(String containerName, String format) {
-        // Encontra o nome completo do container
-        String actualContainerName = findContainerByPattern(containerName);
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerName);
         
-        if (actualContainerName == null) {
+        if (containerId == null) {
             return "";
         }
         
         String dockerCmd = getDockerCommand();
-        String command = dockerCmd + " inspect " + actualContainerName + " --format='" + format + "'";
+        // Usa ID do container ao invés de nome
+        String command = dockerCmd + " inspect " + containerId + " --format='" + format + "'";
         return runCommand(command);
     }
     
     @Override
     public String getContainerStats(String containerName) {
-        // Encontra o nome completo do container
-        String actualContainerName = findContainerByPattern(containerName);
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerName);
         
-        if (actualContainerName == null) {
+        if (containerId == null) {
             return "";
         }
         
         String dockerCmd = getDockerCommand();
-        String command = dockerCmd + " stats " + actualContainerName + " --no-stream --format " +
+        // Usa ID do container ao invés de nome
+        String command = dockerCmd + " stats " + containerId + " --no-stream --format " +
             "'{{.CPUPerc}},{{.MemUsage}},{{.NetIO}},{{.BlockIO}}'";
         return runCommand(command);
     }

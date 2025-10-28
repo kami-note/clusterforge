@@ -23,4 +23,5 @@ public interface IDockerService {
     public void pruneUnusedNetworks();                                      // Remove redes não utilizadas do Docker
     public String inspectContainer(String containerName, String format);    // Executa docker inspect com formato
     public String getContainerStats(String containerName);                  // Executa docker stats
+    public String getContainerId(String containerName);                     // Obtém o ID do container pelo nome
 }

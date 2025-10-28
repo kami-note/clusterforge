@@ -13,6 +13,7 @@ import com.seveninterprise.clusterforge.model.Template;
 import com.seveninterprise.clusterforge.model.User;
 import com.seveninterprise.clusterforge.repository.ClusterRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterHealthStatusRepository;
+import com.seveninterprise.clusterforge.repositories.ClusterHealthMetricsRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterBackupRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,7 @@ public class ClusterService implements IClusterService {
     
     // Repositórios relacionados
     private final ClusterHealthStatusRepository clusterHealthStatusRepository;
+    private final ClusterHealthMetricsRepository clusterHealthMetricsRepository;
     private final ClusterBackupRepository clusterBackupRepository;
     
     // Novos serviços abstraídos
@@ -73,6 +75,7 @@ public class ClusterService implements IClusterService {
                          DockerService dockerService,
                          UserService userService,
                          ClusterHealthStatusRepository clusterHealthStatusRepository,
+                         ClusterHealthMetricsRepository clusterHealthMetricsRepository,
                          ClusterBackupRepository clusterBackupRepository,
                          IFileSystemService fileSystemService,
                          IDockerComposeService dockerComposeService,
@@ -86,6 +89,7 @@ public class ClusterService implements IClusterService {
         this.dockerService = dockerService;
         this.userService = userService;
         this.clusterHealthStatusRepository = clusterHealthStatusRepository;
+        this.clusterHealthMetricsRepository = clusterHealthMetricsRepository;
         this.clusterBackupRepository = clusterBackupRepository;
         this.fileSystemService = fileSystemService;
         this.dockerComposeService = dockerComposeService;
@@ -156,20 +160,28 @@ public class ClusterService implements IClusterService {
             // Instancia o container Docker
             boolean dockerSuccess = instantiateDockerContainer(clusterName, clusterPath);
             
+            // Obtém o ID do container Docker (mais preciso que nome)
+            if (dockerSuccess) {
+                String containerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
+                cluster.setContainerId(containerId);
+                System.out.println("Container ID obtido: " + containerId + " para cluster: " + clusterName);
+            }
+            
             String status = dockerSuccess ? "RUNNING" : "CREATED";
             String message;
             
             // Define o status do cluster
             cluster.setStatus(status);
             
-            // Salva o cluster com status
+            // Salva o cluster com status e container ID
             Cluster savedCluster = clusterRepository.save(cluster);
             if (dockerSuccess) {
                 message = "Cluster criado e iniciado com sucesso";
                 
                 // Inicializar monitoramento de saúde e backup para clusters bem-sucedidos
                 initializeHealthMonitoring(savedCluster);
-                createInitialBackup(savedCluster);
+                // BACKUP DESABILITADO TEMPORARIAMENTE
+                // createInitialBackup(savedCluster);
             } else {
                 message = "Cluster criado mas falha ao iniciar container Docker. Verifique se o Docker está rodando e se o usuário tem permissão sudo";
             }
@@ -351,6 +363,25 @@ public class ClusterService implements IClusterService {
         
         // Deleta registros relacionados antes de deletar o cluster
         try {
+            // Deleta health metrics
+            List<Long> metricIds = clusterHealthMetricsRepository.findAll().stream()
+                .filter(m -> m.getCluster().getId().equals(clusterId))
+                .map(m -> m.getId())
+                .collect(Collectors.toList());
+            
+            metricIds.forEach(id -> {
+                try {
+                    clusterHealthMetricsRepository.deleteById(id);
+                } catch (Exception e) {
+                    // Ignora erros individuais
+                }
+            });
+            System.out.println("Health metrics deletadas para cluster " + clusterId);
+        } catch (Exception e) {
+            System.err.println("Warning: Failed to remove health metrics for cluster " + clusterId + ": " + e.getMessage());
+        }
+        
+        try {
             // Deleta health status
             clusterHealthStatusRepository.findByClusterId(clusterId).ifPresent(health -> {
                 clusterHealthStatusRepository.delete(health);
@@ -370,10 +401,14 @@ public class ClusterService implements IClusterService {
         
         // Para e remove o container Docker
         try {
-            String containerName = cluster.getSanitizedContainerName();
-            System.out.println("DEBUG: Removendo container para cluster " + clusterId + ". Nome do container: " + containerName);
-            dockerService.removeContainer(containerName);
-            System.out.println("DEBUG: Container " + containerName + " removido com sucesso.");
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
+            
+            System.out.println("DEBUG: Removendo container para cluster " + clusterId + ". ID/Nome: " + containerIdentifier);
+            dockerService.removeContainer(containerIdentifier);
+            System.out.println("DEBUG: Container " + containerIdentifier + " removido com sucesso.");
         } catch (RuntimeException e) {
             // Silenciosamente ignora se o container não existe
             // O dockerService já imprime mensagem informativa neste caso
@@ -399,7 +434,12 @@ public class ClusterService implements IClusterService {
         Cluster cluster = findClusterById(clusterId);
         
         try {
-            dockerService.startContainer(cluster.getSanitizedContainerName());
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
+            
+            dockerService.startContainer(containerIdentifier);
             cluster.setStatus("RUNNING");
             clusterRepository.save(cluster);
             return buildResponse(cluster, "RUNNING", "Cluster iniciado com sucesso");
@@ -415,7 +455,12 @@ public class ClusterService implements IClusterService {
         Cluster cluster = findClusterById(clusterId);
         
         try {
-            dockerService.stopContainer(cluster.getSanitizedContainerName());
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
+            
+            dockerService.stopContainer(containerIdentifier);
             cluster.setStatus("STOPPED");
             clusterRepository.save(cluster);
             return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso");
@@ -478,12 +523,17 @@ public class ClusterService implements IClusterService {
             fileSystemService.writeFile(composePath, updatedCompose);
             
             // 6. Reinicia container para aplicar mudanças (se estiver rodando)
-            boolean containerWasRunning = isContainerRunning(cluster.getSanitizedContainerName());
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
+            
+            boolean containerWasRunning = isContainerRunning(containerIdentifier);
             
             if (containerWasRunning) {
                 // Para o container
                 try {
-                    dockerService.stopContainer(cluster.getSanitizedContainerName());
+                    dockerService.stopContainer(containerIdentifier);
                 } catch (Exception e) {
                     System.err.println("Warning: Failed to stop container before update: " + e.getMessage());
                 }
@@ -495,6 +545,11 @@ public class ClusterService implements IClusterService {
                 boolean restartSuccess = instantiateDockerContainer(cluster.getName(), cluster.getRootPath());
                 
                 if (restartSuccess) {
+                    // Atualiza o containerId após reiniciar
+                    String newContainerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
+                    savedCluster.setContainerId(newContainerId);
+                    clusterRepository.save(savedCluster);
+                    
                     return buildResponse(savedCluster, "UPDATED", 
                         "Limites atualizados e cluster reiniciado com sucesso");
                 } else {
@@ -557,7 +612,9 @@ public class ClusterService implements IClusterService {
     
     /**
      * Cria backup inicial do cluster após criação bem-sucedida
+     * @SuppressWarnings("unused")
      */
+    @SuppressWarnings("unused")
     private void createInitialBackup(Cluster cluster) {
         try {
             clusterBackupService.createBackup(

@@ -169,9 +169,13 @@ public class ClusterBackupService implements IClusterBackupService {
             }
             
             // Parar container se estiver rodando
-            String containerName = targetCluster.getSanitizedContainerName();
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (targetCluster.getContainerId() != null && !targetCluster.getContainerId().isEmpty()) 
+                ? targetCluster.getContainerId() 
+                : targetCluster.getSanitizedContainerName();
+            
             try {
-                dockerService.stopContainer(containerName);
+                dockerService.stopContainer(containerIdentifier);
                 Thread.sleep(3000);
             } catch (Exception e) {
                 // Ignora se não conseguir parar
@@ -560,9 +564,13 @@ public class ClusterBackupService implements IClusterBackupService {
             Path backupPath = Paths.get(backup.getBackupPath());
             
             // Parar container se estiver rodando
-            String containerName = targetCluster.getSanitizedContainerName();
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (targetCluster.getContainerId() != null && !targetCluster.getContainerId().isEmpty()) 
+                ? targetCluster.getContainerId() 
+                : targetCluster.getSanitizedContainerName();
+            
             try {
-                dockerService.stopContainer(containerName);
+                dockerService.stopContainer(containerIdentifier);
                 Thread.sleep(2000);
             } catch (Exception e) {
                 // Ignora se não conseguir parar
@@ -574,7 +582,7 @@ public class ClusterBackupService implements IClusterBackupService {
             
             if (result.contains("Process exited with code: 0")) {
                 // Reiniciar container
-                dockerService.startContainer(containerName);
+                dockerService.startContainer(containerIdentifier);
                 return true;
             } else {
                 return false;

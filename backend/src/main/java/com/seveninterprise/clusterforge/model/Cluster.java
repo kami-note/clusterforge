@@ -25,6 +25,7 @@ public class Cluster {
     private int port;
     private String rootPath;
     private String status;        // Status do cluster (CREATED, RUNNING, STOPPED, FAILED)
+    private String containerId;   // ID do container Docker (mais preciso que nome)
     
     // Resource Limits
     private Double cpuLimit;      // CPU limit in cores (e.g., 1.5 = 1.5 cores)
@@ -111,6 +112,14 @@ public class Cluster {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+    
+    public String getContainerId() {
+        return containerId;
+    }
+
+    public void setContainerId(String containerId) {
+        this.containerId = containerId;
     }
     
     // Métodos auxiliares para lógicas básicas

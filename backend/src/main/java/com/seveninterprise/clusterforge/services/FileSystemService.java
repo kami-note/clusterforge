@@ -113,7 +113,16 @@ public class FileSystemService implements IFileSystemService {
         try {
             Path directoryPath = Paths.get(path);
             if (Files.exists(directoryPath)) {
-                Files.deleteIfExists(directoryPath);
+                // Remove recursivamente (importante para diretórios não vazios)
+                Files.walk(directoryPath)
+                    .sorted((a, b) -> b.compareTo(a)) // Ordem reversa: arquivos antes de diretórios
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (Exception e) {
+                            System.err.println("Warning: Failed to remove " + p + ": " + e.getMessage());
+                        }
+                    });
             }
         } catch (Exception e) {
             System.err.println("Warning: Failed to remove directory " + path + ": " + e.getMessage());
