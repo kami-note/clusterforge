@@ -1,36 +1,101 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ClusterForge - Frontend
 
-## Getting Started
+Sistema de gerenciamento de clusters desenvolvido com Next.js 15, React 19 e TypeScript.
 
-First, run the development server:
+## 🚀 Tecnologias
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Next.js 15** - Framework React
+- **React 19** - Biblioteca UI
+- **TypeScript** - Tipagem estática
+- **Tailwind CSS** - Estilização
+- **Radix UI** - Componentes acessíveis
+- **Recharts** - Gráficos e visualizações
+- **Sonner** - Notificações toast
+
+## 📁 Estrutura do Projeto
+
+```
+frontend/
+├── src/
+│   ├── app/                    # Páginas da aplicação
+│   │   ├── admin/              # Painel administrativo
+│   │   ├── client/             # Painel do cliente
+│   │   ├── auth/               # Autenticação
+│   │   └── page.tsx            # Página inicial
+│   ├── components/
+│   │   ├── admin/              # Componentes admin
+│   │   ├── client/             # Componentes cliente
+│   │   ├── clusters/           # Gerenciamento de clusters
+│   │   ├── layout/             # Componentes de layout
+│   │   └── ui/                 # Componentes UI reutilizáveis
+│   ├── hooks/                  # Custom hooks
+│   └── lib/                    # Utilitários
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🎯 Funcionalidades
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Autenticação
+- Login com diferentes tipos de usuário (admin/cliente)
+- Redirecionamento automático baseado no tipo
+- Gerenciamento de sessão com localStorage
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Dashboard Admin
+- Visão geral do sistema
+- Gráficos de métricas (usuários, clusters, recursos)
+- Atividade recente
+- Gerenciamento completo de clusters
 
-## Learn More
+### Dashboard Cliente
+- Visão dos clusters próprios
+- Controle de recursos (start/stop/restart)
+- Monitoramento em tempo real
+- Criação de novos clusters
 
-To learn more about Next.js, take a look at the following resources:
+### Gerenciamento de Clusters
+- Criar novos clusters com templates
+- Visualizar detalhes completos
+- Console interativo
+- Monitoramento de recursos em tempo real
+- Logs de aplicação
+- Acesso FTP/SFTP
+- Controle de banco de dados
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🏃 Como Executar
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Instalação
+```bash
+cd frontend
+npm install
+```
 
-## Deploy on Vercel
+### Desenvolvimento
+```bash
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Abra [http://localhost:3000](http://localhost:3000) no navegador.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Build de Produção
+```bash
+npm run build
+npm start
+```
+
+## 👤 Credenciais de Teste
+
+- **Email Admin**: `admin@example.com`
+- **Senha**: qualquer valor
+
+## 📝 Notas
+
+- Dados atualmente armazenados em `localStorage`
+- Pronto para integração com backend Spring Boot
+- Sistema de rotas protegidas por role
+- Dark mode suportado
+
+## 🔗 Integração com Backend
+
+Para conectar com a API backend:
+1. Configure a URL da API em `.env.local`
+2. Atualize os hooks `useAuth` e `useClusters`
+3. Remova os mocks e implemente chamadas reais

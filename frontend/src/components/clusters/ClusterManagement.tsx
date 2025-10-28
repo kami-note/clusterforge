@@ -180,7 +180,11 @@ const owners = [
   ...Array.from(new Set(mockClusters.map(cluster => cluster.owner)))
 ];
 
-export function ClusterManagement({ }: Record<string, never>) {
+interface ClusterManagementProps {
+  onCreateCluster?: () => void;
+}
+
+export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const router = useRouter();
   const [clusters, setClusters] = useState<Cluster[]>(mockClusters);
   const [searchTerm, setSearchTerm] = useState('');
@@ -190,7 +194,11 @@ export function ClusterManagement({ }: Record<string, never>) {
   const [alertFilter, setAlertFilter] = useState('all');
 
   const handleCreateCluster = () => {
-    router.push('/admin/clusters/create');
+    if (onCreateCluster) {
+      onCreateCluster();
+    } else {
+      router.push('/admin/clusters/create');
+    }
   };
 
   const handleViewDetails = (clusterId: string) => {

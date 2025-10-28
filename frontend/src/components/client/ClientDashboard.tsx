@@ -24,7 +24,7 @@ const performClusterAction = async (clusterId: string, action: 'start' | 'stop' 
   });
 };
 
-export function ClientDashboard({ }: ClientDashboardProps) {
+export function ClientDashboard() {
   const router = useRouter();
   const { } = useAuth(); // Removed user
   const { clusters, updateCluster } = useClusters();
