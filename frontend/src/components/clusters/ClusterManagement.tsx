@@ -23,6 +23,7 @@ import {
   Eye // Added Eye icon
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useClusters } from '@/hooks/useClusters';
 
 interface Cluster {
   id: string;
@@ -186,12 +187,31 @@ interface ClusterManagementProps {
 
 export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const router = useRouter();
-  const [clusters, setClusters] = useState<Cluster[]>(mockClusters);
+  const { clusters: apiClusters, loading } = useClusters();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('Todos os Donos');
   const [serviceFilter, setServiceFilter] = useState('Todos os Serviços');
   const [alertFilter, setAlertFilter] = useState('all');
+
+  // Converter clusters da API para o formato esperado do componente
+  const clusters = useMemo(() => {
+    return apiClusters.map(cluster => ({
+      id: cluster.id,
+      name: cluster.name,
+      owner: cluster.owner,
+      service: cluster.serviceType,
+      status: cluster.status === 'running' ? 'active' : cluster.status === 'stopped' ? 'stopped' : 'active',
+      resources: {
+        cpu: { used: cluster.cpu, limit: 100 },
+        ram: { used: cluster.memory, limit: cluster.memory || 4 },
+        disk: { used: 0, limit: cluster.storage },
+      },
+      address: cluster.port ? `localhost:${cluster.port}` : '',
+      createdAt: cluster.lastUpdate,
+      hasAlert: false,
+    }));
+  }, [apiClusters]);
 
   const handleCreateCluster = () => {
     if (onCreateCluster) {
@@ -242,36 +262,30 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     return Math.round((used / limit) * 100);
   };
 
-  const handleAction = (clusterId: string, action: 'edit' | 'restart' | 'delete' | 'start' | 'stop') => {
-    setClusters(prev => prev.map(cluster => {
-      if (cluster.id === clusterId) {
-        switch (action) {
-          case 'restart':
-            return { ...cluster, status: 'reinstalling' as const };
-          case 'start':
-            return { ...cluster, status: 'active' as const };
-          case 'stop':
-            return { ...cluster, status: 'stopped' as const };
-          case 'delete':
-            return cluster; // Será removido pelo filter abaixo
-          default:
-            return cluster;
-        }
+  const { updateCluster } = useClusters();
+
+  const handleAction = async (clusterId: string, action: 'edit' | 'restart' | 'delete' | 'start' | 'stop') => {
+    try {
+      switch (action) {
+        case 'restart':
+          await updateCluster(clusterId, { status: 'restarting' });
+          setTimeout(() => updateCluster(clusterId, { status: 'running' }), 3000);
+          break;
+        case 'start':
+          await updateCluster(clusterId, { status: 'running' });
+          break;
+        case 'stop':
+          await updateCluster(clusterId, { status: 'stopped' });
+          break;
+        case 'delete':
+          // TODO: Implementar delete usando clusterService
+          console.log('Delete not implemented yet');
+          break;
+        default:
+          break;
       }
-      return cluster;
-    }));
-
-    if (action === 'delete') {
-      setClusters(prev => prev.filter(cluster => cluster.id !== clusterId));
-    }
-
-    // Simular mudança de status após restart
-    if (action === 'restart') {
-      setTimeout(() => {
-        setClusters(prev => prev.map(cluster =>
-          cluster.id === clusterId ? { ...cluster, status: 'active' as const } : cluster
-        ));
-      }, 3000);
+    } catch (error) {
+      console.error('Error performing action:', error);
     }
   };
 
@@ -418,7 +432,13 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredClusters.length === 0 ? (
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8">
+                      <div className="text-muted-foreground">Carregando clusters...</div>
+                    </TableCell>
+                  </TableRow>
+                ) : filteredClusters.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-8">
                       <div className="text-muted-foreground">

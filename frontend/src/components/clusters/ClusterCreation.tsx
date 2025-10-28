@@ -26,9 +26,16 @@ import {
   Database,
   CircuitBoard,
   AlertCircle,
-  Loader2
+  Loader2,
+  Box,
+  Code,
+  Cloud,
+  Package,
+  Layers,
+  Rocket
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { templateService, type Template } from '@/services/template.service';
 
 // Types
 export interface ClusterData {
@@ -101,58 +108,145 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingClients, setLoadingClients] = useState(userType === 'admin');
+  const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
 
-  // Service templates
-  const serviceTemplates: ServiceTemplate[] = [
-    {
-      id: 'minecraft',
-      name: 'Servidor Minecraft',
-      description: 'Servidor dedicado para Minecraft Java Edition',
-      icon: Gamepad2,
-      defaultCommand: 'java -Xmx{RAM}G -Xms{RAM}G -jar minecraft_server.jar nogui',
-      recommendedResources: { cpu: 50, ram: 4, disk: 10 }
-    },
-    {
-      id: 'wordpress',
-      name: 'Blog WordPress',
-      description: 'Site WordPress com PHP e MySQL',
-      icon: FileText,
-      defaultCommand: 'docker-compose up -d',
-      recommendedResources: { cpu: 30, ram: 2, disk: 5 }
-    },
-    {
-      id: 'nodejs',
-      name: 'Aplicação Node.js',
-      description: 'Servidor Node.js para APIs e aplicações web',
-      icon: Zap,
-      defaultCommand: 'npm start',
-      recommendedResources: { cpu: 25, ram: 1, disk: 3 }
-    },
-    {
-      id: 'nginx',
-      name: 'Servidor Web (Nginx)',
-      description: 'Servidor web Nginx para sites estáticos',
-      icon: Globe,
-      defaultCommand: 'nginx -g "daemon off;"',
-      recommendedResources: { cpu: 20, ram: 1, disk: 2 }
-    },
-    {
-      id: 'mysql',
-      name: 'Banco de Dados MySQL',
-      description: 'Servidor de banco de dados MySQL',
-      icon: Database,
-      defaultCommand: 'mysqld --user=mysql',
-      recommendedResources: { cpu: 40, ram: 4, disk: 20 }
-    },
-    {
-      id: 'redis',
-      name: 'Cache Redis',
-      description: 'Servidor Redis para cache e sessões',
-      icon: CircuitBoard,
-      defaultCommand: 'redis-server',
-      recommendedResources: { cpu: 15, ram: 1, disk: 1 }
-    }
+  // Mapeamento de ícones aleatórios para templates
+  const iconMap: { [key: string]: React.ComponentType<{ className?: string }> } = {
+    'test-alpine': Package,
+    'webserver-php': Code,
+    'wordpress': FileText,
+    'nginx': Globe,
+    'apache': Globe,
+    'mysql': Database,
+    'postgres': Database,
+    'redis': CircuitBoard,
+    'nodejs': Zap,
+    'python': Code,
+    'java': Box,
+    'minecraft': Gamepad2,
+    'docker': Layers,
+    'kubernetes': Rocket,
+    'default': Cloud
+  };
+
+  // Array de ícones para distribuição aleatória
+  const availableIcons = [
+    Gamepad2, FileText, Zap, Globe, Database, CircuitBoard,
+    Package, Code, Cloud, Box, Layers, Rocket, Server, Cpu
   ];
+
+  // Função para obter ícone do template
+  const getIconForTemplate = (templateName: string): React.ComponentType<{ className?: string }> => {
+    const lowerName = templateName.toLowerCase();
+    
+    // Busca ícone pelo nome do template
+    for (const [key, icon] of Object.entries(iconMap)) {
+      if (lowerName.includes(key)) {
+        return icon;
+      }
+    }
+    
+    // Se não encontrar, usa hash para escolher um ícone aleatório
+    let hash = 0;
+    for (let i = 0; i < templateName.length; i++) {
+      hash = ((hash << 5) - hash) + templateName.charCodeAt(i);
+      hash = hash & hash;
+    }
+    return availableIcons[Math.abs(hash) % availableIcons.length];
+  };
+
+  // Função para obter recursos padrão baseados no tipo de template
+  const getDefaultResourcesForTemplate = (templateName: string): { cpu: number; ram: number; disk: number } => {
+    const lowerName = templateName.toLowerCase();
+    
+    // Recursos baseados no tipo de template
+    if (lowerName.includes('test') || lowerName.includes('alpine')) {
+      return { cpu: 15, ram: 0.5, disk: 2 };
+    }
+    if (lowerName.includes('php') || lowerName.includes('webserver') || lowerName.includes('wordpress')) {
+      return { cpu: 30, ram: 2, disk: 5 };
+    }
+    if (lowerName.includes('minecraft') || lowerName.includes('game')) {
+      return { cpu: 50, ram: 4, disk: 10 };
+    }
+    if (lowerName.includes('database') || lowerName.includes('mysql') || lowerName.includes('postgres')) {
+      return { cpu: 40, ram: 4, disk: 20 };
+    }
+    if (lowerName.includes('node') || lowerName.includes('api')) {
+      return { cpu: 25, ram: 1, disk: 3 };
+    }
+    if (lowerName.includes('nginx') || lowerName.includes('apache')) {
+      return { cpu: 20, ram: 1, disk: 2 };
+    }
+    if (lowerName.includes('redis') || lowerName.includes('cache')) {
+      return { cpu: 15, ram: 1, disk: 1 };
+    }
+    
+    // Recursos padrão para templates desconhecidos
+    return { cpu: 25, ram: 2, disk: 10 };
+  };
+
+  // Carregar templates do backend
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        setLoadingTemplates(true);
+        const templates = await templateService.listTemplates();
+        
+        // Converter templates do backend para ServiceTemplate
+        const formattedTemplates: ServiceTemplate[] = templates.map((template) => {
+          const Icon = getIconForTemplate(template.name);
+          
+          // Recursos padrão baseados no tipo de template
+          const defaultResources = getDefaultResourcesForTemplate(template.name);
+          
+          return {
+            id: template.name.toLowerCase().replace(/\s+/g, '-'),
+            name: template.name,
+            description: template.description,
+            icon: Icon,
+            defaultCommand: 'docker-compose up -d',
+            recommendedResources: defaultResources
+          };
+        });
+        
+        // Se não houver templates do backend, usa templates padrão
+        if (formattedTemplates.length === 0) {
+          const fallbackTemplates: ServiceTemplate[] = [
+            {
+              id: 'docker-app',
+              name: 'Aplicação Docker',
+              description: 'Aplicação genérica com Docker',
+              icon: Cloud,
+              defaultCommand: 'docker-compose up -d',
+              recommendedResources: { cpu: 25, ram: 2, disk: 10 }
+            }
+          ];
+          setServiceTemplates(fallbackTemplates);
+        } else {
+          setServiceTemplates(formattedTemplates);
+        }
+      } catch (error) {
+        console.error('Error fetching templates:', error);
+        toast.error('Erro ao carregar templates do servidor');
+        
+        // Fallback para template padrão em caso de erro
+        setServiceTemplates([{
+          id: 'docker-app',
+          name: 'Aplicação Docker',
+          description: 'Aplicação genérica com Docker',
+          icon: Cloud,
+          defaultCommand: 'docker-compose up -d',
+          recommendedResources: { cpu: 25, ram: 2, disk: 10 }
+        }]);
+      } finally {
+        setLoadingTemplates(false);
+      }
+    };
+    
+    loadTemplates();
+  }, []);
 
   useEffect(() => {
     if (userType === 'admin') {
@@ -314,39 +408,55 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 {/* Tipo de Serviço */}
                 <div className="space-y-3">
                   <Label>Tipo de Serviço (Template)</Label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {serviceTemplates.map((service) => {
-                      const IconComponent = service.icon;
-                      return (
-                        <div
-                          key={service.id}
-                          className={`relative border rounded-lg p-4 cursor-pointer transition-all hover:border-primary ${
-                            selectedService?.id === service.id 
-                              ? 'border-primary bg-primary/5' 
-                              : 'border-border'
-                          }`}
-                          onClick={() => handleServiceChange(service.id)}
-                        >
-                          <div className="flex items-start space-x-3">
-                            <div className="p-2 rounded-lg bg-muted/50">
-                              <IconComponent className="h-6 w-6 text-primary" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-medium">{service.name}</h4>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                {service.description}
-                              </p>
-                            </div>
-                            {selectedService?.id === service.id && (
-                              <div className="absolute top-2 right-2">
-                                <div className="h-2 w-2 bg-primary rounded-full"></div>
+                  {loadingTemplates ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="flex items-center space-x-2 text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Carregando templates...</span>
+                      </div>
+                    </div>
+                  ) : serviceTemplates.length === 0 ? (
+                    <div className="flex items-center justify-center py-8 text-center">
+                      <div className="flex flex-col items-center space-y-2 text-muted-foreground">
+                        <AlertCircle className="h-8 w-8" />
+                        <p className="text-sm">Nenhum template disponível no servidor</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {serviceTemplates.map((service) => {
+                        const IconComponent = service.icon;
+                        return (
+                          <div
+                            key={service.id}
+                            className={`relative border rounded-lg p-4 cursor-pointer transition-all hover:border-primary ${
+                              selectedService?.id === service.id 
+                                ? 'border-primary bg-primary/5' 
+                                : 'border-border'
+                            }`}
+                            onClick={() => handleServiceChange(service.id)}
+                          >
+                            <div className="flex items-start space-x-3">
+                              <div className="p-2 rounded-lg bg-muted/50">
+                                <IconComponent className="h-6 w-6 text-primary" />
                               </div>
-                            )}
+                              <div className="flex-1">
+                                <h4 className="font-medium">{service.name}</h4>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  {service.description}
+                                </p>
+                              </div>
+                              {selectedService?.id === service.id && (
+                                <div className="absolute top-2 right-2">
+                                  <div className="h-2 w-2 bg-primary rounded-full"></div>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

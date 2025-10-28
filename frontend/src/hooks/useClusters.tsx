@@ -101,20 +101,46 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         const apiClusters = await clusterService.listClusters();
         
         // Converte os clusters da API para o formato esperado pelo frontend
-        const convertedClusters: Cluster[] = apiClusters.map(cluster => ({
-          id: cluster.id.toString(),
-          name: cluster.name,
-          status: mapStatus(cluster.status),
-          cpu: 0, // TODO: Buscar métricas reais
-          memory: 0,
-          storage: 0,
-          lastUpdate: cluster.createdAt || 'desconhecido',
-          owner: 'Cliente',
-          serviceType: 'Unknown',
-          service: null,
-          startupCommand: '',
-          port: cluster.port?.toString(),
-        }));
+        const convertedClusters: Cluster[] = await Promise.all(
+          apiClusters.map(async (cluster) => {
+            // Para cada cluster, buscar detalhes completos
+            try {
+              const details = await clusterService.getCluster(cluster.id);
+              
+              return {
+                id: details.id.toString(),
+                name: details.name,
+                status: details.status ? mapStatus(details.status) : 'stopped',
+                cpu: details.cpuLimit ? Math.round(details.cpuLimit * 100) : 0, // CPU em percentual
+                memory: details.memoryLimit ? Math.round(details.memoryLimit / 1024) : 0, // MB para GB
+                storage: details.diskLimit || 0,
+                lastUpdate: details.createdAt || 'desconhecido',
+                owner: details.user?.username || 'Desconhecido',
+                serviceType: details.rootPath || 'Custom',
+                service: null,
+                startupCommand: '',
+                port: details.port?.toString() || details.rootPath,
+              };
+            } catch (error) {
+              console.error(`Error loading cluster ${cluster.id}:`, error);
+              // Retorna dados básicos se falhar ao buscar detalhes
+              return {
+                id: cluster.id.toString(),
+                name: cluster.name,
+                status: cluster.status ? mapStatus(cluster.status) : 'stopped',
+                cpu: cluster.cpuLimit ? Math.round(cluster.cpuLimit * 100) : 0,
+                memory: cluster.memoryLimit ? Math.round(cluster.memoryLimit / 1024) : 0,
+                storage: cluster.diskLimit || 0,
+                lastUpdate: 'desconhecido',
+                owner: cluster.owner?.userId?.toString() || 'Desconhecido',
+                serviceType: cluster.rootPath || 'Custom',
+                service: null,
+                startupCommand: '',
+                port: cluster.port?.toString(),
+              };
+            }
+          })
+        );
         
         setClusters(convertedClusters);
       } catch (error) {

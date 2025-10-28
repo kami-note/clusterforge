@@ -6,13 +6,9 @@ import { httpClient } from '@/lib/api-client';
 
 export interface Template {
   name: string;
-  description?: string;
-  dockerComposeFile?: string;
-  defaultResources?: {
-    cpu: number;
-    memory: number;
-    disk: number;
-  };
+  description: string;
+  version: string;
+  path: string;
 }
 
 class TemplateService {

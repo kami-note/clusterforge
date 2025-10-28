@@ -35,19 +35,30 @@ export interface UpdateClusterLimitsRequest {
 export interface ClusterListItem {
   id: number;
   name: string;
-  status: string;
+  status?: string;
   port?: number;
+  rootPath?: string;
   userId?: number;
-  createdAt?: string;
+  owner?: {
+    userId: number;
+  };
+  cpuLimit?: number;
+  memoryLimit?: number;
+  diskLimit?: number;
 }
 
 export interface ClusterDetails {
   id: number;
   name: string;
-  status: string;
+  status?: string;
   port?: number;
-  userId: number;
-  templateName?: string;
+  rootPath?: string;
+  userId?: number;
+  user?: {
+    id: number;
+    username: string;
+    role: string;
+  };
   cpuLimit?: number;
   memoryLimit?: number;
   diskLimit?: number;
