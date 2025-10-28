@@ -10,10 +10,13 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, allowedRoles = ['client', 'admin'] }: ProtectedRouteProps) {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
+    // Aguarda o carregamento terminar antes de verificar autenticação
+    if (isLoading) return;
+    
     if (!user) {
       // Usuário não está logado, redirecionar para login
       router.push('/auth/login');
@@ -21,10 +24,10 @@ export default function ProtectedRoute({ children, allowedRoles = ['client', 'ad
       // Usuário não tem permissão para acessar esta página
       router.push('/auth/login'); // ou uma página de acesso negado
     }
-  }, [user, router, allowedRoles]);
+  }, [user, isLoading, router, allowedRoles]);
 
-  // Mostrar conteúdo apenas se o usuário estiver autenticado e tiver permissão
-  if (!user || !allowedRoles.includes(user.type)) {
+  // Mostrar conteúdo de carregamento enquanto verifica autenticação
+  if (isLoading || !user || !allowedRoles.includes(user.type)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p>Carregando...</p>
