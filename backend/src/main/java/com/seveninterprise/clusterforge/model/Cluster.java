@@ -103,4 +103,58 @@ public class Cluster {
     public void setNetworkLimit(Long networkLimit) {
         this.networkLimit = networkLimit;
     }
+    
+    // Métodos auxiliares para lógicas básicas
+    
+    /**
+     * Retorna o limite de memória formatado para Docker (com sufixo 'm')
+     * @return String formatada (ex: "512m")
+     */
+    public String getMemoryLimitForDocker() {
+        return (memoryLimit != null ? memoryLimit : 0) + "m";
+    }
+    
+    /**
+     * Retorna 50% do limite de memória formatado para Docker (usado em reservations)
+     * @return String formatada (ex: "256m")
+     */
+    public String getMemoryReservationForDocker() {
+        long halfMemory = (memoryLimit != null ? memoryLimit / 2 : 0);
+        return halfMemory + "m";
+    }
+    
+    /**
+     * Retorna o nome sanitizado para uso como container Docker
+     * Remove caracteres especiais, mantendo apenas alfanuméricos e underscore
+     * @return Nome sanitizado
+     */
+    public String getSanitizedContainerName() {
+        return (name != null ? name.replaceAll("[^a-zA-Z0-9]", "_") : "");
+    }
+    
+    /**
+     * Gera URL de health check para o cluster
+     * @param healthEndpoint Endpoint de health check (ex: "/health")
+     * @return URL completa do health check
+     */
+    public String getHealthUrl(String healthEndpoint) {
+        return "http://localhost:" + port + healthEndpoint;
+    }
+    
+    /**
+     * Retorna o ID do usuário dono do cluster
+     * @return ID do usuário
+     */
+    public Long getOwnerId() {
+        return user != null ? user.getId() : null;
+    }
+    
+    /**
+     * Verifica se o cluster pertence a um usuário
+     * @param userId ID do usuário a verificar
+     * @return true se o cluster pertence ao usuário
+     */
+    public boolean isOwnedBy(Long userId) {
+        return getOwnerId() != null && getOwnerId().equals(userId);
+    }
 }

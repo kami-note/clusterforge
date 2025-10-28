@@ -157,7 +157,7 @@ public class ClusterBackupService implements IClusterBackupService {
             }
             
             // Parar container se estiver rodando
-            String containerName = sanitizeContainerName(targetCluster.getName());
+            String containerName = targetCluster.getSanitizedContainerName();
             try {
                 dockerService.stopContainer(containerName);
                 Thread.sleep(3000);
@@ -537,7 +537,7 @@ public class ClusterBackupService implements IClusterBackupService {
             Path backupPath = Paths.get(backup.getBackupPath());
             
             // Parar container se estiver rodando
-            String containerName = sanitizeContainerName(targetCluster.getName());
+            String containerName = targetCluster.getSanitizedContainerName();
             try {
                 dockerService.stopContainer(containerName);
                 Thread.sleep(2000);
@@ -612,10 +612,6 @@ public class ClusterBackupService implements IClusterBackupService {
         } catch (Exception e) {
             return null;
         }
-    }
-    
-    private String sanitizeContainerName(String clusterName) {
-        return clusterName.replaceAll("[^a-zA-Z0-9]", "_");
     }
     
     // Agendamento automático de backups

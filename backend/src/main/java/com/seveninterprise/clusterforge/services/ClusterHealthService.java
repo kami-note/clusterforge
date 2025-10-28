@@ -316,7 +316,7 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private String checkContainerStatus(Cluster cluster) {
         try {
-            String containerName = sanitizeContainerName(cluster.getName());
+            String containerName = cluster.getSanitizedContainerName();
             String command = "docker inspect " + containerName + " --format='{{.State.Status}}'";
             String result = dockerService.runCommand(command);
             
@@ -332,7 +332,7 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private Long checkApplicationHealth(Cluster cluster) {
         try {
-            String healthUrl = "http://localhost:" + cluster.getPort() + healthEndpoint;
+            String healthUrl = cluster.getHealthUrl(healthEndpoint);
             URL url = new URL(healthUrl);
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
@@ -358,7 +358,7 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private ClusterHealthMetrics collectResourceMetrics(Cluster cluster) {
         try {
-            String containerName = sanitizeContainerName(cluster.getName());
+            String containerName = cluster.getSanitizedContainerName();
             
             // Coletar métricas do Docker Stats
             String statsCommand = "docker stats " + containerName + " --no-stream --format " +
@@ -590,7 +590,7 @@ public class ClusterHealthService implements IClusterHealthService {
     private boolean performRecovery(Cluster cluster) {
         try {
             // 1. Parar container se estiver rodando
-            String containerName = sanitizeContainerName(cluster.getName());
+            String containerName = cluster.getSanitizedContainerName();
             try {
                 dockerService.stopContainer(containerName);
                 Thread.sleep(2000); // Aguardar parada completa
@@ -618,10 +618,6 @@ public class ClusterHealthService implements IClusterHealthService {
             System.err.println("Erro durante recuperação: " + e.getMessage());
             return false;
         }
-    }
-    
-    private String sanitizeContainerName(String clusterName) {
-        return clusterName.replaceAll("[^a-zA-Z0-9]", "_");
     }
     
     private String extractStatusFromResult(String result) {

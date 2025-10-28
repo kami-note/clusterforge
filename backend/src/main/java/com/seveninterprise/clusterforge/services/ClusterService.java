@@ -135,7 +135,7 @@ public class ClusterService implements IClusterService {
             Cluster savedCluster = clusterRepository.save(cluster);
             
             // Modifica o arquivo docker-compose para usar a porta dinâmica, nome único e limites de recursos
-            updateDockerComposeConfig(clusterPath, port, clusterName, savedCluster);
+            updateDockerComposeConfig(clusterPath, savedCluster);
             
             // Instancia o container Docker
             boolean dockerSuccess = instantiateDockerContainer(clusterName, clusterPath);
@@ -295,7 +295,7 @@ public class ClusterService implements IClusterService {
         }
     }
     
-    private void updateDockerComposeConfig(String clusterPath, int port, String clusterName, Cluster cluster) {
+    private void updateDockerComposeConfig(String clusterPath, Cluster cluster) {
         try {
             String composePath = clusterPath + "/" + DOCKER_COMPOSE_FILE;
             String originalContent = new String(Files.readAllBytes(Paths.get(composePath)));
@@ -305,11 +305,11 @@ public class ClusterService implements IClusterService {
             // Substitui a porta no arquivo docker-compose
             updatedContent = updatedContent.replaceAll(
                 DEFAULT_PORT_MAPPING, 
-                port + ":80"
+                cluster.getPort() + ":80"
             );
             
-            // Gera um nome único para o container baseado no clusterName
-            String uniqueContainerName = generateUniqueContainerName(clusterName);
+            // Gera um nome único para o container usando o método do model
+            String uniqueContainerName = generateUniqueContainerName(cluster);
             
             // Substitui o container_name no arquivo docker-compose
             updatedContent = updatedContent.replaceAll(
@@ -331,7 +331,7 @@ public class ClusterService implements IClusterService {
      */
     private String addResourceLimitsToDockerCompose(String content, Cluster cluster) {
         // Converte memória de MB para formato Docker (com sufixo 'm')
-        String memoryLimit = cluster.getMemoryLimit() + "m";
+        String memoryLimit = cluster.getMemoryLimitForDocker();
         
         // Monta a seção de deploy resources (CPU e Memória via CGroups)
         String resourcesSection = String.format(
@@ -346,7 +346,7 @@ public class ClusterService implements IClusterService {
             cluster.getCpuLimit(),
             memoryLimit,
             cluster.getCpuLimit() * 0.5,  // Reserva 50% do limite
-            (cluster.getMemoryLimit() / 2) + "m"  // Reserva 50% da memória
+            cluster.getMemoryReservationForDocker()  // Reserva 50% da memória
         );
         
         // Adiciona variáveis de ambiente para os limites (usado pelo script init-limits.sh)
@@ -425,7 +425,6 @@ public class ClusterService implements IClusterService {
         if (content.contains("tmpfs:")) {
             content = content.replaceAll("(?s)    tmpfs:.*?(?=\\n    [a-z])", "");
         }
-        // Removido storage_opt - não é mais usado
         
         // Monta todas as seções na ordem correta
         String allSections = capsSection + tmpfsSection + storageOptsSection + environmentSection + resourcesSection;
@@ -440,10 +439,10 @@ public class ClusterService implements IClusterService {
         return content;
     }
     
-    private String generateUniqueContainerName(String clusterName) {
+    private String generateUniqueContainerName(Cluster cluster) {
         // Generate unique container name with timestamp to avoid conflicts
         String timestamp = String.valueOf(System.currentTimeMillis());
-        String cleanName = clusterName.replaceAll("[^a-zA-Z0-9]", "_");
+        String cleanName = cluster.getSanitizedContainerName();
         return DEFAULT_CONTAINER_NAME + "_" + cleanName + "_" + timestamp.substring(timestamp.length() - 6);
     }
     
@@ -527,7 +526,7 @@ public class ClusterService implements IClusterService {
     private ClusterListItemDto toClusterListItemDto(Cluster cluster, boolean includeOwner) {
         if (includeOwner) {
             ClusterListItemDto.OwnerInfoDto ownerInfo = new ClusterListItemDto.OwnerInfoDto(
-                cluster.getUser().getId()
+                cluster.getOwnerId()
             );
             return new ClusterListItemDto(
                 cluster.getId(),
@@ -558,7 +557,7 @@ public class ClusterService implements IClusterService {
             .orElseThrow(() -> new ClusterException("Cluster não encontrado com ID: " + clusterId));
         
         // Admin pode deletar qualquer cluster, usuário normal só os próprios
-        if (!isAdmin && !cluster.getUser().getId().equals(authenticatedUser.getId())) {
+        if (!isAdmin && !cluster.isOwnedBy(authenticatedUser.getId())) {
             throw new ClusterException("Não autorizado a deletar este cluster");
         }
         
@@ -670,9 +669,7 @@ public class ClusterService implements IClusterService {
             
             // Atualiza arquivo docker-compose.yml com novos limites
             updateDockerComposeConfig(
-                cluster.getRootPath(), 
-                cluster.getPort(), 
-                cluster.getName(), 
+                savedCluster.getRootPath(), 
                 savedCluster
             );
             
