@@ -60,10 +60,9 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
     
     @Override
     public Map<String, Object> getRealtimeMetrics(Long clusterId) {
-        // Retorna do cache ou busca mais recente se cache não existir
-        if (!realtimeMetrics.containsKey(clusterId)) {
-            updateRealtimeMetricsCache(clusterId);
-        }
+        // Sempre busca a métrica mais recente do banco para garantir dados atualizados
+        // O cache pode estar desatualizado se novas métricas foram salvas
+        updateRealtimeMetricsCache(clusterId);
         return realtimeMetrics.getOrDefault(clusterId, new HashMap<>());
     }
     
@@ -97,6 +96,15 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
             System.err.println("Erro ao atualizar cache de métricas para cluster " + clusterId + ": " + e.getMessage());
             realtimeMetrics.put(clusterId, new HashMap<>());
         }
+    }
+    
+    /**
+     * Invalida o cache de métricas em tempo real para um cluster
+     * Permite que novas métricas sejam buscadas na próxima consulta
+     */
+    public void invalidateRealtimeMetricsCache(Long clusterId) {
+        realtimeMetrics.remove(clusterId);
+        System.out.println("🔄 Cache de métricas invalidado para cluster " + clusterId);
     }
     
     /**

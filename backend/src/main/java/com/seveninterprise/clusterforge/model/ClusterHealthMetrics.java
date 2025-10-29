@@ -21,7 +21,7 @@ public class ClusterHealthMetrics {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @OneToOne
+    @ManyToOne
     @JoinColumn(name = "cluster_id", nullable = false)
     private Cluster cluster;
     

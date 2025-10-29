@@ -287,7 +287,9 @@ public class DockerService implements IDockerService {
         }
         
         String dockerCmd = getDockerCommand();
-        // Usa ID do container ao invés de nome
+        // Formato básico que funciona: CPU, Memória, Rede I/O, Block I/O
+        // Nota: Campos como MemCache, NetRxPackets, NetTxPackets não estão disponíveis no docker stats
+        // Formato: CPUPerc,MemUsage,NetIO,BlockIO (4 campos)
         String command = dockerCmd + " stats " + containerId + " --no-stream --format " +
             "'{{.CPUPerc}},{{.MemUsage}},{{.NetIO}},{{.BlockIO}}'";
         return runCommand(command);

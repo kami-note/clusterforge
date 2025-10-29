@@ -17,6 +17,9 @@ import jakarta.annotation.PostConstruct;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -88,8 +91,21 @@ public class ClusterHealthService implements IClusterHealthService {
             // 3. Coletar métricas de recursos
             ClusterHealthMetrics metrics = collectResourceMetrics(cluster);
             if (metrics != null) {
-                metricsRepository.save(metrics);
-                updateHealthStatusFromMetrics(healthStatus, metrics);
+                try {
+                    metricsRepository.save(metrics);
+                    System.out.println("✅ Métricas salvas com sucesso para cluster " + cluster.getId() + " (timestamp: " + metrics.getTimestamp() + ")");
+                    updateHealthStatusFromMetrics(healthStatus, metrics);
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    // Erro de constraint UNIQUE - pode ocorrer se migration não foi aplicada
+                    System.err.println("❌ ERRO CRÍTICO: Falha ao salvar métricas devido a constraint UNIQUE!");
+                    System.err.println("   Cluster ID: " + cluster.getId());
+                    System.err.println("   Erro: " + e.getMessage());
+                    System.err.println("   AÇÃO NECESSÁRIA: Execute a migration V1.3.0 ou remova manualmente a constraint UNIQUE no banco");
+                    // Não quebra o health check, apenas loga o erro
+                } catch (Exception e) {
+                    System.err.println("❌ Erro ao salvar métricas para cluster " + cluster.getId() + ": " + e.getMessage());
+                    e.printStackTrace();
+                }
             }
             
             // 4. Determinar status geral de saúde
@@ -191,7 +207,12 @@ public class ClusterHealthService implements IClusterHealthService {
             
         } catch (Exception e) {
             healthStatus.setCurrentState(ClusterHealthStatus.HealthState.FAILED);
-            healthStatus.setErrorMessage("Erro durante recuperação: " + e.getMessage());
+            // Limitar tamanho da mensagem de erro
+            String errorMsg = "Erro durante recuperação: " + e.getMessage();
+            if (errorMsg.length() > 500) {
+                errorMsg = errorMsg.substring(0, 497) + "...";
+            }
+            healthStatus.setErrorMessage(errorMsg);
             healthStatusRepository.save(healthStatus);
             
             recordHealthEvent(healthStatus, ClusterHealthStatus.HealthEventType.RECOVERY_FAILED);
@@ -415,8 +436,9 @@ public class ClusterHealthService implements IClusterHealthService {
             
             String[] parts = statsResult.split(",");
             
+            // Formato padrão: CPUPerc,MemUsage,NetIO,BlockIO (4 campos)
             if (parts.length < 4) {
-                System.err.println("⚠️ Formato inválido - esperado 4 partes separadas por vírgula, obtido: " + parts.length);
+                System.err.println("⚠️ Formato inválido - esperado 4 partes, obtido: " + parts.length);
                 System.err.println("   Dados: " + statsResult);
                 return null;
             }
@@ -471,7 +493,7 @@ public class ClusterHealthService implements IClusterHealthService {
             } else {
                 System.err.println("⚠️ Formato de memória inválido: '" + memStr + "'");
             }
-                
+            
             // ========== Network Metrics ==========
             String netStr = parts[2].trim();
             if (netStr.contains("/")) {
@@ -483,7 +505,7 @@ public class ClusterHealthService implements IClusterHealthService {
                     metrics.setNetworkRxBytes(networkRxBytes);
                     metrics.setNetworkTxBytes(networkTxBytes);
                     
-                    System.out.println("   ✅ Rede: RX=" + networkRxBytes + " bytes, TX=" + networkTxBytes + " bytes");
+                    System.out.println("   ✅ Rede I/O: RX=" + networkRxBytes + " bytes, TX=" + networkTxBytes + " bytes");
                     
                     // Armazenar limite de rede configurado no cluster
                     if (cluster.getNetworkLimit() != null) {
@@ -493,6 +515,9 @@ public class ClusterHealthService implements IClusterHealthService {
             } else {
                 System.err.println("⚠️ Formato de rede inválido: '" + netStr + "'");
             }
+            
+            // Coletar métricas adicionais do container via docker inspect
+            collectContainerMetrics(metrics, cluster);
             
             // ========== Disk I/O Metrics ==========
             String blockStr = parts[3].trim();
@@ -526,6 +551,76 @@ public class ClusterHealthService implements IClusterHealthService {
         }
         
         return null;
+    }
+    
+    /**
+     * Coleta métricas adicionais do container via docker inspect
+     * Coleta: restart count, uptime, exit code, status
+     */
+    private void collectContainerMetrics(ClusterHealthMetrics metrics, Cluster cluster) {
+        try {
+            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                ? cluster.getContainerId() 
+                : cluster.getSanitizedContainerName();
+            
+            if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                return;
+            }
+            
+            // Coletar restart count
+            String restartCountStr = dockerService.inspectContainer(containerIdentifier, "{{.RestartCount}}");
+            if (restartCountStr != null && !restartCountStr.isEmpty() && restartCountStr.contains("Process exited with code: 0")) {
+                String countStr = restartCountStr.split("Process exited")[0].trim();
+                try {
+                    Integer restartCount = Integer.parseInt(countStr);
+                    metrics.setContainerRestartCount(restartCount);
+                    System.out.println("   ✅ Container Restart Count: " + restartCount);
+                } catch (NumberFormatException e) {
+                    // Ignora
+                }
+            }
+            
+            // Coletar status do container
+            String statusStr = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
+            if (statusStr != null && !statusStr.isEmpty() && statusStr.contains("Process exited with code: 0")) {
+                String status = statusStr.split("Process exited")[0].trim();
+                metrics.setContainerStatus(status);
+                System.out.println("   ✅ Container Status: " + status);
+            }
+            
+            // Coletar exit code (se container não está rodando)
+            String exitCodeStr = dockerService.inspectContainer(containerIdentifier, "{{.State.ExitCode}}");
+            if (exitCodeStr != null && !exitCodeStr.isEmpty() && exitCodeStr.contains("Process exited with code: 0")) {
+                String codeStr = exitCodeStr.split("Process exited")[0].trim();
+                try {
+                    Integer exitCode = Integer.parseInt(codeStr);
+                    metrics.setContainerExitCode(exitCode);
+                } catch (NumberFormatException e) {
+                    // Ignora
+                }
+            }
+            
+            // Coletar started at e calcular uptime
+            String startedAtStr = dockerService.inspectContainer(containerIdentifier, "{{.State.StartedAt}}");
+            if (startedAtStr != null && !startedAtStr.isEmpty() && startedAtStr.contains("Process exited with code: 0")) {
+                String startedAt = startedAtStr.split("Process exited")[0].trim();
+                if (!startedAt.isEmpty() && !startedAt.equals("0001-01-01T00:00:00Z")) {
+                    try {
+                        // Parse ISO 8601 format
+                        ZonedDateTime started = ZonedDateTime.parse(startedAt);
+                        Duration uptime = Duration.between(started.toInstant(), Instant.now());
+                        long uptimeSeconds = uptime.getSeconds();
+                        metrics.setContainerUptimeSeconds(uptimeSeconds);
+                        System.out.println("   ✅ Container Uptime: " + uptimeSeconds + " segundos");
+                    } catch (Exception e) {
+                        // Ignora erro de parsing
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            System.err.println("⚠️ Erro ao coletar métricas adicionais do container: " + e.getMessage());
+        }
     }
     
     private Long parseMemoryValue(String value) {
@@ -710,7 +805,12 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private void handleHealthCheckError(ClusterHealthStatus healthStatus, Exception e) {
         healthStatus.setCurrentState(ClusterHealthStatus.HealthState.UNKNOWN);
-        healthStatus.setErrorMessage(e.getMessage());
+        // Limitar tamanho da mensagem de erro para evitar truncamento
+        String errorMsg = e.getMessage();
+        if (errorMsg != null && errorMsg.length() > 500) {
+            errorMsg = errorMsg.substring(0, 497) + "...";
+        }
+        healthStatus.setErrorMessage(errorMsg);
         healthStatus.setConsecutiveFailures(healthStatus.getConsecutiveFailures() + 1);
         healthStatus.setTotalFailures(healthStatus.getTotalFailures() + 1);
         healthStatus.setLastCheckTime(LocalDateTime.now());

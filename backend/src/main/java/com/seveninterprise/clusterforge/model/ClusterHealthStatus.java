@@ -93,7 +93,8 @@ public class ClusterHealthStatus {
     @Column(name = "application_response_time_ms")
     private Long applicationResponseTimeMs;
     
-    @Column(name = "error_message")
+    @Lob
+    @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
     
     @Column(name = "created_at")
