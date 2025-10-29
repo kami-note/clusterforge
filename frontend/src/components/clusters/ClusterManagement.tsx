@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import Skeleton from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -280,16 +281,41 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   // Exibir estado de carregamento claro para evitar mostrar dados inconsistentes
   if (loading) {
     return (
-      <div className="p-6 space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Clusters</CardTitle>
-            <CardDescription>Carregando dados dos clusters...</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm text-muted-foreground">Aguarde enquanto buscamos as informações na API.</div>
-          </CardContent>
-        </Card>
+      <div className="p-6 space-y-6">
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <Skeleton className="h-7 w-40" />
+            <div className="flex gap-2">
+              <Skeleton className="h-9 w-40" />
+              <Skeleton className="h-9 w-44" />
+              <Skeleton className="h-9 w-48" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Card key={i}>
+                <CardContent className="pt-6">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-3 w-full">
+                      <Skeleton className="h-5 w-3/5" />
+                      <Skeleton className="h-4 w-2/5" />
+                      <div className="grid grid-cols-3 gap-3 mt-2">
+                        <Skeleton className="h-3 w-full" />
+                        <Skeleton className="h-3 w-full" />
+                        <Skeleton className="h-3 w-full" />
+                      </div>
+                      <div className="flex gap-2 pt-3">
+                        <Skeleton className="h-8 w-20" />
+                        <Skeleton className="h-8 w-24" />
+                        <Skeleton className="h-8 w-20" />
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
