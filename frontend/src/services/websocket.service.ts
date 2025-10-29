@@ -13,6 +13,7 @@ import type { ClusterMetrics, ClusterStatsMessage } from '@/types';
 export type { ClusterMetrics, ClusterStatsMessage };
 
 type MetricsCallback = (metrics: Record<number, ClusterMetrics>) => void;
+// Removido: callback de estatísticas não é mais utilizado
 type StatsCallback = (stats: ClusterStatsMessage) => void;
 type ConnectionCallback = (connected: boolean) => void;
 
@@ -24,6 +25,7 @@ class WebSocketService {
   private reconnectDelay = WEBSOCKET_CONFIG.RECONNECT_DELAY;
   
   private metricsCallbacks: Set<MetricsCallback> = new Set();
+  // Removido: statsCallbacks não é mais utilizado
   private statsCallbacks: Set<StatsCallback> = new Set();
   private connectionCallbacks: Set<ConnectionCallback> = new Set();
   
@@ -175,24 +177,8 @@ class WebSocketService {
       }
     });
     
-    // Inscrever-se no tópico de estatísticas
-    this.client.subscribe('/topic/stats', (message: IMessage) => {
-      try {
-        const stats: ClusterStatsMessage = JSON.parse(message.body);
-        console.log('📈 Estatísticas recebidas via WebSocket:', {
-          timestamp: stats.timestamp,
-          totalClusters: Object.keys(stats.clusters || {}).length,
-          systemStats: stats.systemStats,
-          dados: stats,
-        });
-        this.notifyStatsCallbacks(stats);
-      } catch (error) {
-        console.error('❌ Erro ao processar mensagem de estatísticas:', error);
-        console.error('Mensagem raw:', message.body);
-      }
-    });
-    
-    console.log('✅ Inscrito nos tópicos WebSocket: /topic/metrics e /topic/stats');
+    // Tópico de estatísticas desativado – usamos somente métricas
+    console.log('✅ Inscrito no tópico WebSocket: /topic/metrics');
   }
   
   /**
@@ -220,15 +206,7 @@ class WebSocketService {
     };
   }
   
-  /**
-   * Registra callback para receber estatísticas
-   */
-  onStats(callback: StatsCallback): () => void {
-    this.statsCallbacks.add(callback);
-    return () => {
-      this.statsCallbacks.delete(callback);
-    };
-  }
+  // Removido: API onStats
   
   /**
    * Registra callback para mudanças de conexão
@@ -253,18 +231,7 @@ class WebSocketService {
     });
   }
   
-  /**
-   * Notifica todos os callbacks de estatísticas
-   */
-  private notifyStatsCallbacks(stats: ClusterStatsMessage): void {
-    this.statsCallbacks.forEach(callback => {
-      try {
-        callback(stats);
-      } catch (error) {
-        console.error('Erro ao executar callback de estatísticas:', error);
-      }
-    });
-  }
+  // Removido: notifyStatsCallbacks
   
   /**
    * Notifica todos os callbacks de conexão

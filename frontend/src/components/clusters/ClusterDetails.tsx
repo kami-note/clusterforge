@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   ArrowLeft,
   Play,
@@ -20,7 +20,6 @@ import {
   Cpu,
   MemoryStick,
   HardDrive,
-  Network,
   Server,
   ZoomIn,
   ZoomOut,
@@ -42,6 +41,7 @@ interface ResourceDataPoint {
   cpu: number;
   ram: number;
   disk: number;
+  // network removido da UI (mantido no tipo original apenas localmente se necessário)
   network: number;
 }
 
@@ -116,6 +116,135 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     setAllResourceData(initialData);
   }, [sanitizeValue]);
 
+  // Calcular domínios dinâmicos baseados nos dados reais
+  const calculateDynamicDomain = useCallback((
+    data: ResourceDataPoint[], 
+    keys: ('cpu' | 'ram' | 'disk' | 'network')[],
+    minPadding: number = 0.1,
+    maxPadding: number = 0.1,
+    maxLimit?: number // Limite máximo opcional (para percentuais, por exemplo)
+  ): [number, number] => {
+    if (data.length === 0) {
+      return maxLimit ? [0, maxLimit] : [0, 100];
+    }
+
+    // Encontrar min e max entre todas as chaves fornecidas
+    let min = Infinity;
+    let max = -Infinity;
+
+    data.forEach(point => {
+      keys.forEach(key => {
+        const value = point[key];
+        if (value !== null && value !== undefined && !isNaN(value)) {
+          min = Math.min(min, value);
+          max = Math.max(max, value);
+        }
+      });
+    });
+
+    // Se não encontrou valores válidos, retornar padrão
+    if (!isFinite(min) || !isFinite(max)) {
+      return maxLimit ? [0, maxLimit] : [0, 100];
+    }
+
+    // Se min e max são iguais, criar um range mínimo
+    if (min === max) {
+      // Para valores muito pequenos (< 1), usar padding absoluto
+      if (max < 1) {
+        const padding = Math.max(0.1, max * 0.3);
+        return [Math.max(0, min - padding), Math.min(maxLimit || Infinity, max + padding)];
+      }
+      // Para valores maiores, usar padding proporcional
+      const padding = Math.max(max * 0.1, 1);
+      return [
+        Math.max(0, min - padding), 
+        Math.min(maxLimit || Infinity, max + padding)
+      ];
+    }
+
+    // Calcular padding baseado na diferença
+    const range = max - min;
+    
+    // Para valores muito pequenos, usar padding absoluto
+    let paddingMin: number;
+    let paddingMax: number;
+    
+    if (max < 1) {
+      // Valores muito pequenos: padding baseado no valor máximo
+      paddingMin = Math.max(0.05, max * 0.15);
+      paddingMax = Math.max(0.1, max * 0.2);
+    } else if (range < 5) {
+      // Range pequeno: padding proporcional ao range
+      paddingMin = range * minPadding;
+      paddingMax = range * maxPadding;
+    } else {
+      // Range normal: padding proporcional ao range
+      paddingMin = range * minPadding;
+      paddingMax = range * maxPadding;
+    }
+
+    const finalMin = Math.max(0, min - paddingMin);
+    const finalMax = maxLimit 
+      ? Math.min(maxLimit, max + paddingMax)
+      : max + paddingMax;
+
+    // Se o range ficou muito pequeno após o cálculo, garantir um mínimo
+    if (finalMax - finalMin < 0.1 && max < 1) {
+      return [Math.max(0, finalMin - 0.1), finalMax + 0.1];
+    }
+
+    return [finalMin, finalMax];
+  }, []);
+
+  // Helper para converter oklch para hex (usando elemento temporário)
+  const oklchToHex = useCallback((oklch: string, fallback: string = '#8884d8'): string => {
+    if (typeof document === 'undefined') {
+      return fallback;
+    }
+    
+    try {
+      // Criar elemento temporário para obter cor computada
+      const tempElement = document.createElement('div');
+      tempElement.style.color = oklch;
+      tempElement.style.position = 'absolute';
+      tempElement.style.visibility = 'hidden';
+      tempElement.style.width = '1px';
+      tempElement.style.height = '1px';
+      document.body.appendChild(tempElement);
+      
+      const computedColor = window.getComputedStyle(tempElement).color;
+      document.body.removeChild(tempElement);
+      
+      // Converter rgb/rgba para hex
+      const rgb = computedColor.match(/\d+/g);
+      if (rgb && rgb.length >= 3) {
+        const r = parseInt(rgb[0]);
+        const g = parseInt(rgb[1]);
+        const b = parseInt(rgb[2]);
+        const hex = '#' + [r, g, b].map(x => {
+          const hex = x.toString(16);
+          return hex.length === 1 ? '0' + hex : hex;
+        }).join('');
+        return hex;
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Erro ao converter oklch para hex:', error);
+      }
+    }
+    
+    return fallback;
+  }, []);
+
+  // Obter cores do tema convertidas para hex
+  // Cores padrão visíveis (serão substituídas quando o tema for detectado)
+  const [chartColors, setChartColors] = useState({
+    chart1: '#ef4444', // vermelho (tema claro) ou azul (tema escuro)
+    chart2: '#3b82f6', // azul (tema claro) ou verde (tema escuro)
+    chart3: '#1e40af', // azul escuro (tema claro) ou amarelo (tema escuro)
+    chart4: '#fbbf24', // amarelo (tema claro) ou roxo (tema escuro)
+  });
+
   // Carregar dados iniciais (apenas cluster, sem métricas - métricas vêm do WebSocket)
   // Este efeito roda APENAS quando clusterId mudar, não quando realtimeMetrics mudar
   useEffect(() => {
@@ -132,57 +261,51 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           setCluster(clusterData);
           
           const clusterIdNum = parseInt(clusterId);
-          const wsMetrics = realtimeMetrics && !isNaN(clusterIdNum) ? realtimeMetrics[clusterIdNum] : null;
           
+          // SEMPRE usar o status da API como fonte primária inicial
+          // O status da API é mais confiável no momento do carregamento
           let initialStatus = clusterData.status;
           
-          // Usar WebSocket para status se disponível
-          if (wsMetrics && wsMetrics.healthState) {
-            const healthState = wsMetrics.healthState.toUpperCase();
-            if (healthState === 'FAILED' || healthState === 'UNKNOWN') {
-              initialStatus = 'stopped';
-            } else if (healthState === 'RECOVERING') {
-              initialStatus = 'restarting';
-            } else if (healthState === 'HEALTHY' || healthState === 'UNHEALTHY') {
-              initialStatus = 'running';
+          // Buscar health status da API para ter informação mais atualizada
+          try {
+            const health = await monitoringService.getClusterHealth(clusterIdNum);
+            if (!isCancelled && health) {
+              setHealthStatus(health);
+              
+              // Se o health status da API indica algo diferente, usar como referência
+              // mas priorizar o status da entidade do cluster (que vem de /clusters/{id})
+              // A API pode ter status diferente do health check
             }
-            
-            setHealthStatus({
-              clusterId: clusterIdNum,
-              status: healthState === 'HEALTHY' ? 'HEALTHY' : 
-                      healthState === 'UNHEALTHY' ? 'UNHEALTHY' : 'UNKNOWN'
-            });
-            
-            // Inicializar dados do gráfico apenas com WebSocket
-            if (connected && !isCancelled) {
-              const wsMetricsData: ClusterMetrics = {
-                cpuUsagePercent: wsMetrics.cpuUsagePercent,
-                memoryUsagePercent: wsMetrics.memoryUsagePercent,
-                diskUsagePercent: wsMetrics.diskUsagePercent,
-                containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
-                healthState: wsMetrics.healthState,
-                networkUsage: wsMetrics.networkRxBytes && wsMetrics.networkTxBytes 
-                  ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
-                  : undefined,
-                ...wsMetrics
-              };
-              setCurrentMetrics(wsMetricsData);
-              generateInitialChartData(wsMetricsData);
-            }
-          } else {
-            // Apenas buscar health status via REST se não houver WebSocket (sem métricas)
-            try {
-              const health = await monitoringService.getClusterHealth(clusterIdNum);
-              if (!isCancelled) {
-                setHealthStatus(health);
-              }
-            } catch (error) {
-              if (process.env.NODE_ENV === 'development') {
-                console.debug("Failed to fetch health status", error);
-              }
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.debug("Failed to fetch health status from API, using cluster status:", error);
             }
           }
           
+          // Verificar WebSocket apenas para métricas, não para sobrescrever status inicial
+          const wsMetrics = realtimeMetrics && !isNaN(clusterIdNum) ? realtimeMetrics[clusterIdNum] : null;
+          
+          // Se houver métricas do WebSocket, usar apenas para inicializar gráfico
+          if (wsMetrics && connected && !isCancelled) {
+            const wsMetricsData: ClusterMetrics = {
+              cpuUsagePercent: wsMetrics.cpuUsagePercent,
+              memoryUsagePercent: wsMetrics.memoryUsagePercent,
+              diskUsagePercent: wsMetrics.diskUsagePercent,
+              containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
+              healthState: wsMetrics.healthState,
+              networkUsage: wsMetrics.networkRxBytes && wsMetrics.networkTxBytes 
+                ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
+                : undefined,
+            };
+            setCurrentMetrics(wsMetricsData);
+            
+            // Inicializar gráfico apenas se ainda não houver dados
+            if (allResourceData.length === 0) {
+              generateInitialChartData(wsMetricsData);
+            }
+          }
+          
+          // Definir status baseado na API (fonte primária)
           if (!isCancelled) {
             setStatus(initialStatus);
           }
@@ -266,16 +389,31 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     // Só processar se WebSocket estiver conectado E houver métricas
     if (!wsMetrics || !connected) return;
     
+    // Debug: verificar apenas métricas essenciais recebidas do WebSocket
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📊 Métricas recebidas do WebSocket para cluster', clusterIdNum, {
+        cpuUsagePercent: wsMetrics.cpuUsagePercent,
+        memoryUsagePercent: wsMetrics.memoryUsagePercent,
+        diskUsagePercent: wsMetrics.diskUsagePercent,
+        networkMB: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
+          ? ((wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
+          : 'N/A'
+      });
+    }
+    
     const metrics: ClusterMetrics = {
-      cpuUsagePercent: wsMetrics.cpuUsagePercent,
-      memoryUsagePercent: wsMetrics.memoryUsagePercent,
-      diskUsagePercent: wsMetrics.diskUsagePercent,
+      cpuUsagePercent: wsMetrics.cpuUsagePercent ?? undefined,
+      memoryUsagePercent: wsMetrics.memoryUsagePercent ?? undefined,
+      // Converter null para undefined para que sanitizeValue funcione corretamente
+      diskUsagePercent: wsMetrics.diskUsagePercent !== null && wsMetrics.diskUsagePercent !== undefined 
+        ? wsMetrics.diskUsagePercent 
+        : undefined,
       containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
       healthState: wsMetrics.healthState,
-      networkUsage: wsMetrics.networkRxBytes && wsMetrics.networkTxBytes 
+      networkUsage: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
         ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
         : undefined,
-      ...wsMetrics
+      // Incluir apenas métricas essenciais, não todos os dados extras
     };
     
     // Atualizar métricas apenas se houver mudança significativa
@@ -291,19 +429,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       return metrics;
     });
     
-    // Atualizar status baseado em healthState (usando ref para evitar loop)
-    if (metrics.healthState) {
-      const healthState = metrics.healthState.toUpperCase();
-      const currentStatus = statusRef.current;
-      
-      if (healthState === 'FAILED' || healthState === 'UNKNOWN') {
-        if (currentStatus !== 'stopped') setStatus('stopped');
-      } else if (healthState === 'RECOVERING') {
-        if (currentStatus !== 'restarting') setStatus('restarting');
-      } else if (healthState === 'HEALTHY' || healthState === 'UNHEALTHY') {
-        if (currentStatus !== 'running') setStatus('running');
-      }
-    }
+    // Não usar WebSocket para alterar status; apenas a API controla estado.
     
     // Atualizar healthStatus apenas se mudou
     if (wsMetrics.healthState) {
@@ -320,15 +446,16 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       });
     }
     
-    // Atualizar gráfico apenas se realmente há novos dados válidos
+    // Atualizar gráfico se houver ao menos CPU ou RAM (essenciais)
+    // Mesmo se Disco ou Network forem null/undefined, ainda plotamos as métricas válidas
     const hasValidMetrics = metrics.cpuUsagePercent !== undefined || 
-                           metrics.memoryUsagePercent !== undefined || 
-                           metrics.diskUsagePercent !== undefined;
+                           metrics.memoryUsagePercent !== undefined;
     
     if (hasValidMetrics) {
       setAllResourceData(prev => {
         // Se não há dados ainda, criar array inicial
         if (prev.length === 0) {
+          const initialNetwork = metrics.networkUsage !== undefined ? Math.round(metrics.networkUsage) : 0;
           const initialData: ResourceDataPoint[] = Array.from({ length: 20 }, () => ({
             time: new Date().toLocaleTimeString('pt-BR', {
               hour: '2-digit',
@@ -338,7 +465,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             cpu: sanitizeValue(metrics.cpuUsagePercent),
             ram: sanitizeValue(metrics.memoryUsagePercent),
             disk: sanitizeValue(metrics.diskUsagePercent),
-            network: metrics.networkUsage ? Math.round(metrics.networkUsage) : 0
+            network: initialNetwork
           }));
           return initialData;
         }
@@ -348,14 +475,27 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         const newCpu = sanitizeValue(metrics.cpuUsagePercent);
         const newRam = sanitizeValue(metrics.memoryUsagePercent);
         const newDisk = sanitizeValue(metrics.diskUsagePercent);
-        const newNetwork = metrics.networkUsage ? Math.round(metrics.networkUsage) : 0;
+        const newNetwork = metrics.networkUsage !== undefined ? Math.round(metrics.networkUsage) : 0;
+        
+        // Debug: verificar valores que serão adicionados ao gráfico (apenas primeiros pontos)
+        if (process.env.NODE_ENV === 'development' && prev.length < 2) {
+          console.log('📈 Valores plotados no gráfico:', {
+            cpu: `${newCpu}%`,
+            ram: `${newRam}%`,
+            disk: metrics.diskUsagePercent !== undefined ? `${newDisk}%` : 'N/A (null)',
+            network: metrics.networkUsage !== undefined ? `${newNetwork} MB/s` : 'N/A'
+          });
+        }
         
         // Só adicionar se houver mudança significativa (evitar pontos duplicados)
-        if (lastPoint && 
-            Math.abs(lastPoint.cpu - newCpu) < 0.01 &&
-            Math.abs(lastPoint.ram - newRam) < 0.01 &&
-            Math.abs(lastPoint.disk - newDisk) < 0.01 &&
-            Math.abs(lastPoint.network - newNetwork) < 0.01) {
+        // Mas sempre adicionar se algum valor válido mudou (não apenas se todos mudaram)
+        const cpuChanged = !lastPoint || Math.abs(lastPoint.cpu - newCpu) >= 0.01;
+        const ramChanged = !lastPoint || Math.abs(lastPoint.ram - newRam) >= 0.01;
+        const diskChanged = !lastPoint || Math.abs(lastPoint.disk - newDisk) >= 0.01;
+        const networkChanged = !lastPoint || Math.abs(lastPoint.network - newNetwork) >= 0.01;
+        
+        // Se nenhum valor válido mudou, não adicionar novo ponto
+        if (lastPoint && !cpuChanged && !ramChanged && !diskChanged && !networkChanged) {
           return prev; // Dados muito similares, não adicionar novo ponto
         }
         
@@ -411,6 +551,86 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
     }
   }, [consoleOutput, isLogsPaused]);
+
+  // Obter cores do tema quando componente montar
+  useEffect(() => {
+    // Obter cores reais do CSS e converter para hex
+    const root = document.documentElement;
+    const isDark = root.classList.contains('dark');
+    
+    // Cores oklch baseadas no globals.css
+    const oklchColors = isDark 
+      ? {
+          chart1: 'oklch(0.488 0.243 264.376)', // azul escuro
+          chart2: 'oklch(0.696 0.17 162.48)',   // verde
+          chart3: 'oklch(0.769 0.188 70.08)',  // amarelo
+          chart4: 'oklch(0.627 0.265 303.9)', // roxo/rosa
+        }
+      : {
+          chart1: 'oklch(0.646 0.222 41.116)', // laranja/vermelho
+          chart2: 'oklch(0.6 0.118 184.704)',  // azul
+          chart3: 'oklch(0.398 0.07 227.392)', // azul escuro
+          chart4: 'oklch(0.828 0.189 84.429)', // amarelo/verde claro
+        };
+    
+    // Converter para hex com fallbacks específicos - cores mais contrastantes
+    const colors = {
+      chart1: oklchToHex(oklchColors.chart1, isDark ? '#6366f1' : '#ef4444'), // azul escuro ou vermelho
+      chart2: oklchToHex(oklchColors.chart2, isDark ? '#10b981' : '#3b82f6'), // verde ou azul
+      chart3: oklchToHex(oklchColors.chart3, isDark ? '#f59e0b' : '#eab308'), // amarelo mais brilhante
+      chart4: oklchToHex(oklchColors.chart4, isDark ? '#a855f7' : '#f97316'), // roxo ou laranja
+    };
+    
+    // Log para debug
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🎨 Cores do gráfico definidas:', colors);
+    }
+    
+    setChartColors(colors);
+  }, [oklchToHex]);
+
+  // Observar mudanças de tema
+  useEffect(() => {
+    const updateColors = () => {
+      const root = document.documentElement;
+      const isDark = root.classList.contains('dark');
+      
+      const oklchColors = isDark 
+        ? {
+            chart1: 'oklch(0.488 0.243 264.376)',
+            chart2: 'oklch(0.696 0.17 162.48)',
+            chart3: 'oklch(0.769 0.188 70.08)',
+            chart4: 'oklch(0.627 0.265 303.9)',
+          }
+        : {
+            chart1: 'oklch(0.646 0.222 41.116)',
+            chart2: 'oklch(0.6 0.118 184.704)',
+            chart3: 'oklch(0.398 0.07 227.392)',
+            chart4: 'oklch(0.828 0.189 84.429)',
+          };
+      
+      const colors = {
+        chart1: oklchToHex(oklchColors.chart1, isDark ? '#6366f1' : '#ef4444'),
+        chart2: oklchToHex(oklchColors.chart2, isDark ? '#10b981' : '#3b82f6'),
+        chart3: oklchToHex(oklchColors.chart3, isDark ? '#f59e0b' : '#1e40af'),
+        chart4: oklchToHex(oklchColors.chart4, isDark ? '#a855f7' : '#fbbf24'),
+      };
+      
+      setChartColors(colors);
+    };
+
+    const observer = new MutationObserver(() => {
+      // Pequeno delay para garantir que o CSS foi atualizado
+      setTimeout(updateColors, 10);
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+
+    return () => observer.disconnect();
+  }, [oklchToHex]);
 
   const handleAction = (action: 'start' | 'stop' | 'restart' | 'reinstall') => {
     const newStatus = action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting';
@@ -498,13 +718,18 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     cpu: sanitizeValue(currentMetrics.cpuUsagePercent),
     ram: sanitizeValue(currentMetrics.memoryUsagePercent),
     disk: sanitizeValue(currentMetrics.diskUsagePercent),
-    network: currentMetrics.networkUsage ? Math.round(currentMetrics.networkUsage) : 0
+    // network removido da UI
   } : (resourceData.length > 0 && resourceData[resourceData.length - 1] ? {
     cpu: sanitizeValue(resourceData[resourceData.length - 1].cpu),
     ram: sanitizeValue(resourceData[resourceData.length - 1].ram),
     disk: sanitizeValue(resourceData[resourceData.length - 1].disk),
-    network: resourceData[resourceData.length - 1].network
-  } : { cpu: 0, ram: 0, disk: 0, network: 0 });
+  } : { cpu: 0, ram: 0, disk: 0 });
+
+  // Calcular domínios para os eixos Y
+  // Para percentuais: limite máximo de 100%, mas permite range dinâmico para valores pequenos
+  const percentageDomain = calculateDynamicDomain(resourceData, ['cpu', 'ram', 'disk'], 0.1, 0.1, 100);
+  // Para rede: sem limite máximo, range totalmente dinâmico
+  // const networkDomain = calculateDynamicDomain(resourceData, ['network'], 0.1, 0.2); // removido
 
   return (
     <div className="p-6 space-y-6">
@@ -667,45 +892,100 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                   <div className="text-2xl">{Math.round(currentResourceUsage.disk)}%</div>
                   <div className="text-xs text-muted-foreground">Disco</div>
                 </div>
-                <div className="text-center p-3 bg-muted rounded-lg">
-                  <Network className="h-6 w-6 mx-auto mb-2 text-chart-4" />
-                  <div className="text-2xl">{Math.round(currentResourceUsage.network)}</div>
-                  <div className="text-xs text-muted-foreground">MB/s</div>
-                </div>
-
+                {/* Card de Network removido */}
               </div>
 
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={resourceData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line 
-                    type="monotone" 
-                    dataKey="cpu" 
-                    stroke="hsl(var(--chart-1))" 
-                    strokeWidth={2}
-                    name="CPU %"
-                    dot={false}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="ram" 
-                    stroke="hsl(var(--chart-2))" 
-                    strokeWidth={2}
-                    name="RAM %"
-                    dot={false}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="disk" 
-                    stroke="hsl(var(--chart-3))" 
-                    strokeWidth={2}
-                    name="Disco %"
-                    dot={false}
-                  />
-                </LineChart>
+              <ResponsiveContainer width="100%" height={400}>
+                {resourceData.length > 0 ? (
+                  <LineChart 
+                    data={resourceData}
+                    margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
+                    onMouseEnter={(e) => {
+                      // Debug: log dos dados quando hover
+                      if (process.env.NODE_ENV === 'development') {
+                        console.log('📊 Dados do gráfico:', resourceData.slice(-5), {
+                          totalPontos: resourceData.length,
+                          cores: chartColors
+                        });
+                      }
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                    <XAxis 
+                      dataKey="time" 
+                      tick={{ fontSize: 12 }}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis 
+                      yAxisId="left"
+                      domain={percentageDomain}
+                      tick={{ fontSize: 12 }}
+                      label={{ value: 'Uso (%)', angle: -90, position: 'insideLeft' }}
+                      allowDecimals={true}
+                    />
+                    {/* Eixo de rede removido */}
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'hsl(var(--background))', border: '1px solid hsl(var(--border))' }}
+                      labelStyle={{ color: 'hsl(var(--foreground))' }}
+                    />
+                    <Legend 
+                      wrapperStyle={{ paddingTop: '20px', paddingBottom: '10px' }}
+                      iconType="line"
+                      iconSize={16}
+                      formatter={(value) => <span style={{ color: 'hsl(var(--foreground))', fontSize: '14px' }}>{value}</span>}
+                      layout="horizontal"
+                      verticalAlign="bottom"
+                      align="center"
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="cpu" 
+                      stroke={chartColors.chart1}
+                      strokeWidth={3}
+                      name="CPU"
+                      dot={false}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      connectNulls={false}
+                      yAxisId="left"
+                      style={{ stroke: chartColors.chart1 }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="ram" 
+                      stroke={chartColors.chart2}
+                      strokeWidth={3}
+                      name="RAM"
+                      dot={false}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      connectNulls={false}
+                      yAxisId="left"
+                      style={{ stroke: chartColors.chart2 }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="disk" 
+                      stroke={chartColors.chart3}
+                      strokeWidth={3}
+                      name="Disco"
+                      dot={false}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      connectNulls={false}
+                      yAxisId="left"
+                      style={{ stroke: chartColors.chart3 }}
+                    />
+                    {/* Linha de network removida */}
+                  </LineChart>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    <p>Aguardando dados do WebSocket...</p>
+                  </div>
+                )}
               </ResponsiveContainer>
             </CardContent>
           </Card>

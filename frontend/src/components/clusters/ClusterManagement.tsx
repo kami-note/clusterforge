@@ -229,18 +229,8 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       const clusterId = parseInt(cluster.id.toString());
       const realtimeMetrics = isNaN(clusterId) ? undefined : metrics[clusterId];
       
-      // Determinar status baseado nas métricas de saúde
+      // Status SEMPRE baseado na API; WebSocket não altera status
       let status: 'active' | 'stopped' | 'reinstalling' = cluster.status === 'running' ? 'active' : cluster.status === 'stopped' ? 'stopped' : 'active';
-      if (realtimeMetrics) {
-        const healthState = realtimeMetrics.healthState?.toUpperCase();
-        if (healthState === 'FAILED' || healthState === 'UNKNOWN') {
-          status = 'stopped';
-        } else if (healthState === 'RECOVERING') {
-          status = 'reinstalling';
-        } else if (healthState === 'HEALTHY' || healthState === 'UNHEALTHY') {
-          status = 'active';
-        }
-      }
       
       // Usar métricas em tempo real se disponíveis, senão usar valores da API
       const cpuUsage = realtimeMetrics?.cpuUsagePercent || cluster.cpu || 0;
@@ -252,13 +242,11 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       const diskUsageMb = realtimeMetrics?.diskUsageMb || 0;
       const diskLimitMb = realtimeMetrics?.diskLimitMb || (cluster.storage ? cluster.storage * 1024 : 20480); // Default 20GB
       
-      // Verificar se há alertas baseado nas métricas
+      // Verificar se há alertas baseado nas métricas (sem usar healthState)
       const hasAlert = realtimeMetrics ? (
         (realtimeMetrics.cpuUsagePercent && realtimeMetrics.cpuUsagePercent > 90) ||
         (realtimeMetrics.memoryUsagePercent && realtimeMetrics.memoryUsagePercent > 90) ||
-        (realtimeMetrics.diskUsagePercent && realtimeMetrics.diskUsagePercent > 90) ||
-        realtimeMetrics.healthState === 'FAILED' ||
-        realtimeMetrics.healthState === 'UNHEALTHY'
+        (realtimeMetrics.diskUsagePercent && realtimeMetrics.diskUsagePercent > 90)
       ) : false;
       
       return {
@@ -288,6 +276,23 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       };
     });
   }, [apiClusters, metrics]);
+
+  // Exibir estado de carregamento claro para evitar mostrar dados inconsistentes
+  if (loading) {
+    return (
+      <div className="p-6 space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Clusters</CardTitle>
+            <CardDescription>Carregando dados dos clusters...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-sm text-muted-foreground">Aguarde enquanto buscamos as informações na API.</div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const handleCreateCluster = () => {
     if (onCreateCluster) {
@@ -428,7 +433,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           
           if (clusterDetails.status === 'RUNNING') {
             isRunning = true;
-            // Atualizar status localmente
+            // Recarregar da API para ter status atualizado
             await updateCluster(clusterId, { status: 'running' });
             toast.success('Cluster iniciado e verificado com sucesso', { id: `action-${clusterId}` });
           } else if (clusterDetails.status === 'ERROR') {
@@ -448,6 +453,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         try {
           const finalCheck = await clusterService.getCluster(clusterIdNum);
           if (finalCheck.status === 'RUNNING') {
+            // Recarregar da API para ter status atualizado
             await updateCluster(clusterId, { status: 'running' });
             toast.success('Cluster iniciado com sucesso', { id: `action-${clusterId}` });
             return;
@@ -509,7 +515,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           
           if (clusterDetails.status === 'STOPPED') {
             isStopped = true;
-            // Atualizar status localmente
+            // Recarregar da API para ter status atualizado
             await updateCluster(clusterId, { status: 'stopped' });
             toast.success('Cluster parado e verificado com sucesso', { id: `action-${clusterId}` });
           } else if (clusterDetails.status === 'ERROR') {
@@ -526,7 +532,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       
       if (!isStopped) {
         // Timeout - mesmo assim atualiza o status local
-        await updateCluster(clusterId, { status: 'stopped' });
+        // updateCluster já recarrega da API automaticamente
         toast.warning('Cluster parado, mas não foi possível confirmar o status. Verifique manualmente.', { 
           id: `action-${clusterId}`,
           duration: 8000
@@ -894,11 +900,11 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleAction(cluster.id, 'restart')}
-                          disabled={cluster.status === 'reinstalling' || isProcessing}
+                          disabled={isProcessing}
                           title="Reiniciar"
                           className="h-7 w-7 p-0"
                         >
-                          <RotateCw className={`h-3.5 w-3.5 ${(cluster.status === 'reinstalling' || isProcessing) ? 'animate-spin' : ''}`} />
+                          <RotateCw className={`h-3.5 w-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
                         </Button>
                         <Button
                           variant="ghost"

@@ -7,7 +7,6 @@ import { clusterService, ClusterListItem } from '@/services/cluster.service';
 
 export interface RealtimeMetrics {
   metrics: Record<number, ClusterMetrics>;
-  stats: ClusterStatsMessage | null;
   connected: boolean;
   error: Error | null;
   requestUpdate: () => void;
@@ -20,7 +19,7 @@ export interface RealtimeMetrics {
 export function useRealtimeMetrics(): RealtimeMetrics {
   const { user } = useAuth();
   const [metrics, setMetrics] = useState<Record<number, ClusterMetrics>>({});
-  const [stats, setStats] = useState<ClusterStatsMessage | null>(null);
+  // Removido: stats do WebSocket não são mais usados
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [userClusters, setUserClusters] = useState<ClusterListItem[]>([]);
@@ -70,44 +69,13 @@ export function useRealtimeMetrics(): RealtimeMetrics {
         const currentUser = userRef.current;
         const currentClusters = userClustersRef.current;
         if (currentUser) {
-          console.log('🎯 Filtrando métricas para usuário:', {
-            userType: currentUser.type,
-            userId: currentUser.id,
-            totalClustersRecebidos: Object.keys(newMetrics).length,
-            userClustersCount: currentClusters.length,
-          });
           const filteredMetrics = filterMetricsByUserRole(newMetrics, currentUser, currentClusters);
-          console.log('✨ Métricas filtradas:', {
-            quantidade: Object.keys(filteredMetrics).length,
-            clusterIds: Object.keys(filteredMetrics),
-            dados: filteredMetrics,
-          });
           setMetrics(filteredMetrics);
           setError(null);
         }
       };
       
-      // Callback para estatísticas (usa refs para sempre ter valores atualizados)
-      const handleStats = (newStats: ClusterStatsMessage) => {
-        const currentUser = userRef.current;
-        const currentClusters = userClustersRef.current;
-        if (currentUser) {
-          console.log('🎯 Filtrando estatísticas para usuário:', {
-            userType: currentUser.type,
-            userId: currentUser.id,
-            totalClustersRecebidos: Object.keys(newStats.clusters || {}).length,
-            systemStats: newStats.systemStats,
-          });
-          const filteredStats = filterStatsByUserRole(newStats, currentUser, currentClusters);
-          console.log('✨ Estatísticas filtradas:', {
-            quantidadeClusters: Object.keys(filteredStats.clusters || {}).length,
-            systemStats: filteredStats.systemStats,
-            dados: filteredStats,
-          });
-          setStats(filteredStats);
-          setError(null);
-        }
-      };
+      // Removido: callback de estatísticas
       
       // Callback para mudanças de conexão
       const handleConnectionChange = (isConnected: boolean) => {
@@ -121,7 +89,7 @@ export function useRealtimeMetrics(): RealtimeMetrics {
       
       // Registrar callbacks
       const unsubscribeMetrics = websocketService.onMetrics(handleMetrics);
-      const unsubscribeStats = websocketService.onStats(handleStats);
+      // Removido: assinatura de estatísticas
       const unsubscribeConnection = websocketService.onConnectionChange(handleConnectionChange);
       
       // Conectar (apenas uma vez)
@@ -132,7 +100,7 @@ export function useRealtimeMetrics(): RealtimeMetrics {
       // Cleanup apenas quando o componente for desmontado ou usuário mudar
       return () => {
         unsubscribeMetrics();
-        unsubscribeStats();
+        // Removido: unsubscribe de estatísticas
         unsubscribeConnection();
         websocketService.disconnect();
         isSubscribedRef.current = false;
@@ -212,7 +180,6 @@ export function useRealtimeMetrics(): RealtimeMetrics {
   
   return {
     metrics,
-    stats,
     connected,
     error,
     requestUpdate,

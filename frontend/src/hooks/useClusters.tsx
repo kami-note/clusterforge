@@ -68,74 +68,77 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Carregar clusters da API
-  useEffect(() => {
-    const loadClusters = async () => {
-      try {
-        setLoading(true);
-        const apiClusters = await clusterService.listClusters();
-        
-        // Converte os clusters da API para o formato esperado pelo frontend
-        const convertedClusters: Cluster[] = await Promise.all(
-          apiClusters.map(async (cluster) => {
-            // Para cada cluster, buscar detalhes completos
-            try {
-              const details = await clusterService.getCluster(cluster.id);
-              
-              return {
-                id: details.id.toString(),
-                name: details.name,
-                status: mapClusterStatus(details.status),
-                cpu: details.cpuLimit ? cpuCoresToPercent(details.cpuLimit) : 0,
-                memory: details.memoryLimit ? memoryMbToGb(details.memoryLimit) : 0,
-                storage: details.diskLimit || 0,
-                lastUpdate: details.createdAt || 'desconhecido',
-                owner: details.user?.username || 'Desconhecido',
-                serviceType: formatTemplateName(details.templateName) || details.rootPath || 'Custom',
-                service: null,
-                startupCommand: '',
-                port: details.port?.toString() || details.rootPath,
-              };
-            } catch (error) {
-              console.error(`Error loading cluster ${cluster.id}:`, error);
-              // Retorna dados básicos se falhar ao buscar detalhes
-              return {
-                id: cluster.id.toString(),
-                name: cluster.name,
-                status: mapClusterStatus(cluster.status),
-                cpu: cluster.cpuLimit ? cpuCoresToPercent(cluster.cpuLimit) : 0,
-                memory: cluster.memoryLimit ? memoryMbToGb(cluster.memoryLimit) : 0,
-                storage: cluster.diskLimit || 0,
-                lastUpdate: 'desconhecido',
-                owner: cluster.owner?.userId?.toString() || 'Desconhecido',
-                serviceType: cluster.rootPath || 'Custom',
-                service: null,
-                startupCommand: '',
-                port: cluster.port?.toString(),
-              };
-            }
-          })
-        );
-        
-        setClusters(convertedClusters);
-      } catch (error) {
-        console.error('Error loading clusters:', error);
-        // Fallback para dados mockados em caso de erro
-        setClusters(initialClusters);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    loadClusters();
+  // Função para carregar clusters da API
+  const loadClusters = useCallback(async () => {
+    try {
+      setLoading(true);
+      const apiClusters = await clusterService.listClusters();
+      
+      // Converte os clusters da API para o formato esperado pelo frontend
+      const convertedClusters: Cluster[] = await Promise.all(
+        apiClusters.map(async (cluster) => {
+          // Para cada cluster, buscar detalhes completos (inclui status atualizado)
+          try {
+            const details = await clusterService.getCluster(cluster.id);
+            
+            return {
+              id: details.id.toString(),
+              name: details.name,
+              status: mapClusterStatus(details.status), // Status sempre vem da API
+              cpu: details.cpuLimit ? cpuCoresToPercent(details.cpuLimit) : 0,
+              memory: details.memoryLimit ? memoryMbToGb(details.memoryLimit) : 0,
+              storage: details.diskLimit || 0,
+              lastUpdate: details.updatedAt || details.createdAt || 'desconhecido',
+              owner: details.user?.username || 'Desconhecido',
+              serviceType: formatTemplateName(details.templateName) || details.rootPath || 'Custom',
+              service: null,
+              startupCommand: '',
+              port: details.port?.toString() || details.rootPath,
+            };
+          } catch (error) {
+            console.error(`Error loading cluster ${cluster.id}:`, error);
+            // Retorna dados básicos se falhar ao buscar detalhes
+            return {
+              id: cluster.id.toString(),
+              name: cluster.name,
+              status: mapClusterStatus(cluster.status),
+              cpu: cluster.cpuLimit ? cpuCoresToPercent(cluster.cpuLimit) : 0,
+              memory: cluster.memoryLimit ? memoryMbToGb(cluster.memoryLimit) : 0,
+              storage: cluster.diskLimit || 0,
+              lastUpdate: 'desconhecido',
+              owner: cluster.owner?.userId?.toString() || 'Desconhecido',
+              serviceType: cluster.rootPath || 'Custom',
+              service: null,
+              startupCommand: '',
+              port: cluster.port?.toString(),
+            };
+          }
+        })
+      );
+      
+      setClusters(convertedClusters);
+    } catch (error) {
+      console.error('Error loading clusters:', error);
+      // Fallback para dados mockados em caso de erro
+      setClusters(initialClusters);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // Carregar clusters da API quando o componente montar
+  useEffect(() => {
+    loadClusters();
+  }, [loadClusters]);
+
+  // Removido polling periódico para evitar recarregamentos visíveis
 
   const addCluster = async (clusterData: ClusterData) => {
     try {
       setLoading(true);
       
       // Chama a API real para criar o cluster
-      const response = await clusterService.createCluster({
+      await clusterService.createCluster({
         templateName: clusterData.service?.id || 'webserver-php',
         baseName: clusterData.name,
         cpuLimit: clusterData.resources.cpu,
@@ -143,26 +146,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         diskLimit: clusterData.resources.disk,
       });
 
-      // Atualiza a lista de clusters
-      if (response.clusterId) {
-        const newCluster: Cluster = {
-          id: response.clusterId.toString(),
-          name: response.clusterName,
-          status: 'running',
-          cpu: clusterData.resources.cpu,
-          memory: clusterData.resources.ram,
-          storage: clusterData.resources.disk,
-          lastUpdate: 'agora',
-          owner: clusterData.owner || 'Cliente',
-          serviceType: clusterData.service?.name || 'Custom',
-          service: clusterData.service,
-          startupCommand: clusterData.startupCommand,
-          port: response.port.toString(),
-        };
-
-        const updatedClusters = [...clusters, newCluster];
-        setClusters(updatedClusters);
-      }
+      // Recarregar lista da API para ter dados atualizados (incluindo status)
+      await loadClusters();
     } catch (error) {
       console.error('Error adding cluster:', error);
       throw error;
@@ -216,9 +201,9 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         await clusterService.stopCluster(parseInt(id));
       }
 
-      // Atualiza o estado local
-      const updatedClusters = clusters.map(c => c.id === id ? { ...c, ...updates } : c);
-      setClusters(updatedClusters);
+      // Após ação na API, recarregar dados da API para ter status atualizado
+      // Isso garante que o status sempre vem da fonte primária (API)
+      await loadClusters();
     } catch (error) {
       console.error('Error updating cluster:', error);
       throw error;
@@ -234,9 +219,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       // Chama a API para deletar o cluster
       await clusterService.deleteCluster(parseInt(id));
       
-      // Remove o cluster da lista local
-      const updatedClusters = clusters.filter(c => c.id !== id);
-      setClusters(updatedClusters);
+      // Recarregar lista da API para garantir consistência
+      await loadClusters();
     } catch (error) {
       console.error('Error deleting cluster:', error);
       throw error;
