@@ -2,13 +2,8 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { authService } from '@/services/auth.service';
-
-interface User {
-  email: string;
-  type: 'client' | 'admin';
-  username?: string;
-  id?: number;
-}
+import { User } from '@/types';
+import { STORAGE_KEYS } from '@/constants';
 
 interface AuthContextType {
   user: User | null;
@@ -22,12 +17,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     // Check if user is stored in localStorage on initial load
-    const storedUser = localStorage.getItem('clusterforge_user');
+    const storedUser = localStorage.getItem(STORAGE_KEYS.USER);
     if (storedUser) {
       try {
         setUser(JSON.parse(storedUser));
@@ -43,24 +36,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
       
       // Chama a API real
-      const response = await authService.login(username, password);
+      await authService.login(username, password);
       
       // Obtém informações do usuário do token JWT
       const apiUser = await authService.getCurrentUser();
       
-      if (!apiUser) {
+      if (!apiUser || !apiUser.username) {
         throw new Error('Não foi possível obter informações do usuário');
       }
       
       const userData: User = {
-        email: apiUser.username,
+        email: apiUser.email || apiUser.username,
         type: apiUser.role === 'ADMIN' ? 'admin' : 'client',
         username: apiUser.username,
         id: apiUser.id,
       };
       
       setUser(userData);
-      localStorage.setItem('clusterforge_user', JSON.stringify(userData));
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(userData));
       
       return userData;
     } catch (error) {
@@ -75,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await authService.logout();
       setUser(null);
-      localStorage.removeItem('clusterforge_user');
+      localStorage.removeItem(STORAGE_KEYS.USER);
     } catch (error) {
       console.error('Logout error:', error);
       throw error;

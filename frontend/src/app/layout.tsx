@@ -3,8 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/hooks/useTheme";
-import { ClustersProvider } from "@/hooks/useClusters";
 import ClientLayout from "./ClientLayout";
+import { STORAGE_KEYS } from "@/constants";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,7 +37,7 @@ export default function RootLayout({
             __html: `
               (function() {
                 try {
-                  const theme = localStorage.getItem('clusterforge_theme');
+                  const theme = localStorage.getItem('${STORAGE_KEYS.THEME}');
                   if (theme === 'dark') {
                     document.documentElement.classList.add('dark');
                   } else if (!theme) {

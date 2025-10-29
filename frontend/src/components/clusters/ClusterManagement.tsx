@@ -17,7 +17,6 @@ import {
   AlertTriangle,
   Play,
   Square,
-  ExternalLink,
   Eye,
   Wifi,
   WifiOff,
@@ -344,17 +343,11 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const CompactMetric = ({ 
     label, 
     icon: Icon, 
-    used, 
-    limit, 
-    unit, 
     percentage, 
     realtime 
   }: { 
     label: string; 
     icon: React.ComponentType<{ className?: string }>; 
-    used: number; 
-    limit: number; 
-    unit: string; 
     percentage: number;
     realtime?: boolean;
   }) => {
@@ -443,7 +436,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           }
           
           attempts++;
-        } catch (pollError: any) {
+        } catch (pollError: unknown) {
           // Se erro ao buscar status, continua tentando (pode ser temporário)
           console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
           attempts++;
@@ -468,9 +461,10 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         });
       }
       
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       console.error('Erro ao iniciar cluster:', error);
-      toast.error('Erro ao iniciar cluster: ' + (error.message || 'Erro desconhecido'), { id: `action-${clusterId}` });
+      toast.error('Erro ao iniciar cluster: ' + errorMessage, { id: `action-${clusterId}` });
       throw error;
     } finally {
       // Remover do estado de processamento
@@ -523,7 +517,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           }
           
           attempts++;
-        } catch (pollError: any) {
+        } catch (pollError: unknown) {
           // Se erro ao buscar status, continua tentando (pode ser temporário)
           console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
           attempts++;
@@ -539,9 +533,10 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         });
       }
       
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       console.error('Erro ao parar cluster:', error);
-      toast.error('Erro ao parar cluster: ' + (error.message || 'Erro desconhecido'), { id: `action-${clusterId}` });
+      toast.error('Erro ao parar cluster: ' + errorMessage, { id: `action-${clusterId}` });
       throw error;
     } finally {
       // Remover do estado de processamento
@@ -555,7 +550,6 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
 
   const handleAction = async (clusterId: string, action: 'edit' | 'restart' | 'delete' | 'start' | 'stop') => {
     try {
-      const clusterIdNum = parseInt(clusterId);
       
       switch (action) {
         case 'start': {
@@ -580,8 +574,9 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             await startClusterWithVerification(clusterId);
             
             toast.success('Cluster reiniciado com sucesso', { id: `action-${clusterId}` });
-          } catch (error: any) {
-            toast.error('Erro ao reiniciar cluster: ' + (error.message || 'Erro desconhecido'), { id: `action-${clusterId}` });
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+            toast.error('Erro ao reiniciar cluster: ' + errorMessage, { id: `action-${clusterId}` });
             // Garantir que remove do processamento se houver erro
             setProcessingClusters(prev => {
               const next = new Set(prev);
@@ -599,9 +594,10 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         default:
           break;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro ao executar ação';
       console.error('Error performing action:', error);
-      toast.error(error.message || 'Erro ao executar ação', { id: `action-${clusterId}` });
+      toast.error(errorMessage, { id: `action-${clusterId}` });
     }
   };
 
@@ -771,9 +767,9 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
 
               const isProcessing = processingClusters.has(cluster.id);
               // Determinar tipo de processamento baseado no status atual
-              const isProcessingStopping = isProcessing && (cluster.status === 'active' || cluster.status === 'running');
+              const isProcessingStopping = isProcessing && cluster.status === 'active';
               const isProcessingStarting = isProcessing && cluster.status === 'stopped';
-              // Se está processando mas não é stopped nem active/running, provavelmente é restart
+              // Se está processando mas não é stopped nem active, provavelmente é restart
               const isProcessingRestarting = isProcessing && !isProcessingStopping && !isProcessingStarting;
 
               return (
@@ -813,7 +809,9 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                           <div className="flex items-center gap-2 mb-0.5">
                             <h3 className="text-sm font-semibold truncate">{cluster.name}</h3>
                             {cluster.hasAlert && (
-                              <AlertTriangle className="h-3.5 w-3.5 text-red-500 dark:text-red-400 flex-shrink-0" title="Cluster com alertas" />
+                              <span className="inline-flex" title="Cluster com alertas">
+                                <AlertTriangle className="h-3.5 w-3.5 text-red-500 dark:text-red-400 flex-shrink-0" />
+                              </span>
                             )}
                             {cluster.realtimeMetrics && connected && (
                               <div className="h-1.5 w-1.5 bg-green-500 dark:bg-green-400 rounded-full animate-pulse flex-shrink-0" title="Métricas em tempo real" />
@@ -836,27 +834,18 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                         <CompactMetric
                           label="CPU"
                           icon={Cpu}
-                          used={cluster.resources.cpu.used}
-                          limit={cluster.resources.cpu.limit}
-                          unit={cluster.realtimeMetrics?.cpuLimitCores ? 'cores' : '%'}
                           percentage={cpuPercentage}
                           realtime={!!(cluster.realtimeMetrics && connected)}
                         />
                         <CompactMetric
                           label="RAM"
                           icon={MemoryStick}
-                          used={cluster.resources.ram.used}
-                          limit={cluster.resources.ram.limit}
-                          unit="GB"
                           percentage={ramPercentage}
                           realtime={!!(cluster.realtimeMetrics && connected)}
                         />
                         <CompactMetric
                           label="Disk"
                           icon={HardDrive}
-                          used={cluster.resources.disk.used}
-                          limit={cluster.resources.disk.limit}
-                          unit="GB"
                           percentage={diskPercentage}
                           realtime={!!(cluster.realtimeMetrics && connected)}
                         />

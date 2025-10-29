@@ -3,63 +3,14 @@
  */
 
 import { Client, IMessage } from '@stomp/stompjs';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - sockjs-client não possui tipos TypeScript
 import SockJS from 'sockjs-client';
 import { config } from '@/lib/config';
+import { STORAGE_KEYS, WEBSOCKET_CONFIG } from '@/constants';
+import type { ClusterMetrics, ClusterStatsMessage } from '@/types';
 
-export interface ClusterMetrics {
-  clusterId: number;
-  clusterName: string;
-  timestamp: string;
-  
-  // CPU Metrics
-  cpuUsagePercent?: number;
-  cpuLimitCores?: number;
-  
-  // Memory Metrics
-  memoryUsageMb?: number;
-  memoryLimitMb?: number;
-  memoryUsagePercent?: number;
-  
-  // Disk Metrics
-  diskUsageMb?: number;
-  diskLimitMb?: number;
-  diskUsagePercent?: number;
-  diskReadBytes?: number;
-  diskWriteBytes?: number;
-  
-  // Network Metrics
-  networkRxBytes?: number;
-  networkTxBytes?: number;
-  networkLimitMbps?: number;
-  
-  // Application Metrics
-  applicationResponseTimeMs?: number;
-  applicationStatusCode?: number;
-  
-  // Container Metrics
-  containerRestartCount?: number;
-  containerUptimeSeconds?: number;
-  containerStatus?: string;
-  
-  // Health Status
-  healthState?: string;
-  applicationResponseTime?: number;
-  errorMessage?: string;
-}
-
-export interface ClusterStatsMessage {
-  timestamp: number;
-  clusters: Record<number, ClusterMetrics>;
-  systemStats?: {
-    totalClusters: number;
-    healthyClusters: number;
-    unhealthyClusters: number;
-    failedClusters: number;
-    averageCpuUsage: number;
-    averageMemoryUsage: number;
-    averageResponseTime: number;
-  };
-}
+export type { ClusterMetrics, ClusterStatsMessage };
 
 type MetricsCallback = (metrics: Record<number, ClusterMetrics>) => void;
 type StatsCallback = (stats: ClusterStatsMessage) => void;
@@ -69,8 +20,8 @@ class WebSocketService {
   private client: Client | null = null;
   private isConnected = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 3000;
+  private maxReconnectAttempts = WEBSOCKET_CONFIG.MAX_RECONNECT_ATTEMPTS;
+  private reconnectDelay = WEBSOCKET_CONFIG.RECONNECT_DELAY;
   
   private metricsCallbacks: Set<MetricsCallback> = new Set();
   private statsCallbacks: Set<StatsCallback> = new Set();
@@ -106,11 +57,13 @@ class WebSocketService {
     
     this.client = new Client({
       webSocketFactory: () => {
+        // SockJS não tem tipos TypeScript, então precisamos fazer cast
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return new SockJS(`${protocol}${wsUrl}/ws/metrics`) as any;
       },
       reconnectDelay: this.reconnectDelay,
-      heartbeatIncoming: 4000,
-      heartbeatOutgoing: 4000,
+      heartbeatIncoming: WEBSOCKET_CONFIG.HEARTBEAT_INTERVAL,
+      heartbeatOutgoing: WEBSOCKET_CONFIG.HEARTBEAT_INTERVAL,
       connectHeaders: {
         Authorization: `Bearer ${token}`,
       },
@@ -132,7 +85,7 @@ class WebSocketService {
         this.isConnected = false;
         this.notifyConnectionCallbacks(false);
       },
-      onStompError: (frame) => {
+      onStompError: (frame: { command?: string; headers?: Record<string, string>; body?: string }) => {
         const errorMessage = frame.headers?.['message'] || frame.body || 'Erro desconhecido no STOMP';
         console.error('Erro STOMP:', {
           command: frame.command,
@@ -150,18 +103,21 @@ class WebSocketService {
         
         this.handleReconnect();
       },
-      onWebSocketError: (event) => {
+      onWebSocketError: (event: Event | unknown) => {
         // Tentar extrair informações do evento
-        const errorInfo: any = {
-          type: event?.type || 'unknown',
-          target: event?.target?.readyState || 'unknown',
+        const errorInfo: Record<string, unknown> = {
+          type: (event && typeof event === 'object' && 'type' in event) ? (event as Event).type : 'unknown',
+          target: (event && typeof event === 'object' && 'target' in event && event.target && typeof event.target === 'object' && 'readyState' in event.target) 
+            ? (event.target as { readyState: unknown }).readyState 
+            : 'unknown',
         };
         
         // Adicionar informações adicionais se disponíveis
         if (event && typeof event === 'object') {
           Object.keys(event).forEach(key => {
             if (!['type', 'target'].includes(key)) {
-              errorInfo[key] = (event as any)[key];
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              errorInfo[key] = (event as Record<string, any>)[key];
             }
           });
         }
@@ -348,7 +304,7 @@ class WebSocketService {
    */
   private getToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(config.auth.tokenKey);
+    return localStorage.getItem(STORAGE_KEYS.TOKEN);
   }
   
   /**

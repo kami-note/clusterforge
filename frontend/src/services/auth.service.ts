@@ -4,27 +4,8 @@
  */
 
 import { httpClient } from '@/lib/api-client';
-
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
-export interface RegisterRequest {
-  username: string;
-  password: string;
-}
-
-export interface AuthResponse {
-  token: string;
-}
-
-export interface User {
-  id: number;
-  username: string;
-  role: 'ADMIN' | 'USER';
-  email?: string;
-}
+import type { AuthResponse, User } from '@/types';
+import { STORAGE_KEYS } from '@/constants';
 
 class AuthService {
   /**
@@ -63,7 +44,7 @@ class AuthService {
    * Verifica se o usuário está autenticado
    */
   isAuthenticated(): boolean {
-    return typeof window !== 'undefined' && !!localStorage.getItem('clusterforge_token');
+    return typeof window !== 'undefined' && !!localStorage.getItem(STORAGE_KEYS.TOKEN);
   }
 
   /**
@@ -80,8 +61,10 @@ class AuthService {
       const decoded = JSON.parse(atob(payload));
 
       return {
-        id: decoded.sub ? 1 : 0, // Usamos sub como identificador
-        username: decoded.sub,
+        id: decoded.sub ? parseInt(decoded.sub) || 0 : 0,
+        username: decoded.sub || '',
+        email: decoded.sub || '',
+        type: decoded.role === 'ADMIN' ? 'admin' : 'client',
         role: decoded.role || 'USER',
       };
     } catch (error) {
@@ -95,7 +78,7 @@ class AuthService {
    */
   private getToken(): string | null {
     return typeof window !== 'undefined' 
-      ? localStorage.getItem('clusterforge_token') 
+      ? localStorage.getItem(STORAGE_KEYS.TOKEN) 
       : null;
   }
 }

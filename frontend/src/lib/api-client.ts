@@ -27,13 +27,24 @@ export class HttpClient {
   ): Promise<T> {
     const token = this.getToken();
     
+    const method = options.method || 'GET';
+    const fullUrl = `${this.baseUrl}${endpoint}`;
+    
+    // Log da requisição para identificar rotas sendo spamadas
+    console.log(`[API Request] ${method} ${fullUrl}`, {
+      endpoint,
+      method,
+      timestamp: new Date().toISOString(),
+      hasToken: !!token,
+    });
+    
     const headers = new Headers({
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     });
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    const response = await fetch(fullUrl, {
       ...options,
       headers,
       signal: AbortSignal.timeout(config.api.timeout),

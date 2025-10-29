@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -35,7 +34,7 @@ import {
   Rocket
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { templateService, type Template } from '@/services/template.service';
+import { templateService } from '@/services/template.service';
 import { clusterService, type CreateClusterRequest } from '@/services/cluster.service';
 
 // Types
@@ -84,7 +83,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
 
-  // Mapeamento de ícones aleatórios para templates
+  // Mapeamento de ícones aleatórios para templates (constantes - não mudam)
   const iconMap: { [key: string]: React.ComponentType<{ className?: string }> } = {
     'test-alpine': Package,
     'webserver-php': Code,
@@ -103,31 +102,11 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     'default': Cloud
   };
 
-  // Array de ícones para distribuição aleatória
+  // Array de ícones para distribuição aleatória (constante - não muda)
   const availableIcons = [
     Gamepad2, FileText, Zap, Globe, Database, CircuitBoard,
     Package, Code, Cloud, Box, Layers, Rocket, Server, Cpu
   ];
-
-  // Função para obter ícone do template
-  const getIconForTemplate = (templateName: string): React.ComponentType<{ className?: string }> => {
-    const lowerName = templateName.toLowerCase();
-    
-    // Busca ícone pelo nome do template
-    for (const [key, icon] of Object.entries(iconMap)) {
-      if (lowerName.includes(key)) {
-        return icon;
-      }
-    }
-    
-    // Se não encontrar, usa hash para escolher um ícone aleatório
-    let hash = 0;
-    for (let i = 0; i < templateName.length; i++) {
-      hash = ((hash << 5) - hash) + templateName.charCodeAt(i);
-      hash = hash & hash;
-    }
-    return availableIcons[Math.abs(hash) % availableIcons.length];
-  };
 
   // Função para obter recursos padrão baseados no tipo de template
   // CPU: em porcentagem (5-100%) para o slider, será convertido para cores (÷100) ao enviar
@@ -160,6 +139,29 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     // Recursos padrão para templates desconhecidos
     return { cpu: 25, ram: 2, disk: 10 }; // 25% CPU
   };
+
+  // Função para obter ícone do template
+  // iconMap e availableIcons são constantes e não mudam, então não precisam estar nas dependências
+  const getIconForTemplate = useCallback((templateName: string): React.ComponentType<{ className?: string }> => {
+    const lowerName = templateName.toLowerCase();
+    
+    // Busca ícone pelo nome do template
+    for (const [key, icon] of Object.entries(iconMap)) {
+      if (lowerName.includes(key)) {
+        return icon;
+      }
+    }
+    
+    // Se não encontrar, usa hash para escolher um ícone aleatório
+    let hash = 0;
+    for (let i = 0; i < templateName.length; i++) {
+      hash = ((hash << 5) - hash) + templateName.charCodeAt(i);
+      hash = hash & hash;
+    }
+    return availableIcons[Math.abs(hash) % availableIcons.length];
+    // iconMap e availableIcons são constantes locais, não precisam estar nas dependências
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Carregar templates do backend
   useEffect(() => {
@@ -220,7 +222,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     };
     
     loadTemplates();
-  }, []);
+  }, [getIconForTemplate]);
 
   const handleServiceChange = (serviceId: string) => {
     const service = serviceTemplates.find(s => s.id === serviceId);
@@ -331,9 +333,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       } else {
         toast.error(response.message || 'Erro ao criar cluster');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating cluster:', error);
-      const errorMessage = error.message || 'Erro ao criar cluster. Tente novamente.';
+      const errorMessage = error instanceof Error ? error.message : 'Erro ao criar cluster. Tente novamente.';
       toast.error(errorMessage);
     } finally {
       setLoading(false);

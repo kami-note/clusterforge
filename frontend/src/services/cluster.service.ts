@@ -3,29 +3,22 @@
  */
 
 import { httpClient } from '@/lib/api-client';
+import type {
+  CreateClusterRequest,
+  CreateClusterResponse,
+  ClusterListItem,
+  ClusterDetailsResponse,
+} from '@/types';
 
-export interface CreateClusterRequest {
-  templateName: string;
-  baseName?: string;
-  cpuLimit?: number;
-  memoryLimit?: number;
-  diskLimit?: number;
-  networkLimit?: number;
-}
+// Re-exportar tipos para compatibilidade
+export type {
+  CreateClusterRequest,
+  CreateClusterResponse,
+  ClusterListItem,
+};
 
-export interface CreateClusterResponse {
-  clusterId: number | null;
-  clusterName: string;
-  port: number;
-  status: string;
-  message: string;
-  ownerCredentials?: {
-    username: string;
-    password: string;
-  };
-}
-
-// Alias para compatibilidade com o código antigo
+// Alias para compatibilidade com código existente
+export type ClusterDetails = ClusterDetailsResponse;
 export interface UserCredentials {
   username: string;
   password: string;
@@ -36,41 +29,6 @@ export interface UpdateClusterLimitsRequest {
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;
-}
-
-export interface ClusterListItem {
-  id: number;
-  name: string;
-  status?: string;
-  port?: number;
-  rootPath?: string;
-  userId?: number;
-  owner?: {
-    userId: number;
-  };
-  cpuLimit?: number;
-  memoryLimit?: number;
-  diskLimit?: number;
-}
-
-export interface ClusterDetails {
-  id: number;
-  name: string;
-  status?: string;
-  port?: number;
-  rootPath?: string;
-  userId?: number;
-  user?: {
-    id: number;
-    username: string;
-    role: string;
-  };
-  cpuLimit?: number;
-  memoryLimit?: number;
-  diskLimit?: number;
-  networkLimit?: number;
-  createdAt?: string;
-  updatedAt?: string;
 }
 
 class ClusterService {
@@ -86,15 +44,15 @@ class ClusterService {
   /**
    * Obtém detalhes de um cluster específico
    */
-  async getCluster(clusterId: number): Promise<ClusterDetails> {
-    return httpClient.get<ClusterDetails>(`/clusters/${clusterId}`);
+  async getCluster(clusterId: number): Promise<ClusterDetailsResponse> {
+    return httpClient.get<ClusterDetailsResponse>(`/clusters/${clusterId}`);
   }
 
   /**
    * Obtém clusters de um usuário específico
    */
-  async getUserClusters(userId: number): Promise<ClusterDetails[]> {
-    return httpClient.get<ClusterDetails[]>(`/clusters/user/${userId}`);
+  async getUserClusters(userId: number): Promise<ClusterDetailsResponse[]> {
+    return httpClient.get<ClusterDetailsResponse[]>(`/clusters/user/${userId}`);
   }
 
   /**

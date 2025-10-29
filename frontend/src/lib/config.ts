@@ -2,13 +2,16 @@
  * Configurações da aplicação
  */
 
+import { STORAGE_KEYS } from '@/constants';
+import { TIMEOUTS } from '@/constants';
+
 export const config = {
   api: {
     baseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api',
-    timeout: 30000, // 30 segundos
+    timeout: TIMEOUTS.API_REQUEST,
   },
   auth: {
-    tokenKey: 'clusterforge_token',
-    userKey: 'clusterforge_user',
+    tokenKey: STORAGE_KEYS.TOKEN,
+    userKey: STORAGE_KEYS.USER,
   },
 };

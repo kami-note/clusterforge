@@ -15,8 +15,10 @@ interface UsageData {
   value: number;
 }
 
-const performClusterAction = async (clusterId: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const performClusterAction = async (_clusterId: string, _action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
   // In a real app, this would be an API call
+  // Parâmetros são necessários para compatibilidade com chamadas, mas não são usados nesta implementação mock
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve(true);

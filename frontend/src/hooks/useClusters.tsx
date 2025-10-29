@@ -1,23 +1,11 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { ClusterData, ServiceTemplate } from '@/components/clusters/ClusterCreation';
-import { clusterService, ClusterDetails, ClusterListItem } from '@/services/cluster.service';
-
-export interface Cluster {
-  id: string;
-  name: string;
-  status: 'running' | 'stopped' | 'restarting' | 'error';
-  cpu: number;
-  memory: number;
-  storage: number;
-  lastUpdate: string;
-  owner: string;
-  serviceType: string;
-  service: ServiceTemplate | null;
-  startupCommand: string;
-  port?: string;
-}
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { ClusterData } from '@/types';
+import { clusterService } from '@/services/cluster.service';
+import { Cluster } from '@/types';
+import { mapClusterStatus, formatTemplateName } from '@/utils/cluster.utils';
+import { memoryMbToGb, cpuCoresToPercent } from '@/utils/cluster.utils';
 
 interface ClustersContextType {
   clusters: Cluster[];
@@ -75,20 +63,6 @@ const initialClusters: Cluster[] = [
     }
 ];
 
-// Função auxiliar para mapear status da API para o formato do frontend
-const mapStatus = (apiStatus: string): 'running' | 'stopped' | 'restarting' | 'error' => {
-  const statusMap: Record<string, 'running' | 'stopped' | 'restarting' | 'error'> = {
-    'CREATED': 'running',
-    'STARTING': 'restarting',
-    'RUNNING': 'running',
-    'STOPPING': 'restarting',
-    'STOPPED': 'stopped',
-    'FAILED': 'error',
-    'RESTARTING': 'restarting',
-  };
-  
-  return statusMap[apiStatus] || 'error';
-};
 
 export function ClustersProvider({ children }: { children: ReactNode }) {
   const [clusters, setClusters] = useState<Cluster[]>([]);
@@ -111,13 +85,13 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               return {
                 id: details.id.toString(),
                 name: details.name,
-                status: details.status ? mapStatus(details.status) : 'stopped',
-                cpu: details.cpuLimit ? Math.round(details.cpuLimit * 100) : 0, // CPU em percentual
-                memory: details.memoryLimit ? Math.round(details.memoryLimit / 1024) : 0, // MB para GB
+                status: mapClusterStatus(details.status),
+                cpu: details.cpuLimit ? cpuCoresToPercent(details.cpuLimit) : 0,
+                memory: details.memoryLimit ? memoryMbToGb(details.memoryLimit) : 0,
                 storage: details.diskLimit || 0,
                 lastUpdate: details.createdAt || 'desconhecido',
                 owner: details.user?.username || 'Desconhecido',
-                serviceType: details.rootPath || 'Custom',
+                serviceType: formatTemplateName(details.templateName) || details.rootPath || 'Custom',
                 service: null,
                 startupCommand: '',
                 port: details.port?.toString() || details.rootPath,
@@ -128,9 +102,9 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               return {
                 id: cluster.id.toString(),
                 name: cluster.name,
-                status: cluster.status ? mapStatus(cluster.status) : 'stopped',
-                cpu: cluster.cpuLimit ? Math.round(cluster.cpuLimit * 100) : 0,
-                memory: cluster.memoryLimit ? Math.round(cluster.memoryLimit / 1024) : 0,
+                status: mapClusterStatus(cluster.status),
+                cpu: cluster.cpuLimit ? cpuCoresToPercent(cluster.cpuLimit) : 0,
+                memory: cluster.memoryLimit ? memoryMbToGb(cluster.memoryLimit) : 0,
                 storage: cluster.diskLimit || 0,
                 lastUpdate: 'desconhecido',
                 owner: cluster.owner?.userId?.toString() || 'Desconhecido',
@@ -197,7 +171,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const findClusterById = async (id: string): Promise<Cluster | null> => {
+  const findClusterById = useCallback(async (id: string): Promise<Cluster | null> => {
     try {
       setLoading(true);
       const clusterDetails = await clusterService.getCluster(parseInt(id));
@@ -210,13 +184,13 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       const cluster: Cluster = {
         id: clusterDetails.id.toString(),
         name: clusterDetails.name,
-        status: mapStatus(clusterDetails.status),
-        cpu: clusterDetails.cpuLimit || 0,
-        memory: clusterDetails.memoryLimit ? clusterDetails.memoryLimit / 1024 : 0, // MB para GB
+        status: mapClusterStatus(clusterDetails.status),
+        cpu: clusterDetails.cpuLimit ? cpuCoresToPercent(clusterDetails.cpuLimit) : 0,
+        memory: clusterDetails.memoryLimit ? memoryMbToGb(clusterDetails.memoryLimit) : 0,
         storage: clusterDetails.diskLimit || 0,
         lastUpdate: clusterDetails.updatedAt || clusterDetails.createdAt || 'desconhecido',
-        owner: 'Cliente',
-        serviceType: clusterDetails.templateName || 'Unknown',
+        owner: clusterDetails.user?.username || 'Cliente',
+        serviceType: formatTemplateName(clusterDetails.templateName) || 'Serviço Personalizado',
         service: null,
         startupCommand: '',
         port: clusterDetails.port?.toString(),
@@ -229,7 +203,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const updateCluster = async (id: string, updates: Partial<Cluster>) => {
     try {

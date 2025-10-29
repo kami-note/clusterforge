@@ -46,16 +46,17 @@ export default function LoginPage() {
       } else {
         router.push('/client/dashboard');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Extrai a mensagem de erro da API
-      const errorMessage = err?.message || 'Ocorreu um erro durante o login. Por favor, tente novamente.';
+      const errorMessage = err instanceof Error ? err.message : 'Ocorreu um erro durante o login. Por favor, tente novamente.';
+      const errorStatus = err && typeof err === 'object' && 'status' in err ? (err.status as number) : undefined;
       
       // Diferencia mensagens de erro
-      if (err?.status === 403) {
+      if (errorStatus === 403) {
         setError('Acesso negado. Verifique suas credenciais.');
-      } else if (err?.status === 401) {
+      } else if (errorStatus === 401) {
         setError('Credenciais inválidas. Por favor, tente novamente.');
-      } else if (err?.status === 400) {
+      } else if (errorStatus === 400) {
         setError('Requisição inválida. Por favor, verifique os dados.');
       } else {
         setError(errorMessage);

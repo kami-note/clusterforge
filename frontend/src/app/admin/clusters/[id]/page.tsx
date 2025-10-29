@@ -1,11 +1,13 @@
 "use client";
 
+import { use } from 'react';
 import { ClusterDetails } from "@/components/clusters/ClusterDetails";
 import { useRouter } from 'next/navigation';
 import ProtectedRoute from "@/components/ProtectedRoute";
 
-export default function AdminClusterDetailsPage({ params }: { params: { id: string } }) {
+export default function AdminClusterDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
+  const { id } = use(params);
 
   const handleBack = () => {
     router.back();
@@ -14,7 +16,7 @@ export default function AdminClusterDetailsPage({ params }: { params: { id: stri
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <ClusterDetails 
-        clusterId={params.id} 
+        clusterId={id} 
         onBack={handleBack} 
       />
     </ProtectedRoute>

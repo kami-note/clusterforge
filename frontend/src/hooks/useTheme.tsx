@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { STORAGE_KEYS } from '@/constants';
 
 type Theme = 'light' | 'dark';
 
@@ -14,13 +15,11 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>('light');
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     
     // Carrega o tema persistido do localStorage
-    const storedTheme = localStorage.getItem('clusterforge_theme') as Theme | null;
+    const storedTheme = localStorage.getItem(STORAGE_KEYS.THEME) as Theme | null;
     
     if (storedTheme) {
       setTheme(storedTheme);
@@ -37,7 +36,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const toggleTheme = () => {
     setTheme((prev) => {
       const newTheme = prev === 'light' ? 'dark' : 'light';
-      localStorage.setItem('clusterforge_theme', newTheme);
+      localStorage.setItem(STORAGE_KEYS.THEME, newTheme);
       document.documentElement.classList.toggle('dark', newTheme === 'dark');
       return newTheme;
     });
@@ -45,7 +44,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const handleSetTheme = (newTheme: Theme) => {
     setTheme(newTheme);
-    localStorage.setItem('clusterforge_theme', newTheme);
+    localStorage.setItem(STORAGE_KEYS.THEME, newTheme);
     document.documentElement.classList.toggle('dark', newTheme === 'dark');
   };
 

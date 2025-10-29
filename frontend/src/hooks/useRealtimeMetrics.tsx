@@ -138,6 +138,8 @@ export function useRealtimeMetrics(): RealtimeMetrics {
         isSubscribedRef.current = false;
       };
     }
+    // filterMetricsByUserRole e filterStatsByUserRole são estáveis (useCallback sem dependências)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]); // Apenas user como dependência
   
   /**
