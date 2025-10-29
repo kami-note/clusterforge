@@ -14,10 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PostConstruct;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -242,7 +240,8 @@ public class ClusterHealthService implements IClusterHealthService {
     
     @Override
     public List<ClusterHealthStatus.HealthEvent> getClusterHealthHistory(Long clusterId) {
-        ClusterHealthStatus healthStatus = healthStatusRepository.findByClusterId(clusterId)
+        // Verificar se cluster existe
+        healthStatusRepository.findByClusterId(clusterId)
             .orElseThrow(() -> new RuntimeException("Status de saúde não encontrado para cluster: " + clusterId));
         
         // Implementar busca de eventos históricos
@@ -336,8 +335,8 @@ public class ClusterHealthService implements IClusterHealthService {
     private Long checkApplicationHealth(Cluster cluster) {
         try {
             String healthUrl = cluster.getHealthUrl(healthEndpoint);
-            URL url = new URL(healthUrl);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            URI uri = new URI(healthUrl);
+            HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(healthCheckTimeoutSeconds * 1000);
             connection.setReadTimeout(healthCheckTimeoutSeconds * 1000);
@@ -366,15 +365,42 @@ public class ClusterHealthService implements IClusterHealthService {
                 ? cluster.getContainerId() 
                 : cluster.getSanitizedContainerName();
             
+            if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                System.err.println("⚠️ Container identifier vazio para cluster " + cluster.getId());
+                return null;
+            }
+            
             // Coletar métricas do Docker Stats usando método auxiliar
             String result = dockerService.getContainerStats(containerIdentifier);
             
-            if (result != null && !result.isEmpty() && result.contains("Process exited with code: 0")) {
-                return parseDockerStats(result, cluster);
+            if (result == null || result.isEmpty()) {
+                System.err.println("⚠️ Resultado vazio do docker stats para cluster " + cluster.getId());
+                return null;
             }
             
+            // Extrair apenas a linha de dados (antes de "Process exited")
+            String statsData = result.split("Process exited")[0].trim();
+            
+            if (statsData.isEmpty()) {
+                System.err.println("⚠️ Nenhum dado extraído do docker stats para cluster " + cluster.getId());
+                System.err.println("   Resultado completo: " + result);
+                return null;
+            }
+            
+            // Verificar se o comando foi executado com sucesso
+            if (!result.contains("Process exited with code: 0")) {
+                System.err.println("⚠️ Comando docker stats falhou para cluster " + cluster.getId() + ": " + result);
+                return null;
+            }
+            
+            System.out.println("✅ Coletando métricas para cluster " + cluster.getId() + " (container: " + containerIdentifier + ")");
+            System.out.println("   Dados brutos: " + statsData);
+            
+            return parseDockerStats(statsData, cluster);
+            
         } catch (Exception e) {
-            System.err.println("Erro ao coletar métricas do cluster " + cluster.getId() + ": " + e.getMessage());
+            System.err.println("❌ Erro ao coletar métricas do cluster " + cluster.getId() + ": " + e.getMessage());
+            e.printStackTrace();
         }
         
         return null;
@@ -382,52 +408,121 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private ClusterHealthMetrics parseDockerStats(String statsResult, Cluster cluster) {
         try {
+            // Limpar a string - remover quebras de linha e espaços extras
+            statsResult = statsResult.trim().replaceAll("\\s+", " ");
+            
+            System.out.println("📊 Parsing docker stats: " + statsResult);
+            
             String[] parts = statsResult.split(",");
-            if (parts.length >= 4) {
-                ClusterHealthMetrics metrics = new ClusterHealthMetrics();
-                metrics.setCluster(cluster);
-                metrics.setTimestamp(LocalDateTime.now());
-                
-                // Parse CPU percentage
-                String cpuStr = parts[0].replace("%", "").trim();
-                if (!cpuStr.isEmpty()) {
-                    metrics.setCpuUsagePercent(Double.parseDouble(cpuStr));
-                }
-                
-                // Parse Memory usage (format: "used / total")
-                String memStr = parts[1].trim();
-                if (memStr.contains("/")) {
-                    String[] memParts = memStr.split("/");
-                    if (memParts.length == 2) {
-                        metrics.setMemoryUsageMb(parseMemoryValue(memParts[0]));
-                        metrics.setMemoryLimitMb(parseMemoryValue(memParts[1]));
-                    }
-                }
-                
-                // Parse Network I/O
-                String netStr = parts[2].trim();
-                if (netStr.contains("/")) {
-                    String[] netParts = netStr.split("/");
-                    if (netParts.length == 2) {
-                        metrics.setNetworkRxBytes(parseBytesValue(netParts[0]));
-                        metrics.setNetworkTxBytes(parseBytesValue(netParts[1]));
-                    }
-                }
-                
-                // Parse Block I/O
-                String blockStr = parts[3].trim();
-                if (blockStr.contains("/")) {
-                    String[] blockParts = blockStr.split("/");
-                    if (blockParts.length == 2) {
-                        metrics.setDiskReadBytes(parseBytesValue(blockParts[0]));
-                        metrics.setDiskWriteBytes(parseBytesValue(blockParts[1]));
-                    }
-                }
-                
-                return metrics;
+            
+            if (parts.length < 4) {
+                System.err.println("⚠️ Formato inválido - esperado 4 partes separadas por vírgula, obtido: " + parts.length);
+                System.err.println("   Dados: " + statsResult);
+                return null;
             }
+            
+            ClusterHealthMetrics metrics = new ClusterHealthMetrics();
+            metrics.setCluster(cluster);
+            metrics.setTimestamp(LocalDateTime.now());
+            
+            // ========== CPU Metrics ==========
+            // O Docker Stats retorna CPU como percentual do limite do container (se configurado)
+            // ou percentual do host (se não houver limite)
+            String cpuStr = parts[0].replace("%", "").trim();
+            if (!cpuStr.isEmpty() && !cpuStr.equals("--")) {
+                try {
+                    double cpuPercentFromDocker = Double.parseDouble(cpuStr);
+                    metrics.setCpuUsagePercent(cpuPercentFromDocker);
+                    System.out.println("   ✅ CPU: " + cpuPercentFromDocker + "%");
+                } catch (NumberFormatException e) {
+                    System.err.println("⚠️ Erro ao fazer parse de CPU: '" + cpuStr + "'");
+                }
+            }
+            
+            // Armazenar limite de CPU configurado no cluster
+            if (cluster.getCpuLimit() != null) {
+                metrics.setCpuLimitCores(cluster.getCpuLimit());
+            }
+                
+            // ========== Memory Metrics ==========
+            // Parse Memory usage (format: "used / total" ou "used/total")
+            String memStr = parts[1].trim();
+            if (memStr.contains("/")) {
+                String[] memParts = memStr.split("/");
+                if (memParts.length == 2) {
+                    Long memoryUsage = parseMemoryValue(memParts[0].trim());
+                    Long memoryLimitFromDocker = parseMemoryValue(memParts[1].trim());
+                    
+                    metrics.setMemoryUsageMb(memoryUsage);
+                    
+                    // Prioriza limite do cluster se configurado, senão usa do Docker Stats
+                    Long memoryLimit = (cluster.getMemoryLimit() != null) 
+                        ? cluster.getMemoryLimit() 
+                        : memoryLimitFromDocker;
+                    metrics.setMemoryLimitMb(memoryLimit);
+                    
+                    // Calcular percentual de uso de memória relativo ao limite configurado
+                    if (memoryUsage != null && memoryLimit != null && memoryLimit > 0) {
+                        double memoryPercent = (double) memoryUsage / memoryLimit * 100.0;
+                        metrics.setMemoryUsagePercent(memoryPercent);
+                        System.out.println("   ✅ Memória: " + memoryUsage + " MB / " + memoryLimit + " MB = " + String.format("%.2f", memoryPercent) + "%");
+                    }
+                }
+            } else {
+                System.err.println("⚠️ Formato de memória inválido: '" + memStr + "'");
+            }
+                
+            // ========== Network Metrics ==========
+            String netStr = parts[2].trim();
+            if (netStr.contains("/")) {
+                String[] netParts = netStr.split("/");
+                if (netParts.length == 2) {
+                    Long networkRxBytes = parseBytesValue(netParts[0].trim());
+                    Long networkTxBytes = parseBytesValue(netParts[1].trim());
+                    
+                    metrics.setNetworkRxBytes(networkRxBytes);
+                    metrics.setNetworkTxBytes(networkTxBytes);
+                    
+                    System.out.println("   ✅ Rede: RX=" + networkRxBytes + " bytes, TX=" + networkTxBytes + " bytes");
+                    
+                    // Armazenar limite de rede configurado no cluster
+                    if (cluster.getNetworkLimit() != null) {
+                        metrics.setNetworkLimitMbps(cluster.getNetworkLimit());
+                    }
+                }
+            } else {
+                System.err.println("⚠️ Formato de rede inválido: '" + netStr + "'");
+            }
+            
+            // ========== Disk I/O Metrics ==========
+            String blockStr = parts[3].trim();
+            if (blockStr.contains("/")) {
+                String[] blockParts = blockStr.split("/");
+                if (blockParts.length == 2) {
+                    Long diskRead = parseBytesValue(blockParts[0].trim());
+                    Long diskWrite = parseBytesValue(blockParts[1].trim());
+                    metrics.setDiskReadBytes(diskRead);
+                    metrics.setDiskWriteBytes(diskWrite);
+                    System.out.println("   ✅ Disco I/O: Read=" + diskRead + " bytes, Write=" + diskWrite + " bytes");
+                }
+            } else {
+                System.err.println("⚠️ Formato de disco inválido: '" + blockStr + "'");
+            }
+            
+            // Disk usage percentual relativo ao limite configurado no cluster
+            // Nota: Docker Stats não fornece uso de disco em volume, apenas I/O (read/write)
+            // O uso real do disco precisaria ser coletado de outra forma (ex: df dentro do container)
+            if (cluster.getDiskLimit() != null) {
+                // Limite de disco está em GB, converter para MB
+                metrics.setDiskLimitMb(cluster.getDiskLimit() * 1024L);
+            }
+            
+            System.out.println("✅ Métricas parseadas com sucesso para cluster " + cluster.getId());
+            return metrics;
+            
         } catch (Exception e) {
-            System.err.println("Erro ao fazer parse das métricas: " + e.getMessage());
+            System.err.println("❌ Erro ao fazer parse das métricas: " + e.getMessage());
+            e.printStackTrace();
         }
         
         return null;
@@ -436,16 +531,36 @@ public class ClusterHealthService implements IClusterHealthService {
     private Long parseMemoryValue(String value) {
         try {
             value = value.trim().toUpperCase();
-            if (value.endsWith("KB")) {
-                return Long.parseLong(value.replace("KB", "")) / 1024;
-            } else if (value.endsWith("MB")) {
-                return Long.parseLong(value.replace("MB", ""));
-            } else if (value.endsWith("GB")) {
-                return Long.parseLong(value.replace("GB", "")) * 1024;
+            
+            // Tratar formato com vírgula decimal (ex: "11.59MiB")
+            // Primeiro, substituir vírgula por ponto para parsing numérico
+            value = value.replace(",", ".");
+            
+            // Extrair número usando regex
+            String numberStr = value.replaceAll("[^0-9.]", "");
+            if (numberStr.isEmpty()) {
+                return 0L;
+            }
+            
+            double number = Double.parseDouble(numberStr);
+            
+            // Converter baseado na unidade
+            if (value.endsWith("KIB") || value.endsWith("KB")) {
+                return Math.round(number / 1024.0); // KiB ou KB para MB
+            } else if (value.endsWith("MIB") || value.endsWith("MB")) {
+                return Math.round(number); // MiB ou MB - já está em MB
+            } else if (value.endsWith("GIB") || value.endsWith("GB")) {
+                return Math.round(number * 1024.0); // GiB ou GB para MB
+            } else if (value.endsWith("TIB") || value.endsWith("TB")) {
+                return Math.round(number * 1024.0 * 1024.0); // TiB ou TB para MB
+            } else if (value.endsWith("B")) {
+                return Math.round(number / (1024.0 * 1024.0)); // Bytes para MB
             } else {
-                return Long.parseLong(value) / (1024 * 1024); // Assume bytes
+                // Sem unidade, assume bytes
+                return Math.round(number / (1024.0 * 1024.0));
             }
         } catch (Exception e) {
+            System.err.println("⚠️ Erro ao fazer parse de memória: '" + value + "' - " + e.getMessage());
             return 0L;
         }
     }
@@ -453,16 +568,35 @@ public class ClusterHealthService implements IClusterHealthService {
     private Long parseBytesValue(String value) {
         try {
             value = value.trim().toUpperCase();
-            if (value.endsWith("KB")) {
-                return Long.parseLong(value.replace("KB", "")) * 1024;
-            } else if (value.endsWith("MB")) {
-                return Long.parseLong(value.replace("MB", "")) * 1024 * 1024;
-            } else if (value.endsWith("GB")) {
-                return Long.parseLong(value.replace("GB", "")) * 1024 * 1024 * 1024;
+            
+            // Tratar formato com vírgula decimal
+            value = value.replace(",", ".");
+            
+            // Extrair número usando regex
+            String numberStr = value.replaceAll("[^0-9.]", "");
+            if (numberStr.isEmpty()) {
+                return 0L;
+            }
+            
+            double number = Double.parseDouble(numberStr);
+            
+            // Converter baseado na unidade para bytes
+            if (value.endsWith("KIB") || value.endsWith("KB")) {
+                return Math.round(number * 1024.0); // KiB ou KB para bytes
+            } else if (value.endsWith("MIB") || value.endsWith("MB")) {
+                return Math.round(number * 1024.0 * 1024.0); // MiB ou MB para bytes
+            } else if (value.endsWith("GIB") || value.endsWith("GB")) {
+                return Math.round(number * 1024.0 * 1024.0 * 1024.0); // GiB ou GB para bytes
+            } else if (value.endsWith("TIB") || value.endsWith("TB")) {
+                return Math.round(number * 1024.0 * 1024.0 * 1024.0 * 1024.0); // TiB ou TB para bytes
+            } else if (value.endsWith("B")) {
+                return Math.round(number); // Já está em bytes
             } else {
-                return Long.parseLong(value);
+                // Sem unidade, assume bytes
+                return Math.round(number);
             }
         } catch (Exception e) {
+            System.err.println("⚠️ Erro ao fazer parse de bytes: '" + value + "' - " + e.getMessage());
             return 0L;
         }
     }
@@ -507,21 +641,37 @@ public class ClusterHealthService implements IClusterHealthService {
     }
     
     private boolean isResourceLimitExceeded(ClusterHealthStatus healthStatus) {
-        // CPU > 90%
+        // CPU > 90% (já está em percentual relativo ao limite do container)
         if (healthStatus.getCpuUsagePercent() != null && healthStatus.getCpuUsagePercent() > 90) {
             return true;
         }
         
-        // Memória > 90%
-        if (healthStatus.getMemoryUsageMb() != null && healthStatus.getCluster().getMemoryLimit() != null) {
+        // Memória > 90% - usar percentual já calculado nas métricas se disponível
+        // Senão, calcular baseado no limite do cluster
+        ClusterHealthMetrics latestMetrics = metricsRepository
+            .findTopByClusterIdOrderByTimestampDesc(healthStatus.getCluster().getId())
+            .orElse(null);
+        
+        if (latestMetrics != null && latestMetrics.getMemoryUsagePercent() != null) {
+            // Usar percentual já calculado (relativo ao limite do container)
+            if (latestMetrics.getMemoryUsagePercent() > 90) {
+                return true;
+            }
+        } else if (healthStatus.getMemoryUsageMb() != null && healthStatus.getCluster().getMemoryLimit() != null) {
+            // Fallback: calcular percentual baseado no limite do cluster
             double memoryPercent = (double) healthStatus.getMemoryUsageMb() / healthStatus.getCluster().getMemoryLimit() * 100;
             if (memoryPercent > 90) {
                 return true;
             }
         }
         
-        // Disco > 90%
-        if (healthStatus.getDiskUsageMb() != null && healthStatus.getCluster().getDiskLimit() != null) {
+        // Disco > 90% - verificar se há métricas de disco disponíveis
+        if (latestMetrics != null && latestMetrics.getDiskUsagePercent() != null) {
+            if (latestMetrics.getDiskUsagePercent() > 90) {
+                return true;
+            }
+        } else if (healthStatus.getDiskUsageMb() != null && healthStatus.getCluster().getDiskLimit() != null) {
+            // Fallback: calcular percentual baseado no limite do cluster
             double diskPercent = (double) healthStatus.getDiskUsageMb() / (healthStatus.getCluster().getDiskLimit() * 1024) * 100;
             if (diskPercent > 90) {
                 return true;
@@ -532,7 +682,6 @@ public class ClusterHealthService implements IClusterHealthService {
     }
     
     private void updateHealthCounters(ClusterHealthStatus healthStatus, ClusterHealthStatus.HealthState newState) {
-        ClusterHealthStatus.HealthState oldState = healthStatus.getCurrentState();
         
         if (newState == ClusterHealthStatus.HealthState.HEALTHY) {
             healthStatus.setConsecutiveFailures(0);
