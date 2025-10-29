@@ -1,13 +1,11 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import {
   Search,
@@ -20,10 +18,17 @@ import {
   Play,
   Square,
   ExternalLink,
-  Eye // Added Eye icon
+  Eye,
+  Wifi,
+  WifiOff,
+  Cpu,
+  MemoryStick,
+  HardDrive
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useClusters } from '@/hooks/useClusters';
+import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
+import { clusterService } from '@/services/cluster.service';
 import { toast } from 'sonner';
 
 interface Cluster {
@@ -189,30 +194,101 @@ interface ClusterManagementProps {
 export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const router = useRouter();
   const { clusters: apiClusters, loading, updateCluster, deleteCluster } = useClusters();
+  const { metrics, connected, error: wsError } = useRealtimeMetrics();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('Todos os Donos');
   const [serviceFilter, setServiceFilter] = useState('Todos os Serviços');
   const [alertFilter, setAlertFilter] = useState('all');
+  const [wsErrorShown, setWsErrorShown] = useState(false);
+  const [processingClusters, setProcessingClusters] = useState<Set<string>>(new Set());
+  
+  // Mostrar erro de WebSocket apenas uma vez
+  useEffect(() => {
+    if (wsError && !wsErrorShown && !connected) {
+      setWsErrorShown(true);
+      const timeout = setTimeout(() => {
+        toast.warning('Conexão WebSocket perdida. Métricas podem estar desatualizadas.', {
+          duration: 5000,
+        });
+      }, 1000);
+      return () => clearTimeout(timeout);
+    }
+  }, [wsError, wsErrorShown, connected]);
+  
+  // Resetar flag quando reconectar
+  useEffect(() => {
+    if (connected && wsErrorShown) {
+      setWsErrorShown(false);
+    }
+  }, [connected, wsErrorShown]);
 
-  // Converter clusters da API para o formato esperado do componente
+  // Converter clusters da API para o formato esperado do componente e integrar métricas em tempo real
   const clusters = useMemo(() => {
-    return apiClusters.map(cluster => ({
-      id: cluster.id,
-      name: cluster.name,
-      owner: cluster.owner,
-      service: cluster.serviceType,
-      status: cluster.status === 'running' ? 'active' : cluster.status === 'stopped' ? 'stopped' : 'active',
-      resources: {
-        cpu: { used: cluster.cpu, limit: 100 },
-        ram: { used: cluster.memory, limit: cluster.memory || 4 },
-        disk: { used: 0, limit: cluster.storage },
-      },
-      address: cluster.port ? `localhost:${cluster.port}` : '',
-      createdAt: cluster.lastUpdate,
-      hasAlert: false,
-    }));
-  }, [apiClusters]);
+    return apiClusters.map(cluster => {
+      // Converter ID para número para buscar métricas (API retorna string, WebSocket usa number)
+      const clusterId = parseInt(cluster.id.toString());
+      const realtimeMetrics = isNaN(clusterId) ? undefined : metrics[clusterId];
+      
+      // Determinar status baseado nas métricas de saúde
+      let status: 'active' | 'stopped' | 'reinstalling' = cluster.status === 'running' ? 'active' : cluster.status === 'stopped' ? 'stopped' : 'active';
+      if (realtimeMetrics) {
+        const healthState = realtimeMetrics.healthState?.toUpperCase();
+        if (healthState === 'FAILED' || healthState === 'UNKNOWN') {
+          status = 'stopped';
+        } else if (healthState === 'RECOVERING') {
+          status = 'reinstalling';
+        } else if (healthState === 'HEALTHY' || healthState === 'UNHEALTHY') {
+          status = 'active';
+        }
+      }
+      
+      // Usar métricas em tempo real se disponíveis, senão usar valores da API
+      const cpuUsage = realtimeMetrics?.cpuUsagePercent || cluster.cpu || 0;
+      const cpuLimit = realtimeMetrics?.cpuLimitCores ? realtimeMetrics.cpuLimitCores * 100 : 100;
+      
+      const memoryUsageMb = realtimeMetrics?.memoryUsageMb || cluster.memory || 0;
+      const memoryLimitMb = realtimeMetrics?.memoryLimitMb || cluster.memory || 4096; // Default 4GB
+      
+      const diskUsageMb = realtimeMetrics?.diskUsageMb || 0;
+      const diskLimitMb = realtimeMetrics?.diskLimitMb || (cluster.storage ? cluster.storage * 1024 : 20480); // Default 20GB
+      
+      // Verificar se há alertas baseado nas métricas
+      const hasAlert = realtimeMetrics ? (
+        (realtimeMetrics.cpuUsagePercent && realtimeMetrics.cpuUsagePercent > 90) ||
+        (realtimeMetrics.memoryUsagePercent && realtimeMetrics.memoryUsagePercent > 90) ||
+        (realtimeMetrics.diskUsagePercent && realtimeMetrics.diskUsagePercent > 90) ||
+        realtimeMetrics.healthState === 'FAILED' ||
+        realtimeMetrics.healthState === 'UNHEALTHY'
+      ) : false;
+      
+      return {
+        id: cluster.id.toString(),
+        name: cluster.name,
+        owner: cluster.owner,
+        service: cluster.serviceType,
+        status,
+        resources: {
+          cpu: { 
+            used: cpuUsage, 
+            limit: cpuLimit 
+          },
+          ram: { 
+            used: memoryUsageMb / 1024, // Converter MB para GB
+            limit: memoryLimitMb / 1024 
+          },
+          disk: { 
+            used: diskUsageMb / 1024, // Converter MB para GB
+            limit: diskLimitMb / 1024 
+          },
+        },
+        address: cluster.port ? `localhost:${cluster.port}` : '',
+        createdAt: cluster.lastUpdate,
+        hasAlert,
+        realtimeMetrics, // Adicionar métricas para referência
+      };
+    });
+  }, [apiClusters, metrics]);
 
   const handleCreateCluster = () => {
     if (onCreateCluster) {
@@ -249,35 +325,273 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
-        return <Badge className="bg-green-100 text-green-800 border-green-200">Ativo</Badge>;
+        return <Badge className="bg-green-100 dark:bg-green-950 text-green-800 dark:text-green-300 border-green-200 dark:border-green-800">Ativo</Badge>;
       case 'stopped':
         return <Badge variant="secondary">Parado</Badge>;
       case 'reinstalling':
-        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Reinstalando</Badge>;
+        return <Badge className="bg-yellow-100 dark:bg-yellow-950 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">Reinstalando</Badge>;
       default:
         return <Badge variant="outline">Desconhecido</Badge>;
     }
   };
 
   const getResourcePercentage = (used: number, limit: number) => {
-    return Math.round((used / limit) * 100);
+    if (limit === 0) return 0;
+    return Math.min(Math.round((used / limit) * 100), 100);
+  };
+
+  // Componente compacto para exibir métrica em formato horizontal
+  const CompactMetric = ({ 
+    label, 
+    icon: Icon, 
+    used, 
+    limit, 
+    unit, 
+    percentage, 
+    realtime 
+  }: { 
+    label: string; 
+    icon: React.ComponentType<{ className?: string }>; 
+    used: number; 
+    limit: number; 
+    unit: string; 
+    percentage: number;
+    realtime?: boolean;
+  }) => {
+    const getStatusColor = (percent: number) => {
+      if (percent >= 90) return {
+        text: 'text-red-600 dark:text-red-400',
+        gradient: 'from-red-500 to-red-600 dark:from-red-600 dark:to-red-700',
+        iconColor: 'text-red-600 dark:text-red-400'
+      };
+      if (percent >= 70) return {
+        text: 'text-yellow-600 dark:text-yellow-400',
+        gradient: 'from-yellow-500 to-yellow-600 dark:from-yellow-600 dark:to-yellow-700',
+        iconColor: 'text-yellow-600 dark:text-yellow-400'
+      };
+      return {
+        text: 'text-green-600 dark:text-green-400',
+        gradient: 'from-green-500 to-green-600 dark:from-green-600 dark:to-green-700',
+        iconColor: 'text-green-600 dark:text-green-400'
+      };
+    };
+
+    const status = getStatusColor(percentage);
+
+    return (
+      <div className="flex items-center gap-2 min-w-[100px]">
+        <Icon className={`h-3.5 w-3.5 ${status.iconColor}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <span className="text-[10px] text-muted-foreground uppercase font-medium">{label}</span>
+            {realtime && (
+              <div className="h-1 w-1 bg-green-500 dark:bg-green-400 rounded-full animate-pulse" />
+            )}
+            <span className={`text-xs font-bold tabular-nums ml-auto ${status.text}`}>
+              {percentage.toFixed(0)}%
+            </span>
+          </div>
+          <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
+            <div 
+              className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${status.gradient}`}
+              style={{ width: `${Math.min(percentage, 100)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Função assíncrona para iniciar cluster com verificação de status
+  const startClusterWithVerification = async (clusterId: string) => {
+    const clusterIdNum = parseInt(clusterId);
+    
+    // Marcar como processando
+    setProcessingClusters(prev => new Set(prev).add(clusterId));
+    toast.loading('Enviando ordem de inicialização...', { id: `action-${clusterId}` });
+    
+    try {
+      // 1. Enviar ordem de iniciar
+      const startResponse = await clusterService.startCluster(clusterIdNum);
+      
+      if (startResponse.status !== 'RUNNING' && startResponse.status !== 'ERROR') {
+        throw new Error(startResponse.message || 'Resposta inesperada do servidor');
+      }
+      
+      toast.loading('Verificando inicialização do cluster...', { id: `action-${clusterId}` });
+      
+      // 2. Verificar se realmente iniciou (polling com timeout - inicialização pode demorar mais)
+      const maxAttempts = 15; // 15 tentativas (inicialização pode demorar)
+      const pollInterval = 1500; // 1.5 segundos
+      let attempts = 0;
+      let isRunning = false;
+      
+      while (attempts < maxAttempts && !isRunning) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        
+        try {
+          // Buscar status atual do cluster
+          const clusterDetails = await clusterService.getCluster(clusterIdNum);
+          
+          if (clusterDetails.status === 'RUNNING') {
+            isRunning = true;
+            // Atualizar status localmente
+            await updateCluster(clusterId, { status: 'running' });
+            toast.success('Cluster iniciado e verificado com sucesso', { id: `action-${clusterId}` });
+          } else if (clusterDetails.status === 'ERROR') {
+            throw new Error('Cluster entrou em estado de erro');
+          }
+          
+          attempts++;
+        } catch (pollError: any) {
+          // Se erro ao buscar status, continua tentando (pode ser temporário)
+          console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
+          attempts++;
+        }
+      }
+      
+      if (!isRunning) {
+        // Timeout - verifica status atual
+        try {
+          const finalCheck = await clusterService.getCluster(clusterIdNum);
+          if (finalCheck.status === 'RUNNING') {
+            await updateCluster(clusterId, { status: 'running' });
+            toast.success('Cluster iniciado com sucesso', { id: `action-${clusterId}` });
+            return;
+          }
+        } catch {}
+        
+        // Se ainda não está rodando após todas tentativas
+        toast.warning('Cluster iniciado, mas não foi possível confirmar o status. Verifique manualmente.', { 
+          id: `action-${clusterId}`,
+          duration: 8000
+        });
+      }
+      
+    } catch (error: any) {
+      console.error('Erro ao iniciar cluster:', error);
+      toast.error('Erro ao iniciar cluster: ' + (error.message || 'Erro desconhecido'), { id: `action-${clusterId}` });
+      throw error;
+    } finally {
+      // Remover do estado de processamento
+      setProcessingClusters(prev => {
+        const next = new Set(prev);
+        next.delete(clusterId);
+        return next;
+      });
+    }
+  };
+
+  // Função assíncrona para parar cluster com verificação de status
+  const stopClusterWithVerification = async (clusterId: string) => {
+    const clusterIdNum = parseInt(clusterId);
+    
+    // Marcar como processando
+    setProcessingClusters(prev => new Set(prev).add(clusterId));
+    toast.loading('Enviando ordem de parada...', { id: `action-${clusterId}` });
+    
+    try {
+      // 1. Enviar ordem de parar
+      const stopResponse = await clusterService.stopCluster(clusterIdNum);
+      
+      if (stopResponse.status !== 'STOPPED' && stopResponse.status !== 'ERROR') {
+        throw new Error(stopResponse.message || 'Resposta inesperada do servidor');
+      }
+      
+      toast.loading('Verificando status do cluster...', { id: `action-${clusterId}` });
+      
+      // 2. Verificar se realmente parou (polling com timeout)
+      const maxAttempts = 20; // 20 tentativas
+      const pollInterval = 1000; // 1 segundo
+      let attempts = 0;
+      let isStopped = false;
+      
+      while (attempts < maxAttempts && !isStopped) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        
+        try {
+          // Buscar status atual do cluster
+          const clusterDetails = await clusterService.getCluster(clusterIdNum);
+          
+          if (clusterDetails.status === 'STOPPED') {
+            isStopped = true;
+            // Atualizar status localmente
+            await updateCluster(clusterId, { status: 'stopped' });
+            toast.success('Cluster parado e verificado com sucesso', { id: `action-${clusterId}` });
+          } else if (clusterDetails.status === 'ERROR') {
+            throw new Error('Cluster entrou em estado de erro');
+          }
+          
+          attempts++;
+        } catch (pollError: any) {
+          // Se erro ao buscar status, continua tentando (pode ser temporário)
+          console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
+          attempts++;
+        }
+      }
+      
+      if (!isStopped) {
+        // Timeout - mesmo assim atualiza o status local
+        await updateCluster(clusterId, { status: 'stopped' });
+        toast.warning('Cluster parado, mas não foi possível confirmar o status. Verifique manualmente.', { 
+          id: `action-${clusterId}`,
+          duration: 8000
+        });
+      }
+      
+    } catch (error: any) {
+      console.error('Erro ao parar cluster:', error);
+      toast.error('Erro ao parar cluster: ' + (error.message || 'Erro desconhecido'), { id: `action-${clusterId}` });
+      throw error;
+    } finally {
+      // Remover do estado de processamento
+      setProcessingClusters(prev => {
+        const next = new Set(prev);
+        next.delete(clusterId);
+        return next;
+      });
+    }
   };
 
   const handleAction = async (clusterId: string, action: 'edit' | 'restart' | 'delete' | 'start' | 'stop') => {
     try {
+      const clusterIdNum = parseInt(clusterId);
+      
       switch (action) {
-        case 'restart':
-          await updateCluster(clusterId, { status: 'restarting' });
-          setTimeout(() => updateCluster(clusterId, { status: 'running' }), 3000);
+        case 'start': {
+          await startClusterWithVerification(clusterId);
           break;
-        case 'start':
-          await updateCluster(clusterId, { status: 'running' });
-          toast.success('Cluster iniciado com sucesso');
+        }
+        case 'stop': {
+          await stopClusterWithVerification(clusterId);
           break;
-        case 'stop':
-          await updateCluster(clusterId, { status: 'stopped' });
-          toast.success('Cluster parado com sucesso');
+        }
+        case 'restart': {
+          // Não precisa marcar como processando aqui pois stopClusterWithVerification já faz isso
+          toast.loading('Reiniciando cluster...', { id: `action-${clusterId}` });
+          try {
+            // Primeiro parar o cluster com verificação
+            await stopClusterWithVerification(clusterId);
+            
+            // Aguardar 2 segundos antes de iniciar novamente
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Depois iniciar o cluster com verificação (já marca como processando internamente)
+            await startClusterWithVerification(clusterId);
+            
+            toast.success('Cluster reiniciado com sucesso', { id: `action-${clusterId}` });
+          } catch (error: any) {
+            toast.error('Erro ao reiniciar cluster: ' + (error.message || 'Erro desconhecido'), { id: `action-${clusterId}` });
+            // Garantir que remove do processamento se houver erro
+            setProcessingClusters(prev => {
+              const next = new Set(prev);
+              next.delete(clusterId);
+              return next;
+            });
+            throw error;
+          }
           break;
+        }
         case 'delete':
           await deleteCluster(clusterId);
           toast.success('Cluster excluído com sucesso');
@@ -287,7 +601,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       }
     } catch (error: any) {
       console.error('Error performing action:', error);
-      toast.error(error.message || 'Erro ao executar ação');
+      toast.error(error.message || 'Erro ao executar ação', { id: `action-${clusterId}` });
     }
   };
 
@@ -312,9 +626,24 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1>Gerenciamento de Clusters</h1>
+          <div className="flex items-center space-x-2">
+            <h1>Gerenciamento de Clusters</h1>
+            {/* Indicador de conexão WebSocket */}
+            {connected ? (
+              <Badge variant="outline" className="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800 flex items-center space-x-1">
+                <Wifi className="h-3 w-3" />
+                <span>Em tempo real</span>
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 flex items-center space-x-1">
+                <WifiOff className="h-3 w-3" />
+                <span>Offline</span>
+              </Badge>
+            )}
+          </div>
           <p className="text-muted-foreground">
             Controle total sobre todos os serviços hospedados • {filteredClusters.length} de {clusters.length} clusters
+            {connected && ' • Métricas atualizadas em tempo real'}
           </p>
         </div>
         <Button className="flex items-center space-x-2" onClick={handleCreateCluster}>
@@ -411,171 +740,197 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         </CardContent>
       </Card>
 
-      {/* Tabela Principal */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Lista de Clusters</CardTitle>
-          <CardDescription>
-            Visão completa de todos os clusters do sistema
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome do Cluster</TableHead>
-                  <TableHead>Dono</TableHead>
-                  <TableHead>Serviço</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Uso de Recursos</TableHead>
-                  <TableHead>Endereço</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+      {/* Lista de Cards Horizontais */}
+      <div className="space-y-2">
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8">
-                      <div className="text-muted-foreground">Carregando clusters...</div>
-                    </TableCell>
-                  </TableRow>
+          <div className="space-y-2">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardContent className="p-3">
+                  <div className="h-4 bg-muted rounded w-1/3" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
                 ) : filteredClusters.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8">
-                      <div className="text-muted-foreground">
+          <Card>
+            <CardContent className="py-8 text-center">
+              <div className="text-sm text-muted-foreground">
                         {clusters.length === 0
                           ? 'Nenhum cluster encontrado'
-                          : 'Nenhum cluster corresponde aos filtros aplicados'
-                        }
+                  : 'Nenhum cluster corresponde aos filtros aplicados'}
                       </div>
-                    </TableCell>
-                  </TableRow>
+            </CardContent>
+          </Card>
                 ) : (
-                  filteredClusters.map((cluster) => {
-                    const cpuPercentage = getResourcePercentage(cluster.resources.cpu.used, cluster.resources.cpu.limit);
-                    const ramPercentage = getResourcePercentage(cluster.resources.ram.used, cluster.resources.ram.limit);
-                    const diskPercentage = getResourcePercentage(cluster.resources.disk.used, cluster.resources.disk.limit);
+          <div className="space-y-2">
+            {filteredClusters.map((cluster) => {
+              const cpuPercentage = getResourcePercentage(cluster.resources.cpu.used, cluster.resources.cpu.limit);
+              const ramPercentage = getResourcePercentage(cluster.resources.ram.used, cluster.resources.ram.limit);
+              const diskPercentage = getResourcePercentage(cluster.resources.disk.used, cluster.resources.disk.limit);
 
-                    return (
-                      <TableRow key={cluster.id}>
-                        <TableCell>
-                          <div className="flex items-center space-x-2">
-                            <span>{cluster.name}</span>
+              const isProcessing = processingClusters.has(cluster.id);
+              // Determinar tipo de processamento baseado no status atual
+              const isProcessingStopping = isProcessing && (cluster.status === 'active' || cluster.status === 'running');
+              const isProcessingStarting = isProcessing && cluster.status === 'stopped';
+              // Se está processando mas não é stopped nem active/running, provavelmente é restart
+              const isProcessingRestarting = isProcessing && !isProcessingStopping && !isProcessingStarting;
+
+              return (
+                <Card 
+                  key={cluster.id} 
+                  className={`
+                    transition-all duration-200 hover:shadow-md
+                    ${cluster.hasAlert ? 'border-red-200 dark:border-red-800' : ''}
+                    ${isProcessing ? 'opacity-75 pointer-events-none' : ''}
+                  `}
+                >
+                  <CardContent className="p-3">
+                    <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+                      {/* Informações Básicas */}
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="flex-shrink-0">
+                          {isProcessingStopping ? (
+                            <Badge className="bg-yellow-100 dark:bg-yellow-950 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800 flex items-center gap-1.5">
+                              <RotateCw className="h-3 w-3 animate-spin" />
+                              <span>Parando...</span>
+                            </Badge>
+                          ) : isProcessingStarting ? (
+                            <Badge className="bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-800 flex items-center gap-1.5">
+                              <RotateCw className="h-3 w-3 animate-spin" />
+                              <span>Iniciando...</span>
+                            </Badge>
+                          ) : isProcessingRestarting ? (
+                            <Badge className="bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border-purple-200 dark:border-purple-800 flex items-center gap-1.5">
+                              <RotateCw className="h-3 w-3 animate-spin" />
+                              <span>Reiniciando...</span>
+                            </Badge>
+                          ) : (
+                            getStatusBadge(cluster.status)
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <h3 className="text-sm font-semibold truncate">{cluster.name}</h3>
                             {cluster.hasAlert && (
-                              <AlertTriangle className="h-4 w-4 text-red-500" />
+                              <AlertTriangle className="h-3.5 w-3.5 text-red-500 dark:text-red-400 flex-shrink-0" title="Cluster com alertas" />
+                            )}
+                            {cluster.realtimeMetrics && connected && (
+                              <div className="h-1.5 w-1.5 bg-green-500 dark:bg-green-400 rounded-full animate-pulse flex-shrink-0" title="Métricas em tempo real" />
                             )}
                           </div>
-                        </TableCell>
-
-                        <TableCell>{cluster.owner}</TableCell>
-
-                        <TableCell>
-                          <span className="text-sm">{cluster.service}</span>
-                        </TableCell>
-
-                        <TableCell>{getStatusBadge(cluster.status)}</TableCell>
-
-                        <TableCell>
-                          <div className="space-y-2 min-w-[200px]">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-xs w-8">CPU</span>
-                              <div className="flex-1">
-                                <Progress
-                                  value={cpuPercentage}
-                                  className="h-2"
-                                />
-                              </div>
-                              <span className="text-xs w-10 text-right">{cpuPercentage}%</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <span className="text-xs w-8">RAM</span>
-                              <div className="flex-1">
-                                <Progress
-                                  value={ramPercentage}
-                                  className="h-2"
-                                />
-                              </div>
-                              <span className="text-xs w-10 text-right">{ramPercentage}%</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <span className="text-xs w-8">Disk</span>
-                              <div className="flex-1">
-                                <Progress
-                                  value={diskPercentage}
-                                  className="h-2"
-                                />
-                              </div>
-                              <span className="text-xs w-10 text-right">{diskPercentage}%</span>
-                            </div>
-                          </div>
-                        </TableCell>
-
-                        <TableCell>
-                          <div className="flex items-center space-x-1">
-                            <code className="text-xs bg-muted px-2 py-1 rounded">
-                              {cluster.address}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                            <span className="truncate">{cluster.service}</span>
+                            <span className="hidden sm:inline">•</span>
+                            <span className="truncate">{cluster.owner}</span>
+                            <span className="hidden md:inline">•</span>
+                            <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-mono hidden md:inline">
+                              {cluster.address || 'N/A'}
                             </code>
-                            <Button variant="ghost" size="sm">
-                              <ExternalLink className="h-3 w-3" />
-                            </Button>
                           </div>
-                        </TableCell>
+                        </div>
+                      </div>
 
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end space-x-1">
-                            {/* Botão Start/Stop */}
-                            {cluster.status === 'stopped' ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleAction(cluster.id, 'start')}
-                                title="Iniciar"
-                              >
-                                <Play className="h-3 w-3" />
-                              </Button>
-                            ) : cluster.status === 'active' ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleAction(cluster.id, 'stop')}
-                                title="Parar"
-                              >
-                                <Square className="h-3 w-3" />
-                              </Button>
-                            ) : null}
+                      {/* Métricas Compactas */}
+                      <div className="flex items-center gap-3 lg:gap-4 flex-shrink-0 flex-wrap lg:flex-nowrap">
+                        <CompactMetric
+                          label="CPU"
+                          icon={Cpu}
+                          used={cluster.resources.cpu.used}
+                          limit={cluster.resources.cpu.limit}
+                          unit={cluster.realtimeMetrics?.cpuLimitCores ? 'cores' : '%'}
+                          percentage={cpuPercentage}
+                          realtime={!!(cluster.realtimeMetrics && connected)}
+                        />
+                        <CompactMetric
+                          label="RAM"
+                          icon={MemoryStick}
+                          used={cluster.resources.ram.used}
+                          limit={cluster.resources.ram.limit}
+                          unit="GB"
+                          percentage={ramPercentage}
+                          realtime={!!(cluster.realtimeMetrics && connected)}
+                        />
+                        <CompactMetric
+                          label="Disk"
+                          icon={HardDrive}
+                          used={cluster.resources.disk.used}
+                          limit={cluster.resources.disk.limit}
+                          unit="GB"
+                          percentage={diskPercentage}
+                          realtime={!!(cluster.realtimeMetrics && connected)}
+                        />
+                      </div>
 
-                            {/* Botão Editar */}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleAction(cluster.id, 'edit')}
-                              title="Editar Limites"
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
-
-                            {/* Botão Reiniciar */}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleAction(cluster.id, 'restart')}
-                              disabled={cluster.status === 'reinstalling'}
-                              title="Reiniciar"
-                            >
-                              <RotateCw className={`h-3 w-3 ${cluster.status === 'reinstalling' ? 'animate-spin' : ''}`} />
-                            </Button>
-
-                            {/* Botão Excluir */}
+                      {/* Ações */}
+                      <div className="flex items-center gap-1 flex-shrink-0 justify-end lg:justify-start">
+                        {cluster.status === 'stopped' ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleAction(cluster.id, 'start')}
+                            title="Iniciar"
+                            className="h-7 w-7 p-0"
+                            disabled={isProcessing}
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : cluster.status === 'active' ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleAction(cluster.id, 'stop')}
+                            title="Parar"
+                            className="h-7 w-7 p-0"
+                            disabled={isProcessing}
+                          >
+                            {isProcessing ? (
+                              <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Square className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleAction(cluster.id, 'edit')}
+                          title="Editar Limites"
+                          className="h-7 w-7 p-0"
+                          disabled={isProcessing}
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleAction(cluster.id, 'restart')}
+                          disabled={cluster.status === 'reinstalling' || isProcessing}
+                          title="Reiniciar"
+                          className="h-7 w-7 p-0"
+                        >
+                          <RotateCw className={`h-3.5 w-3.5 ${(cluster.status === 'reinstalling' || isProcessing) ? 'animate-spin' : ''}`} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleViewDetails(cluster.id)}
+                          title="Ver Detalhes"
+                          className="h-7 w-7 p-0"
+                          disabled={isProcessing}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <Button
-                                  variant="outline"
+                                  variant="ghost"
                                   size="sm"
-                                  className="text-red-600 hover:text-red-700 hover:border-red-300"
+                                  className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                                   title="Excluir"
+                                  disabled={isProcessing}
                                 >
-                                  <Trash2 className="h-3 w-3" />
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </AlertDialogTrigger>
                               <AlertDialogContent>
@@ -590,34 +945,22 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
                                   <AlertDialogAction
                                     onClick={() => handleAction(cluster.id, 'delete')}
-                                    className="bg-red-600 hover:bg-red-700"
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                                   >
                                     Excluir
                                   </AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>
-
-                            {/* Botão Ver Detalhes */}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleViewDetails(cluster.id)}
-                              title="Ver Detalhes"
-                            >
-                              <Eye className="h-3 w-3" />
-                            </Button>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
           </div>
         </CardContent>
       </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
