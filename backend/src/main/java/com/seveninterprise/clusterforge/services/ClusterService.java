@@ -434,16 +434,76 @@ public class ClusterService implements IClusterService {
         Cluster cluster = findClusterById(clusterId);
         
         try {
-            // Usa containerId se disponível, senão usa o nome sanitizado
-            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
-                ? cluster.getContainerId() 
-                : cluster.getSanitizedContainerName();
+            // Verifica se o diretório do cluster existe
+            String clusterPath = cluster.getRootPath();
+            if (clusterPath == null || clusterPath.isEmpty()) {
+                throw new ClusterException("Diretório do cluster não encontrado para cluster ID: " + clusterId);
+            }
             
-            dockerService.startContainer(containerIdentifier);
-            cluster.setStatus("RUNNING");
+            // Verifica se o arquivo docker-compose.yml existe
+            String composePath = clusterPath + "/" + DOCKER_COMPOSE_FILE;
+            java.io.File composeFile = new java.io.File(composePath);
+            if (!composeFile.exists() || !composeFile.isFile()) {
+                throw new ClusterException("Arquivo docker-compose.yml não encontrado em: " + composePath);
+            }
+            
+            // Usa docker-compose up -d para iniciar o cluster
+            // Isso é mais confiável que iniciar container por ID/nome
+            boolean dockerSuccess = instantiateDockerContainer(cluster.getName(), clusterPath);
+            
+            if (dockerSuccess) {
+                // Aguardar um pouco para o Docker processar a inicialização
+                Thread.sleep(2000);
+                
+                // Obtém o identificador do container para verificação
+                String containerIdentifier = cluster.getSanitizedContainerName();
+                String containerId = dockerService.getContainerId(containerIdentifier);
+                if (containerId != null && !containerId.isEmpty()) {
+                    cluster.setContainerId(containerId);
+                    containerIdentifier = containerId; // Usar ID se disponível (mais preciso)
+                    System.out.println("Container ID atualizado: " + containerId + " para cluster: " + cluster.getName());
+                }
+                
+                // Verificar se o container realmente está rodando
+                if (verifyContainerRunning(containerIdentifier)) {
+                    cluster.setStatus("RUNNING");
+                    clusterRepository.save(cluster);
+                    
+                    // Limites de recursos já estão aplicados no docker-compose.yml
+                    // O docker-compose up -d irá aplicar automaticamente
+                    System.out.println("Cluster iniciado e verificado. Limites de recursos aplicados via docker-compose.yml");
+                    
+                    return buildResponse(cluster, "RUNNING", "Cluster iniciado e verificado com sucesso");
+                } else {
+                    // Comando executou mas container não está rodando
+                    System.out.println("⚠️ Comando docker-compose up executado mas container não está rodando. Verificando...");
+                    // Tenta verificar novamente após mais um tempo (pode estar inicializando)
+                    Thread.sleep(3000);
+                    
+                    if (verifyContainerRunning(containerIdentifier)) {
+                        cluster.setStatus("RUNNING");
+                        clusterRepository.save(cluster);
+                        return buildResponse(cluster, "RUNNING", "Cluster iniciado com sucesso (aguardou inicialização)");
+                    } else {
+                        cluster.setStatus("ERROR");
+                        clusterRepository.save(cluster);
+                        return buildResponse(cluster, "ERROR", "Falha ao verificar inicialização do cluster. Container pode não estar rodando.");
+                    }
+                }
+            } else {
+                cluster.setStatus("ERROR");
+                clusterRepository.save(cluster);
+                return buildResponse(cluster, "ERROR", "Falha ao iniciar cluster via docker-compose");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("Interrompido durante inicialização do cluster: " + e.getMessage());
+            cluster.setStatus("ERROR");
             clusterRepository.save(cluster);
-            return buildResponse(cluster, "RUNNING", "Cluster iniciado com sucesso");
+            return buildResponse(cluster, "ERROR", "Operação interrompida: " + e.getMessage());
         } catch (Exception e) {
+            System.err.println("Erro ao iniciar cluster: " + e.getMessage());
+            e.printStackTrace();
             cluster.setStatus("ERROR");
             clusterRepository.save(cluster);
             return buildResponse(cluster, "ERROR", "Erro ao iniciar cluster: " + e.getMessage());
@@ -455,20 +515,297 @@ public class ClusterService implements IClusterService {
         Cluster cluster = findClusterById(clusterId);
         
         try {
-            // Usa containerId se disponível, senão usa o nome sanitizado
+            // Verifica se o diretório do cluster existe
+            String clusterPath = cluster.getRootPath();
+            if (clusterPath == null || clusterPath.isEmpty()) {
+                throw new ClusterException("Diretório do cluster não encontrado para cluster ID: " + clusterId);
+            }
+            
+            // Obtém identificador do container para verificação posterior
             String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
                 ? cluster.getContainerId() 
                 : cluster.getSanitizedContainerName();
             
-            dockerService.stopContainer(containerIdentifier);
-            cluster.setStatus("STOPPED");
+            // Usa docker-compose down para parar o cluster
+            // Isso é mais confiável que parar container por ID/nome
+            String dockerCmd = getDockerCommand();
+            String composeCmd;
+            
+            if (dockerCmd.contains("sudo")) {
+                composeCmd = "sudo bash -c 'cd " + clusterPath + " && docker-compose down'";
+            } else {
+                composeCmd = "bash -c 'cd " + clusterPath + " && docker-compose down'";
+            }
+            
+            String result = dockerService.runCommand(composeCmd);
+            boolean commandSuccess = isDockerCommandSuccessful(result);
+            
+            if (commandSuccess) {
+                // Aguardar um pouco para o Docker processar a parada
+                Thread.sleep(1500);
+                
+                // Verificar se o container realmente parou
+                if (verifyContainerStopped(containerIdentifier)) {
+                    cluster.setStatus("STOPPED");
+                    clusterRepository.save(cluster);
+                    return buildResponse(cluster, "STOPPED", "Cluster parado e verificado com sucesso");
+                } else {
+                    // Comando executou mas container ainda está rodando - tenta método alternativo
+                    System.out.println("⚠️ Comando docker-compose down executado mas container ainda está rodando. Tentando método alternativo...");
+                    try {
+                        dockerService.stopContainer(containerIdentifier);
+                        Thread.sleep(1500);
+                        
+                        if (verifyContainerStopped(containerIdentifier)) {
+                            cluster.setStatus("STOPPED");
+                            clusterRepository.save(cluster);
+                            return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso (método alternativo)");
+                        } else {
+                            // Container ainda não parou após tentativas
+                            cluster.setStatus("ERROR");
+                            clusterRepository.save(cluster);
+                            return buildResponse(cluster, "ERROR", "Falha ao verificar parada do cluster. Container pode ainda estar rodando.");
+                        }
+                    } catch (Exception fallbackError) {
+                        System.err.println("Erro no método alternativo de parar: " + fallbackError.getMessage());
+                        cluster.setStatus("ERROR");
+                        clusterRepository.save(cluster);
+                        return buildResponse(cluster, "ERROR", "Falha ao parar cluster: " + fallbackError.getMessage());
+                    }
+                }
+            } else {
+                // docker-compose down falhou - tenta método alternativo
+                try {
+                    dockerService.stopContainer(containerIdentifier);
+                    Thread.sleep(1500);
+                    
+                    if (verifyContainerStopped(containerIdentifier)) {
+                        cluster.setStatus("STOPPED");
+                        clusterRepository.save(cluster);
+                        return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso (método alternativo)");
+                    } else {
+                        cluster.setStatus("ERROR");
+                        clusterRepository.save(cluster);
+                        return buildResponse(cluster, "ERROR", "Falha ao parar cluster: comando executado mas container ainda está rodando");
+                    }
+                } catch (Exception fallbackError) {
+                    System.err.println("Erro no método alternativo de parar: " + fallbackError.getMessage());
+                    cluster.setStatus("ERROR");
+                    clusterRepository.save(cluster);
+                    return buildResponse(cluster, "ERROR", "Falha ao parar cluster: " + result);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("Interrompido durante parada do cluster: " + e.getMessage());
+            cluster.setStatus("ERROR");
             clusterRepository.save(cluster);
-            return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso");
+            return buildResponse(cluster, "ERROR", "Operação interrompida: " + e.getMessage());
         } catch (Exception e) {
+            System.err.println("Erro ao parar cluster: " + e.getMessage());
+            e.printStackTrace();
             cluster.setStatus("ERROR");
             clusterRepository.save(cluster);
             return buildResponse(cluster, "ERROR", "Erro ao parar cluster: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Verifica se o container Docker realmente está parado
+     * Faz polling até confirmar ou atingir o limite de tentativas
+     * 
+     * @param containerIdentifier ID ou nome do container
+     * @return true se o container está parado, false caso contrário
+     */
+    private boolean verifyContainerStopped(String containerIdentifier) {
+        if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+            // Se não tem identificador, assume que não existe = parado
+            return true;
+        }
+        
+        int maxAttempts = 5;
+        int attempts = 0;
+        long pollInterval = 1000; // 1 segundo
+        
+        while (attempts < maxAttempts) {
+            try {
+                String result = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
+                
+                if (result == null || result.isEmpty()) {
+                    // Container não encontrado = parado/removido
+                    return true;
+                }
+                
+                if (result.contains("Process exited with code: 0")) {
+                    // Extrair o status do resultado
+                    String status = extractContainerStatusFromResult(result);
+                    System.out.println("📊 Status do container " + containerIdentifier + ": " + status);
+                    
+                    // Container está parado se status é: stopped, exited, ou not found
+                    if ("stopped".equalsIgnoreCase(status) || 
+                        "exited".equalsIgnoreCase(status) ||
+                        "not_found".equalsIgnoreCase(status)) {
+                        return true;
+                    }
+                    
+                    // Se ainda está running, aguarda e tenta novamente
+                    if ("running".equalsIgnoreCase(status)) {
+                        attempts++;
+                        if (attempts < maxAttempts) {
+                            Thread.sleep(pollInterval);
+                        }
+                        continue;
+                    }
+                }
+                
+                // Se não conseguiu verificar, tenta novamente
+                attempts++;
+                if (attempts < maxAttempts) {
+                    Thread.sleep(pollInterval);
+                }
+            } catch (Exception e) {
+                System.err.println("⚠️ Erro ao verificar status do container (tentativa " + (attempts + 1) + "): " + e.getMessage());
+                attempts++;
+                try {
+                    if (attempts < maxAttempts) {
+                        Thread.sleep(pollInterval);
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        }
+        
+        // Após todas as tentativas, verifica uma última vez
+        try {
+            String finalCheck = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
+            if (finalCheck == null || finalCheck.isEmpty() || !finalCheck.contains("Process exited with code: 0")) {
+                // Container não encontrado ou erro = assumir parado
+                return true;
+            }
+            String status = extractContainerStatusFromResult(finalCheck);
+            return "stopped".equalsIgnoreCase(status) || 
+                   "exited".equalsIgnoreCase(status) ||
+                   "not_found".equalsIgnoreCase(status);
+        } catch (Exception e) {
+            // Em caso de erro, assumir que não conseguiu verificar
+            return false;
+        }
+    }
+    
+    /**
+     * Verifica se o container Docker realmente está rodando
+     * Faz polling até confirmar ou atingir o limite de tentativas
+     * 
+     * @param containerIdentifier ID ou nome do container
+     * @return true se o container está rodando, false caso contrário
+     */
+    private boolean verifyContainerRunning(String containerIdentifier) {
+        if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+            // Se não tem identificador, não pode verificar
+            return false;
+        }
+        
+        int maxAttempts = 8; // Mais tentativas para iniciar (pode demorar mais)
+        int attempts = 0;
+        long pollInterval = 1500; // 1.5 segundos (inicialização pode ser mais lenta)
+        
+        while (attempts < maxAttempts) {
+            try {
+                String result = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
+                
+                if (result == null || result.isEmpty()) {
+                    // Container não encontrado = não está rodando
+                    attempts++;
+                    if (attempts < maxAttempts) {
+                        Thread.sleep(pollInterval);
+                    }
+                    continue;
+                }
+                
+                if (result.contains("Process exited with code: 0")) {
+                    // Extrair o status do resultado
+                    String status = extractContainerStatusFromResult(result);
+                    System.out.println("📊 Status do container " + containerIdentifier + ": " + status);
+                    
+                    // Container está rodando se status é: running
+                    if ("running".equalsIgnoreCase(status)) {
+                        return true;
+                    }
+                    
+                    // Se não está running ainda, aguarda e tenta novamente
+                    attempts++;
+                    if (attempts < maxAttempts) {
+                        Thread.sleep(pollInterval);
+                    }
+                    continue;
+                }
+                
+                // Se não conseguiu verificar, tenta novamente
+                attempts++;
+                if (attempts < maxAttempts) {
+                    Thread.sleep(pollInterval);
+                }
+            } catch (Exception e) {
+                System.err.println("⚠️ Erro ao verificar status do container (tentativa " + (attempts + 1) + "): " + e.getMessage());
+                attempts++;
+                try {
+                    if (attempts < maxAttempts) {
+                        Thread.sleep(pollInterval);
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        }
+        
+        // Após todas as tentativas, verifica uma última vez
+        try {
+            String finalCheck = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
+            if (finalCheck != null && finalCheck.contains("Process exited with code: 0")) {
+                String status = extractContainerStatusFromResult(finalCheck);
+                return "running".equalsIgnoreCase(status);
+            }
+            return false;
+        } catch (Exception e) {
+            // Em caso de erro, assumir que não conseguiu verificar
+            return false;
+        }
+    }
+    
+    /**
+     * Extrai o status do container do resultado do comando docker inspect
+     * @param result Resultado do comando docker inspect
+     * @return Status do container (running, stopped, exited, etc.)
+     */
+    private String extractContainerStatusFromResult(String result) {
+        if (result == null || result.isEmpty()) {
+            return "not_found";
+        }
+        
+        // Remove o texto "Process exited with code: 0" se presente
+        String cleaned = result.replace("Process exited with code: 0", "").trim();
+        
+        // Procura por status conhecidos
+        String[] statuses = {"running", "stopped", "exited", "created", "paused"};
+        for (String status : statuses) {
+            if (cleaned.toLowerCase().contains(status)) {
+                return status;
+            }
+        }
+        
+        // Se não encontrou, retorna o primeiro token não vazio
+        String[] lines = cleaned.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty() && !trimmed.equals("0")) {
+                return trimmed.toLowerCase();
+            }
+        }
+        
+        return "unknown";
     }
     
     private Cluster findClusterById(Long clusterId) {
@@ -531,9 +868,16 @@ public class ClusterService implements IClusterService {
             boolean containerWasRunning = isContainerRunning(containerIdentifier);
             
             if (containerWasRunning) {
-                // Para o container
+                // Para o container usando método com verificação
                 try {
-                    dockerService.stopContainer(containerIdentifier);
+                    CreateClusterResponse stopResponse = stopCluster(clusterId, savedCluster.getUser().getId());
+                    if (!"STOPPED".equals(stopResponse.getStatus())) {
+                        System.err.println("Warning: Container pode não ter parado completamente antes do update");
+                    }
+                    Thread.sleep(1000); // Aguardar parada completa
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    System.err.println("Warning: Interrompido durante parada do container antes do update");
                 } catch (Exception e) {
                     System.err.println("Warning: Failed to stop container before update: " + e.getMessage());
                 }
@@ -541,10 +885,10 @@ public class ClusterService implements IClusterService {
                 // Limpa redes antes de reiniciar
                 dockerService.pruneUnusedNetworks();
                 
-                // Inicia novamente com novos limites
-                boolean restartSuccess = instantiateDockerContainer(cluster.getName(), cluster.getRootPath());
+                // Inicia novamente com novos limites usando método com verificação
+                CreateClusterResponse startResponse = startCluster(clusterId, savedCluster.getUser().getId());
                 
-                if (restartSuccess) {
+                if ("RUNNING".equals(startResponse.getStatus())) {
                     // Atualiza o containerId após reiniciar
                     String newContainerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
                     savedCluster.setContainerId(newContainerId);
@@ -554,7 +898,7 @@ public class ClusterService implements IClusterService {
                         "Limites atualizados e cluster reiniciado com sucesso");
                 } else {
                     return buildResponse(savedCluster, "UPDATED_PARTIAL", 
-                        "Limites atualizados mas falha ao reiniciar container. Execute start manualmente");
+                        "Limites atualizados mas falha ao reiniciar container: " + startResponse.getMessage());
                 }
             } else {
                 return buildResponse(savedCluster, "UPDATED", 

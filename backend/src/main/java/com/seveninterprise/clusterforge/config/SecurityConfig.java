@@ -38,6 +38,11 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        // Permitir requisições HTTP de handshake do SockJS para /ws/metrics/**
+                        // IMPORTANTE: Isso permite apenas o handshake HTTP. A conexão WebSocket real
+                        // requer autenticação JWT obrigatória via ChannelInterceptor em WebSocketSecurityConfig.
+                        // Conexões sem token JWT válido serão REJEITADAS pelo ChannelInterceptor.
+                        .requestMatchers("/ws/metrics/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

@@ -44,6 +44,7 @@ public class ClusterHealthService implements IClusterHealthService {
     private final ClusterHealthStatusRepository healthStatusRepository;
     private final ClusterHealthMetricsRepository metricsRepository;
     private final DockerService dockerService;
+    private final MetricsWebSocketService metricsWebSocketService;
     private ExecutorService executorService;
     
     @Value("${clusterforge.health.check.interval:60}")
@@ -61,11 +62,13 @@ public class ClusterHealthService implements IClusterHealthService {
     public ClusterHealthService(ClusterRepository clusterRepository,
                               ClusterHealthStatusRepository healthStatusRepository,
                               ClusterHealthMetricsRepository metricsRepository,
-                              DockerService dockerService) {
+                              DockerService dockerService,
+                              MetricsWebSocketService metricsWebSocketService) {
         this.clusterRepository = clusterRepository;
         this.healthStatusRepository = healthStatusRepository;
         this.metricsRepository = metricsRepository;
         this.dockerService = dockerService;
+        this.metricsWebSocketService = metricsWebSocketService;
         // Inicializar executorService no @PostConstruct para garantir que @Value seja injetado
     }
     
@@ -89,7 +92,29 @@ public class ClusterHealthService implements IClusterHealthService {
             healthStatus.setApplicationResponseTimeMs(responseTime);
             
             // 3. Coletar métricas de recursos
-            ClusterHealthMetrics metrics = collectResourceMetrics(cluster);
+            // Verificar se o container está rodando antes de coletar métricas
+            boolean containerNotFound = "NOT_FOUND".equals(containerStatus) || containerStatus.startsWith("ERROR");
+            boolean containerStopped = !"running".equalsIgnoreCase(containerStatus);
+            
+            ClusterHealthMetrics metrics;
+            if (containerNotFound || containerStopped) {
+                // Container parado ou não encontrado: criar métricas zeradas
+                System.out.println("⚠️ Container " + (containerNotFound ? "não encontrado" : "parado") + 
+                                 " para cluster " + cluster.getId() + " - criando métricas zeradas");
+                metrics = createZeroMetrics(cluster);
+                // Zerar métricas no healthStatus
+                zeroHealthStatusMetrics(healthStatus);
+            } else {
+                // Container rodando: coletar métricas reais
+                metrics = collectResourceMetrics(cluster);
+                if (metrics == null) {
+                    // Se a coleta falhou, usar métricas zeradas como fallback
+                    System.out.println("⚠️ Falha ao coletar métricas para cluster " + cluster.getId() + " - usando métricas zeradas");
+                    metrics = createZeroMetrics(cluster);
+                    zeroHealthStatusMetrics(healthStatus);
+                }
+            }
+            
             if (metrics != null) {
                 try {
                     metricsRepository.save(metrics);
@@ -111,6 +136,21 @@ public class ClusterHealthService implements IClusterHealthService {
             // 4. Determinar status geral de saúde
             ClusterHealthStatus.HealthState newState = determineHealthState(healthStatus, containerStatus, responseTime);
             
+            // 4.1. Se container não existe ou está parado, atualizar status do cluster para STOPPED
+            if (containerNotFound || containerStopped) {
+                try {
+                    Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(null);
+                    if (clusterToUpdate != null && !"STOPPED".equals(clusterToUpdate.getStatus())) {
+                        clusterToUpdate.setStatus("STOPPED");
+                        clusterRepository.save(clusterToUpdate);
+                        System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para STOPPED (container " + 
+                                         (containerNotFound ? "não existe" : "parado") + ")");
+                    }
+                } catch (Exception e) {
+                    System.err.println("⚠️ Erro ao atualizar status do cluster: " + e.getMessage());
+                }
+            }
+            
             // 5. Atualizar contadores e timestamps
             updateHealthCounters(healthStatus, newState);
             
@@ -121,6 +161,14 @@ public class ClusterHealthService implements IClusterHealthService {
             
             // 7. Registrar evento
             recordHealthEvent(healthStatus, newState);
+            
+            // 8. Enviar métricas atualizadas via WebSocket
+            try {
+                metricsWebSocketService.broadcastMetrics();
+            } catch (Exception e) {
+                // Não quebra o health check se o WebSocket falhar
+                System.err.println("Erro ao enviar métricas via WebSocket: " + e.getMessage());
+            }
             
             return healthStatus;
             
@@ -454,11 +502,22 @@ public class ClusterHealthService implements IClusterHealthService {
             if (!cpuStr.isEmpty() && !cpuStr.equals("--")) {
                 try {
                     double cpuPercentFromDocker = Double.parseDouble(cpuStr);
-                    metrics.setCpuUsagePercent(cpuPercentFromDocker);
-                    System.out.println("   ✅ CPU: " + cpuPercentFromDocker + "%");
+                    // Validar se o valor é razoável (max 1000% para evitar valores absurdos)
+                    // Quando o container está parado, o Docker pode retornar valores incorretos
+                    if (cpuPercentFromDocker < 0 || cpuPercentFromDocker > 1000) {
+                        System.err.println("⚠️ Valor de CPU inválido detectado: " + cpuPercentFromDocker + "% - zerando métrica");
+                        metrics.setCpuUsagePercent(0.0);
+                    } else {
+                        metrics.setCpuUsagePercent(cpuPercentFromDocker);
+                        System.out.println("   ✅ CPU: " + cpuPercentFromDocker + "%");
+                    }
                 } catch (NumberFormatException e) {
-                    System.err.println("⚠️ Erro ao fazer parse de CPU: '" + cpuStr + "'");
+                    System.err.println("⚠️ Erro ao fazer parse de CPU: '" + cpuStr + "' - zerando métrica");
+                    metrics.setCpuUsagePercent(0.0);
                 }
+            } else {
+                // Se CPU estiver vazio ou "--", zerar
+                metrics.setCpuUsagePercent(0.0);
             }
             
             // Armazenar limite de CPU configurado no cluster
@@ -696,6 +755,55 @@ public class ClusterHealthService implements IClusterHealthService {
         }
     }
     
+    /**
+     * Cria métricas zeradas quando o container não existe
+     */
+    private ClusterHealthMetrics createZeroMetrics(Cluster cluster) {
+        ClusterHealthMetrics metrics = new ClusterHealthMetrics();
+        metrics.setCluster(cluster);
+        metrics.setTimestamp(LocalDateTime.now());
+        
+        // Zerar todas as métricas
+        metrics.setCpuUsagePercent(0.0);
+        metrics.setMemoryUsageMb(0L);
+        metrics.setMemoryLimitMb(cluster.getMemoryLimit());
+        metrics.setMemoryUsagePercent(0.0);
+        metrics.setDiskUsageMb(0L);
+        metrics.setDiskLimitMb(cluster.getDiskLimit() != null ? cluster.getDiskLimit() * 1024L : null);
+        metrics.setDiskUsagePercent(0.0);
+        metrics.setNetworkRxBytes(0L);
+        metrics.setNetworkTxBytes(0L);
+        metrics.setNetworkLimitMbps(cluster.getNetworkLimit());
+        metrics.setCpuLimitCores(cluster.getCpuLimit());
+        
+        // Status do container
+        metrics.setContainerStatus("NOT_FOUND");
+        metrics.setContainerRestartCount(0);
+        metrics.setContainerUptimeSeconds(0L);
+        metrics.setContainerExitCode(null);
+        
+        // Application metrics
+        metrics.setApplicationResponseTimeMs(null);
+        metrics.setApplicationStatusCode(null);
+        metrics.setApplicationUptimeSeconds(0L);
+        metrics.setApplicationRequestsTotal(0L);
+        metrics.setApplicationRequestsFailed(0L);
+        
+        return metrics;
+    }
+    
+    /**
+     * Zera as métricas no healthStatus quando o container não existe
+     */
+    private void zeroHealthStatusMetrics(ClusterHealthStatus healthStatus) {
+        healthStatus.setCpuUsagePercent(0.0);
+        healthStatus.setMemoryUsageMb(0L);
+        healthStatus.setDiskUsageMb(0L);
+        healthStatus.setNetworkRxMb(0L);
+        healthStatus.setNetworkTxMb(0L);
+        healthStatus.setErrorMessage("Container não encontrado ou Docker não está rodando");
+    }
+    
     private void updateHealthStatusFromMetrics(ClusterHealthStatus healthStatus, ClusterHealthMetrics metrics) {
         healthStatus.setCpuUsagePercent(metrics.getCpuUsagePercent());
         healthStatus.setMemoryUsageMb(metrics.getMemoryUsageMb());
@@ -892,6 +1000,12 @@ public class ClusterHealthService implements IClusterHealthService {
     public void scheduledHealthCheck() {
         System.out.println("Executando verificação agendada de saúde dos clusters...");
         checkAllClustersHealth();
+        // Enviar métricas via WebSocket após verificação completa
+        try {
+            metricsWebSocketService.broadcastMetrics();
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar métricas via WebSocket após health check: " + e.getMessage());
+        }
     }
     
     // Agendamento automático de recuperação

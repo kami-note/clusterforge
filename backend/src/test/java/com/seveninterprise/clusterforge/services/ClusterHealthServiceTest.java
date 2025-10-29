@@ -44,6 +44,9 @@ class ClusterHealthServiceTest {
     @Mock
     private DockerService dockerService;
     
+    @Mock
+    private MetricsWebSocketService metricsWebSocketService;
+    
     private ClusterHealthService healthService;
     
     private Cluster testCluster;
@@ -55,7 +58,8 @@ class ClusterHealthServiceTest {
             clusterRepository,
             healthStatusRepository,
             metricsRepository,
-            dockerService
+            dockerService,
+            metricsWebSocketService
         );
         
         // Setup test cluster
