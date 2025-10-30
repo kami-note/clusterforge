@@ -21,6 +21,9 @@ public class JwtProvider {
 
     private SecretKey SECRET_KEY;
 
+    @Value("${jwt.access.expiration.ms:3600000}")
+    private long accessExpirationMs;
+
     @PostConstruct
     public void init() {
         byte[] keyBytes = Decoders.BASE64.decode(secretKeyString);
@@ -67,7 +70,7 @@ public class JwtProvider {
                 .setSubject(subject)
                 .claim("role", role) // Adiciona o role como claim
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10))
+                .setExpiration(new Date(System.currentTimeMillis() + accessExpirationMs))
                 .signWith(SECRET_KEY)
                 .compact();
     }
