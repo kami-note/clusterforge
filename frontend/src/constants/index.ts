@@ -132,3 +132,4 @@ export const CHART_CONFIG = {
   DATA_UPDATE_THRESHOLD: 0.01, // Mudança mínima para adicionar novo ponto
 } as const;
 
+
