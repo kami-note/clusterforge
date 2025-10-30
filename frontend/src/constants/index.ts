@@ -7,6 +7,7 @@
 // ============================================
 export const STORAGE_KEYS = {
   TOKEN: 'clusterforge_token',
+  REFRESH_TOKEN: 'clusterforge_refresh_token',
   USER: 'clusterforge_user',
   THEME: 'clusterforge_theme',
 } as const;

@@ -17,8 +17,11 @@ class AuthService {
       password,
     });
 
-    // Armazena o token
+    // Armazena tokens
     httpClient.setToken(response.token);
+    if (response.refreshToken && typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, response.refreshToken);
+    }
 
     return response;
   }
@@ -37,7 +40,16 @@ class AuthService {
    * Realiza logout
    */
   async logout(): Promise<void> {
+    try {
+      const refreshToken = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN) : null;
+      if (refreshToken) {
+        await httpClient.post('/auth/logout', { refreshToken });
+      }
+    } catch {}
     httpClient.clearToken();
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+    }
   }
 
   /**

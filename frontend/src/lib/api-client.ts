@@ -13,6 +13,8 @@ export interface ApiError {
 
 export class HttpClient {
   private baseUrl: string;
+  private isRefreshing = false;
+  private refreshPromise: Promise<void> | null = null;
 
   constructor() {
     this.baseUrl = config.api.baseUrl;
@@ -44,13 +46,29 @@ export class HttpClient {
       ...options.headers,
     });
 
-    const response = await fetch(fullUrl, {
+    let response = await fetch(fullUrl, {
       ...options,
       headers,
       signal: AbortSignal.timeout(config.api.timeout),
     });
 
-    // Tratamento de erros HTTP
+    // Se 401, tenta refresh automático uma vez
+    if (response.status === 401) {
+      const refreshed = await this.tryRefreshToken();
+      if (refreshed) {
+        const retryHeaders = new Headers({
+          'Content-Type': 'application/json',
+          ...(this.getToken() && { Authorization: `Bearer ${this.getToken()}` }),
+          ...options.headers,
+        });
+        response = await fetch(fullUrl, {
+          ...options,
+          headers: retryHeaders,
+          signal: AbortSignal.timeout(config.api.timeout),
+        });
+      }
+    }
+
     if (!response.ok) {
       await this.handleError(response);
     }
@@ -129,6 +147,61 @@ export class HttpClient {
     localStorage.removeItem(config.auth.tokenKey);
   }
 
+  private getRefreshToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem(config.auth.refreshTokenKey);
+  }
+
+  setRefreshToken(refreshToken: string): void {
+    localStorage.setItem(config.auth.refreshTokenKey, refreshToken);
+  }
+
+  clearRefreshToken(): void {
+    localStorage.removeItem(config.auth.refreshTokenKey);
+  }
+
+  private async tryRefreshToken(): Promise<boolean> {
+    const refreshToken = this.getRefreshToken();
+    if (!refreshToken) return false;
+    if (this.isRefreshing && this.refreshPromise) {
+      try {
+        await this.refreshPromise;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    this.isRefreshing = true;
+    this.refreshPromise = (async () => {
+      try {
+        const resp = await fetch(`${this.baseUrl}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+          signal: AbortSignal.timeout(config.api.timeout),
+        });
+        if (!resp.ok) {
+          throw new Error('Refresh failed');
+        }
+        const data = await resp.json();
+        if (data?.token) this.setToken(data.token);
+        if (data?.refreshToken) this.setRefreshToken(data.refreshToken);
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    })();
+
+    try {
+      await this.refreshPromise;
+      return true;
+    } catch {
+      this.clearToken();
+      this.clearRefreshToken();
+      return false;
+    }
+  }
+
   /**
    * Tratamento centralizado de erros
    */
@@ -151,9 +224,10 @@ export class HttpClient {
       errors: errorDetails,
     };
 
-    // 401 Unauthorized - limpa o token
+    // 401 Unauthorized - limpa tokens e redireciona
     if (response.status === 401) {
       this.clearToken();
+      this.clearRefreshToken();
       // Redireciona para login se estiver no browser
       if (typeof window !== 'undefined') {
         window.location.href = '/auth/login';

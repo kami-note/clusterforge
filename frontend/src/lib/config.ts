@@ -12,6 +12,7 @@ export const config = {
   },
   auth: {
     tokenKey: STORAGE_KEYS.TOKEN,
+    refreshTokenKey: STORAGE_KEYS.REFRESH_TOKEN,
     userKey: STORAGE_KEYS.USER,
   },
 };

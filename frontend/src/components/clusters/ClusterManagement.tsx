@@ -278,6 +278,27 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     });
   }, [apiClusters, metrics]);
 
+  // Precisa ser declarado ANTES de qualquer retorno condicional para manter a ordem dos Hooks
+  const filteredClusters = useMemo(() => {
+    return clusters.filter(cluster => {
+      const matchesSearch =
+        cluster.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        cluster.owner.toLowerCase().includes(searchTerm.toLowerCase());
+
+      const matchesStatus = statusFilter === 'all' || cluster.status === statusFilter;
+
+      const matchesOwner = ownerFilter === 'Todos os Donos' || cluster.owner === ownerFilter;
+
+      const matchesService = serviceFilter === 'Todos os Serviços' || cluster.service === serviceFilter;
+
+      const matchesAlert = alertFilter === 'all' ||
+        (alertFilter === 'with-alerts' && cluster.hasAlert) ||
+        (alertFilter === 'no-alerts' && !cluster.hasAlert);
+
+      return matchesSearch && matchesStatus && matchesOwner && matchesService && matchesAlert;
+    });
+  }, [clusters, searchTerm, statusFilter, ownerFilter, serviceFilter, alertFilter]);
+
   // Exibir estado de carregamento claro para evitar mostrar dados inconsistentes
   if (loading) {
     return (
@@ -332,25 +353,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     router.push(`/admin/clusters/${clusterId}`);
   };
 
-  const filteredClusters = useMemo(() => {
-    return clusters.filter(cluster => {
-      const matchesSearch =
-        cluster.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        cluster.owner.toLowerCase().includes(searchTerm.toLowerCase());
-
-      const matchesStatus = statusFilter === 'all' || cluster.status === statusFilter;
-
-      const matchesOwner = ownerFilter === 'Todos os Donos' || cluster.owner === ownerFilter;
-
-      const matchesService = serviceFilter === 'Todos os Serviços' || cluster.service === serviceFilter;
-
-      const matchesAlert = alertFilter === 'all' ||
-        (alertFilter === 'with-alerts' && cluster.hasAlert) ||
-        (alertFilter === 'no-alerts' && !cluster.hasAlert);
-
-      return matchesSearch && matchesStatus && matchesOwner && matchesService && matchesAlert;
-    });
-  }, [clusters, searchTerm, statusFilter, ownerFilter, serviceFilter, alertFilter]);
+  
 
   const getStatusBadge = (status: string) => {
     switch (status) {

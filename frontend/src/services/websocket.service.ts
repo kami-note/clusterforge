@@ -7,6 +7,7 @@ import { Client, IMessage } from '@stomp/stompjs';
 // @ts-ignore - sockjs-client não possui tipos TypeScript
 import SockJS from 'sockjs-client';
 import { config } from '@/lib/config';
+import { httpClient } from '@/lib/api-client';
 import { STORAGE_KEYS, WEBSOCKET_CONFIG } from '@/constants';
 import type { ClusterMetrics, ClusterStatsMessage } from '@/types';
 
@@ -87,20 +88,37 @@ class WebSocketService {
         this.isConnected = false;
         this.notifyConnectionCallbacks(false);
       },
-      onStompError: (frame: { command?: string; headers?: Record<string, string>; body?: string }) => {
-        const errorMessage = frame.headers?.['message'] || frame.body || 'Erro desconhecido no STOMP';
-        console.error('Erro STOMP:', {
-          command: frame.command,
-          headers: frame.headers,
-          body: frame.body,
-          message: errorMessage,
-        });
+      onStompError: (frame: { command?: string; headers?: Record<string, string>; body?: string } | undefined) => {
+        try {
+          const headerMessage = frame && frame.headers ? frame.headers['message'] : undefined;
+          const bodyText = frame && typeof frame.body === 'string' ? frame.body : undefined;
+          let parsedBody: unknown;
+          if (bodyText && bodyText.trim().startsWith('{')) {
+            try { parsedBody = JSON.parse(bodyText); } catch {}
+          }
+          const errorMessage = headerMessage || (typeof parsedBody === 'object' && parsedBody && 'message' in (parsedBody as Record<string, unknown>)
+            ? String((parsedBody as Record<string, unknown>).message)
+            : (bodyText || 'Erro desconhecido no STOMP'));
+
+          // Loga mensagem clara e o frame completo para diagnóstico
+          console.error('Erro STOMP:', errorMessage, frame);
+        } catch (e) {
+          console.error('Erro STOMP (fallback):', e);
+        }
         
         // Verificar se é erro de autenticação
-        if (errorMessage.includes('autenticação') || errorMessage.includes('JWT') || errorMessage.includes('obrigatória')) {
-          console.error('Falha de autenticação WebSocket. Verifique se o token JWT é válido.');
-          // Não reconectar automaticamente se for erro de autenticação
-          return;
+        const authHints = ['autenticação', 'JWT', 'obrigatória', 'Unauthorized', 'Forbidden', 'expired'];
+        const msg = (frame && (frame.headers?.['message'] || frame.body)) || '';
+        if (authHints.some(h => (msg || '').includes(h))) {
+          console.error('Falha de autenticação WebSocket. Limpando sessão e redirecionando para login.');
+          try {
+            httpClient.clearToken();
+            httpClient.clearRefreshToken();
+          } catch {}
+          if (typeof window !== 'undefined') {
+            window.location.href = '/auth/login';
+          }
+          return; // Não reconectar
         }
         
         this.handleReconnect();

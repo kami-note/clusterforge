@@ -6,6 +6,7 @@ import { clusterService } from '@/services/cluster.service';
 import { Cluster } from '@/types';
 import { mapClusterStatus, formatTemplateName } from '@/utils/cluster.utils';
 import { memoryMbToGb, cpuCoresToPercent } from '@/utils/cluster.utils';
+import { handleError } from '@/utils/error.utils';
 
 interface ClustersContextType {
   clusters: Cluster[];
@@ -96,7 +97,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               port: details.port?.toString() || details.rootPath,
             };
           } catch (error) {
-            console.error(`Error loading cluster ${cluster.id}:`, error);
+            const message = handleError(error);
+            console.error(`Error loading cluster ${cluster.id}:`, message, error);
             // Retorna dados básicos se falhar ao buscar detalhes
             return {
               id: cluster.id.toString(),
@@ -118,7 +120,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       
       setClusters(convertedClusters);
     } catch (error) {
-      console.error('Error loading clusters:', error);
+      const message = handleError(error);
+      console.error('Error loading clusters:', message, error);
       // Fallback para dados mockados em caso de erro
       setClusters(initialClusters);
     } finally {
@@ -149,7 +152,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       // Recarregar lista da API para ter dados atualizados (incluindo status)
       await loadClusters();
     } catch (error) {
-      console.error('Error adding cluster:', error);
+      const message = handleError(error);
+      console.error('Error adding cluster:', message, error);
       throw error;
     } finally {
       setLoading(false);
@@ -183,7 +187,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
 
       return cluster;
     } catch (error) {
-      console.error('Error finding cluster:', error);
+      const message = handleError(error);
+      console.error('Error finding cluster:', message, error);
       return null;
     } finally {
       setLoading(false);
@@ -205,7 +210,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       // Isso garante que o status sempre vem da fonte primária (API)
       await loadClusters();
     } catch (error) {
-      console.error('Error updating cluster:', error);
+      const message = handleError(error);
+      console.error('Error updating cluster:', message, error);
       throw error;
     } finally {
       setLoading(false);
@@ -222,7 +228,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       // Recarregar lista da API para garantir consistência
       await loadClusters();
     } catch (error) {
-      console.error('Error deleting cluster:', error);
+      const message = handleError(error);
+      console.error('Error deleting cluster:', message, error);
       throw error;
     } finally {
       setLoading(false);

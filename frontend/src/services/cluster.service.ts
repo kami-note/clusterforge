@@ -3,6 +3,7 @@
  */
 
 import { httpClient } from '@/lib/api-client';
+import { authService } from '@/services/auth.service';
 import type {
   CreateClusterRequest,
   CreateClusterResponse,
@@ -38,7 +39,33 @@ class ClusterService {
    * User: vê apenas seus clusters
    */
   async listClusters(): Promise<ClusterListItem[]> {
-    return httpClient.get<ClusterListItem[]>('/clusters');
+    try {
+      return await httpClient.get<ClusterListItem[]>('/clusters');
+    } catch (error) {
+      // Se acesso negado ao endpoint administrativo, busca clusters do usuário logado
+      const isApiError = typeof error === 'object' && error !== null && 'status' in (error as any);
+      if (isApiError && (error as any).status === 403) {
+        const user = await authService.getCurrentUser();
+        if (user?.id) {
+          const userClusters = await httpClient.get<ClusterDetailsResponse[]>(`/clusters/user/${user.id}`);
+          // Normaliza para ClusterListItem mínimo
+          return userClusters.map((c) => ({
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            port: c.port,
+            rootPath: c.rootPath,
+            userId: c.userId,
+            cpuLimit: c.cpuLimit,
+            memoryLimit: c.memoryLimit,
+            diskLimit: c.diskLimit,
+          }));
+        }
+        // Sem userId disponível, retorna vazio para evitar quebrar a UI
+        return [] as ClusterListItem[];
+      }
+      throw error;
+    }
   }
 
   /**
