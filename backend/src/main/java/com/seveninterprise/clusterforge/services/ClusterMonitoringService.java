@@ -11,7 +11,6 @@ import com.seveninterprise.clusterforge.repositories.ClusterHealthStatusReposito
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.scheduling.annotation.Scheduled;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -60,9 +59,9 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
     
     @Override
     public Map<String, Object> getRealtimeMetrics(Long clusterId) {
-        // Sempre busca a métrica mais recente do banco para garantir dados atualizados
-        // O cache pode estar desatualizado se novas métricas foram salvas
-        updateRealtimeMetricsCache(clusterId);
+        // NÃO buscar do banco - métricas vêm direto do Docker via HighFrequencyMetricsCollector
+        // Retornar apenas do cache (que é atualizado quando métricas são coletadas)
+        // Se não houver em cache, retornar vazio (métricas serão atualizadas quando coletadas)
         return realtimeMetrics.getOrDefault(clusterId, new HashMap<>());
     }
     
@@ -79,23 +78,13 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
     
     /**
      * Atualiza o cache de métricas em tempo real para um cluster
+     * DESABILITADO - não busca mais do banco. Métricas vêm direto do Docker.
+     * Este método pode ser usado para atualizar o cache quando métricas são coletadas do Docker.
      */
     private void updateRealtimeMetricsCache(Long clusterId) {
-        try {
-            Optional<ClusterHealthMetrics> latestMetrics = metricsRepository
-                .findTopByClusterIdOrderByTimestampDesc(clusterId);
-            
-            if (latestMetrics.isPresent()) {
-                ClusterHealthMetrics metrics = latestMetrics.get();
-                realtimeMetrics.put(clusterId, convertMetricsToMap(metrics));
-            } else {
-                // Se não há métricas, retorna mapa vazio
-                realtimeMetrics.put(clusterId, new HashMap<>());
-            }
-        } catch (Exception e) {
-            System.err.println("Erro ao atualizar cache de métricas para cluster " + clusterId + ": " + e.getMessage());
-            realtimeMetrics.put(clusterId, new HashMap<>());
-        }
+        // Método desabilitado - não buscar do banco
+        // O cache será atualizado quando métricas forem coletadas do Docker via HighFrequencyMetricsCollector
+        // ou quando recebidas via WebSocket
     }
     
     /**
@@ -158,7 +147,7 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
     }
     
     @Override
-    @Transactional
+    @Transactional(timeout = 10) // Timeout curto para operação simples
     public void createAlert(Long clusterId, String alertType, String message, 
                            ClusterAlert.AlertSeverity severity, Map<String, Object> metadata) {
         // Verificar se cluster existe
@@ -182,7 +171,7 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
     }
     
     @Override
-    @Transactional
+    @Transactional(timeout = 10) // Timeout curto para operação simples
     public void resolveAlert(Long alertId, String resolutionMessage) {
         // Implementação básica - apenas log por enquanto
         System.out.println("✅ Alerta resolvido: " + alertId + " - " + resolutionMessage);
@@ -235,8 +224,10 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
         dashboard.setActiveAlerts(0);
         dashboard.setCriticalAlerts(0);
         
-        // Calcular métricas médias de todos os clusters
-        List<ClusterHealthMetrics> latestMetrics = metricsRepository.findLatestMetricsForAllClusters();
+        // NÃO buscar métricas do banco - usar apenas cache ou dados já coletados
+        // Métricas vêm direto do Docker via HighFrequencyMetricsCollector
+        // Para dashboard, podemos usar dados agregados do WebSocket ou cache
+        List<ClusterHealthMetrics> latestMetrics = Collections.emptyList(); // Vazio - não buscar do banco
         
         double avgCpu = 0.0;
         double avgMemory = 0.0;
@@ -366,45 +357,24 @@ public class ClusterMonitoringService implements IClusterMonitoringService {
     }
     
     /**
-     * Atualiza o cache de métricas em tempo real periodicamente
-     * Executado a cada 30 segundos
+     * Scheduler DESABILITADO - métricas agora são coletadas diretamente do Docker
+     * via HighFrequencyMetricsCollector e não precisam ser buscadas do banco periodicamente.
+     * 
+     * Este método foi desabilitado para evitar queries desnecessárias no banco.
      */
-    @Scheduled(fixedDelayString = "30000")
+    // @Scheduled(fixedDelayString = "30000") // DESABILITADO - usando HighFrequencyMetricsCollector
     public void updateRealtimeMetricsCache() {
-        try {
-            // Atualizar cache apenas para clusters que estão sendo monitorados
-            Set<Long> clusterIds = monitoringConfigs.keySet();
-            
-            for (Long clusterId : clusterIds) {
-                updateRealtimeMetricsCache(clusterId);
-            }
-            
-            System.out.println("✅ Cache de métricas atualizado para " + clusterIds.size() + " clusters");
-        } catch (Exception e) {
-            System.err.println("Erro ao atualizar cache de métricas: " + e.getMessage());
-        }
+        // Método desabilitado - não fazer nada
+        // Métricas são coletadas e enviadas diretamente pelo HighFrequencyMetricsCollector
     }
     
     /**
-     * Atualiza o cache de métricas para todos os clusters ativos
-     * Executado a cada 60 segundos
+     * Scheduler DESABILITADO - não precisa mais buscar métricas do banco periodicamente.
+     * Métricas são coletadas diretamente do Docker via HighFrequencyMetricsCollector.
      */
-    @Scheduled(fixedDelayString = "60000")
+    // @Scheduled(fixedDelayString = "60000") // DESABILITADO - usando HighFrequencyMetricsCollector
     public void updateAllClustersMetricsCache() {
-        try {
-            // Buscar todos os clusters com health status
-            List<ClusterHealthStatus> allHealthStatuses = healthStatusRepository.findAll();
-            
-            for (ClusterHealthStatus status : allHealthStatuses) {
-                Long clusterId = status.getCluster().getId();
-                
-                // Iniciar monitoramento para clusters que ainda não estão sendo monitorados
-                if (!monitoringConfigs.containsKey(clusterId)) {
-                    startMonitoring(clusterId, new MonitoringConfig());
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("Erro ao atualizar cache de todos os clusters: " + e.getMessage());
-        }
+        // Método desabilitado - não fazer nada
+        // Métricas são coletadas e enviadas diretamente pelo HighFrequencyMetricsCollector
     }
 }

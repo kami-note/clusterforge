@@ -52,8 +52,8 @@ export function useRealtimeMetrics(): RealtimeMetrics {
   // Separar a conexão WebSocket da atualização de clusters
   useEffect(() => {
     if (!user) {
-      // Desconectar se não houver usuário
-      websocketService.disconnect();
+      // Desconectar se não houver usuário (resetar tentativas de reconexão)
+      websocketService.disconnect(true);
       setConnected(false);
       isSubscribedRef.current = false;
       return;
@@ -102,7 +102,8 @@ export function useRealtimeMetrics(): RealtimeMetrics {
         unsubscribeMetrics();
         // Removido: unsubscribe de estatísticas
         unsubscribeConnection();
-        websocketService.disconnect();
+        // Resetar tentativas de reconexão ao desconectar manualmente
+        websocketService.disconnect(true);
         isSubscribedRef.current = false;
       };
     }

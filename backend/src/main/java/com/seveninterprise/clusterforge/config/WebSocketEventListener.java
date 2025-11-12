@@ -28,18 +28,27 @@ public class WebSocketEventListener {
         System.out.println("🔗 Cliente WebSocket conectado - SessionId: " + sessionId + ", Usuário: " + username);
         
         // Enviar métricas iniciais após um pequeno delay para garantir que a conexão está completamente estabelecida
-        new Thread(() -> {
+        // Usar ScheduledExecutorService ao invés de Thread.sleep para melhor gerenciamento
+        java.util.concurrent.ScheduledExecutorService scheduler = 
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        
+        scheduler.schedule(() -> {
             try {
-                Thread.sleep(1500); // Delay de 1.5 segundos para garantir que a conexão está completamente estabelecida
-                System.out.println("📤 Enviando métricas iniciais para cliente recém-conectado (SessionId: " + sessionId + ", Usuário: " + username + ")");
-                metricsWebSocketService.broadcastMetrics();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                boolean isDebugMode = "true".equalsIgnoreCase(System.getenv("DEBUG")) || 
+                                     "true".equalsIgnoreCase(System.getProperty("debug"));
+                
+                if (isDebugMode) {
+                    System.out.println("📤 Enviando métricas iniciais para cliente recém-conectado (SessionId: " + sessionId + ", Usuário: " + username + ")");
+                }
+                // Forçar envio para novo cliente conectado
+                metricsWebSocketService.broadcastMetrics(true);
             } catch (Exception e) {
                 System.err.println("❌ Erro ao enviar métricas iniciais: " + e.getMessage());
                 e.printStackTrace();
+            } finally {
+                scheduler.shutdown();
             }
-        }).start();
+        }, 500, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
     
     @EventListener

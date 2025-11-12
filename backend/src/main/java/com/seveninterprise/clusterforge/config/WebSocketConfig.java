@@ -26,9 +26,25 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // Registra o endpoint WebSocket
         // Os clientes se conectam a este endpoint usando SockJS como fallback
+        // Em produção, configurar allowedOrigins via variável de ambiente
+        String allowedOriginsEnv = System.getenv("WEBSOCKET_ALLOWED_ORIGINS");
+        String[] allowedOrigins;
+        
+        if (allowedOriginsEnv != null && !allowedOriginsEnv.isEmpty()) {
+            // Usar origens da variável de ambiente (separadas por vírgula)
+            allowedOrigins = allowedOriginsEnv.split(",");
+        } else {
+            // Fallback para desenvolvimento
+            allowedOrigins = new String[]{
+                "http://localhost:3000", 
+                "http://localhost:3001", 
+                "http://127.0.0.1:3000", 
+                "http://127.0.0.1:3001"
+            };
+        }
+        
         registry.addEndpoint("/ws/metrics")
-                .setAllowedOrigins("http://localhost:3000", "http://localhost:3001", 
-                                   "http://127.0.0.1:3000", "http://127.0.0.1:3001")
+                .setAllowedOrigins(allowedOrigins)
                 .withSockJS();
     }
 }

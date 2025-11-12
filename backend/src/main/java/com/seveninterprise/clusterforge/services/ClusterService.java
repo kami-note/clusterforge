@@ -234,6 +234,11 @@ public class ClusterService implements IClusterService {
             System.out.println("Docker command result: " + result);
             
             boolean success = isDockerCommandSuccessful(result);
+            
+            // Limpar cache de containers após criar novo container
+            if (success) {
+                dockerService.clearContainerCache();
+            }
                             
             if (!success) {
                 System.err.println("Docker compose failed: " + result);
@@ -408,6 +413,8 @@ public class ClusterService implements IClusterService {
             
             System.out.println("DEBUG: Removendo container para cluster " + clusterId + ". ID/Nome: " + containerIdentifier);
             dockerService.removeContainer(containerIdentifier);
+            // Cache já é limpo dentro do removeContainer, mas garantimos aqui também
+            dockerService.clearContainerCache(containerIdentifier);
             System.out.println("DEBUG: Container " + containerIdentifier + " removido com sucesso.");
         } catch (RuntimeException e) {
             // Silenciosamente ignora se o container não existe
@@ -975,9 +982,79 @@ public class ClusterService implements IClusterService {
     /**
      * Obtém status de saúde de um cluster
      */
+    // Cache de health status para evitar queries repetidas
+    private final java.util.Map<Long, ClusterHealthStatus> healthStatusCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile long lastHealthStatusCacheUpdate = 0;
+    private static final long HEALTH_STATUS_CACHE_TTL_MS = 5000; // Cache válido por 5 segundos
+    private volatile boolean isUpdatingHealthCache = false; // Lock para evitar múltiplas atualizações simultâneas
+    
+    /**
+     * Obtém o health status de um cluster SEM fazer health check completo
+     * Apenas retorna o status atual do banco (mais rápido, sem queries pesadas)
+     * Para fazer health check completo, use o endpoint /health/force-check
+     * Usa cache para evitar queries repetidas
+     */
     public ClusterHealthStatus getClusterHealthStatus(Long clusterId) {
-        Cluster cluster = getClusterById(clusterId);
-        return clusterHealthService.checkClusterHealth(cluster);
+        long now = System.currentTimeMillis();
+        
+        // Verificar cache
+        ClusterHealthStatus cached = healthStatusCache.get(clusterId);
+        if (cached != null && (now - lastHealthStatusCacheUpdate) < HEALTH_STATUS_CACHE_TTL_MS) {
+            return cached;
+        }
+        
+        // Cache expirado - atualizar apenas se não estiver sendo atualizado por outra thread
+        if (!isUpdatingHealthCache && (now - lastHealthStatusCacheUpdate) >= HEALTH_STATUS_CACHE_TTL_MS) {
+            synchronized (this) {
+                // Double-check: verificar novamente dentro do lock
+                if (!isUpdatingHealthCache && (now - lastHealthStatusCacheUpdate) >= HEALTH_STATUS_CACHE_TTL_MS) {
+                    isUpdatingHealthCache = true;
+                    try {
+                        List<ClusterHealthStatus> allStatuses = clusterHealthStatusRepository.findAll();
+                        healthStatusCache.clear();
+                        for (ClusterHealthStatus status : allStatuses) {
+                            healthStatusCache.put(status.getCluster().getId(), status);
+                        }
+                        lastHealthStatusCacheUpdate = System.currentTimeMillis();
+                    } catch (Exception e) {
+                        // Se falhar, manter cache existente
+                    } finally {
+                        isUpdatingHealthCache = false;
+                    }
+                }
+            }
+        }
+        
+        // Retornar do cache (mesmo que expirado, é melhor que fazer query)
+        ClusterHealthStatus status = healthStatusCache.get(clusterId);
+        if (status != null) {
+            return status;
+        }
+        
+        // Se não está no cache e cache está sendo atualizado, aguardar um pouco e tentar novamente
+        if (isUpdatingHealthCache) {
+            // Aguardar até 100ms para cache ser atualizado
+            long waitStart = System.currentTimeMillis();
+            while (isUpdatingHealthCache && (System.currentTimeMillis() - waitStart) < 100) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            status = healthStatusCache.get(clusterId);
+            if (status != null) {
+                return status;
+            }
+        }
+        
+        // Se ainda não está no cache, buscar individual (último recurso)
+        // Mas apenas se realmente não estiver no cache após tentar aguardar
+        status = clusterHealthStatusRepository.findByClusterId(clusterId)
+                .orElseThrow(() -> new RuntimeException("Health status não encontrado para cluster: " + clusterId));
+        healthStatusCache.put(clusterId, status);
+        return status;
     }
     
     /**

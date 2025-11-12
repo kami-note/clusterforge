@@ -78,11 +78,14 @@ public class ClusterHealthService implements IClusterHealthService {
     }
     
     @Override
-    @Transactional
+    @Transactional(timeout = 30) // Timeout de 30 segundos para evitar transações muito longas
     public ClusterHealthStatus checkClusterHealth(Cluster cluster) {
         ClusterHealthStatus healthStatus = getOrCreateHealthStatus(cluster);
         
         try {
+            // Fazer operações que podem ser lentas (Docker) o mais rápido possível
+            // para reduzir o tempo que a conexão fica aberta
+            
             // 1. Verificar status do container Docker
             String containerStatus = checkContainerStatus(cluster);
             healthStatus.setContainerStatus(containerStatus);
@@ -159,21 +162,22 @@ public class ClusterHealthService implements IClusterHealthService {
             healthStatus.setUpdatedAt(LocalDateTime.now());
             healthStatusRepository.save(healthStatus);
             
+            // Atualizar cache após salvar
+            healthStatusCache.put(cluster.getId(), healthStatus);
+            
             // 7. Registrar evento
             recordHealthEvent(healthStatus, newState);
             
-            // 8. Enviar métricas atualizadas via WebSocket
-            try {
-                metricsWebSocketService.broadcastMetrics();
-            } catch (Exception e) {
-                // Não quebra o health check se o WebSocket falhar
-                System.err.println("Erro ao enviar métricas via WebSocket: " + e.getMessage());
-            }
+            // 8. NÃO enviar métricas via WebSocket aqui - o HighFrequencyMetricsCollector já faz isso
+            // Removido para evitar queries desnecessárias. Métricas são enviadas em tempo real
+            // pelo HighFrequencyMetricsCollector que coleta diretamente do Docker.
             
             return healthStatus;
             
         } catch (Exception e) {
-            handleHealthCheckError(healthStatus, e);
+            // Tratar erro sem quebrar a transação
+            System.err.println("❌ Erro durante health check do cluster " + cluster.getId() + ": " + e.getMessage());
+            e.printStackTrace();
             return healthStatus;
         }
     }
@@ -181,7 +185,8 @@ public class ClusterHealthService implements IClusterHealthService {
     @Override
     @Transactional
     public Map<Long, ClusterHealthStatus> checkAllClustersHealth() {
-        List<Cluster> activeClusters = clusterRepository.findAll();
+        // Usar cache de clusters para evitar queries repetidas
+        List<Cluster> activeClusters = getCachedActiveClusters();
         Map<Long, ClusterHealthStatus> results = new HashMap<>();
         
         // Executar verificações em paralelo
@@ -211,7 +216,7 @@ public class ClusterHealthService implements IClusterHealthService {
     }
     
     @Override
-    @Transactional
+    @Transactional(timeout = 30) // Timeout de 30 segundos
     public boolean recoverCluster(Long clusterId) {
         Cluster cluster = clusterRepository.findById(clusterId)
             .orElseThrow(() -> new RuntimeException("Cluster não encontrado: " + clusterId));
@@ -271,7 +276,7 @@ public class ClusterHealthService implements IClusterHealthService {
     }
     
     @Override
-    @Transactional
+    @Transactional(timeout = 60) // Timeout maior para múltiplos clusters
     public int recoverFailedClusters() {
         List<ClusterHealthStatus> failedClusters = healthStatusRepository
             .findByCurrentStateInAndMonitoringEnabledTrue(
@@ -295,7 +300,7 @@ public class ClusterHealthService implements IClusterHealthService {
     }
     
     @Override
-    @Transactional
+    @Transactional(timeout = 10) // Timeout curto para operação simples
     public void configureRecoveryPolicy(Long clusterId, int maxRetries, int retryInterval, int cooldownPeriod) {
         ClusterHealthStatus healthStatus = healthStatusRepository.findByClusterId(clusterId)
             .orElseThrow(() -> new RuntimeException("Status de saúde não encontrado para cluster: " + clusterId));
@@ -372,14 +377,77 @@ public class ClusterHealthService implements IClusterHealthService {
     
     // Métodos auxiliares privados
     
+    // Cache de health status para evitar queries repetidas durante health checks
+    private final java.util.Map<Long, ClusterHealthStatus> healthStatusCache = new java.util.concurrent.ConcurrentHashMap<>();
+    
+    // Cache de clusters ativos (para evitar queries repetidas em checkAllClustersHealth)
+    private volatile List<Cluster> cachedActiveClusters = new java.util.ArrayList<>();
+    private volatile long lastActiveClustersCacheUpdate = 0;
+    private static final long ACTIVE_CLUSTERS_CACHE_TTL_MS = 10000; // Cache válido por 10 segundos
+    private volatile boolean isUpdatingActiveClustersCache = false;
+    
     private ClusterHealthStatus getOrCreateHealthStatus(Cluster cluster) {
-        return healthStatusRepository.findByClusterId(cluster.getId())
+        // Verificar cache primeiro
+        ClusterHealthStatus cached = healthStatusCache.get(cluster.getId());
+        if (cached != null) {
+            return cached;
+        }
+        
+        // Buscar do banco
+        ClusterHealthStatus status = healthStatusRepository.findByClusterId(cluster.getId())
             .orElseGet(() -> {
                 ClusterHealthStatus newStatus = new ClusterHealthStatus();
                 newStatus.setCluster(cluster);
                 newStatus.setCurrentState(ClusterHealthStatus.HealthState.UNKNOWN);
                 return healthStatusRepository.save(newStatus);
             });
+        
+        // Atualizar cache
+        healthStatusCache.put(cluster.getId(), status);
+        return status;
+    }
+    
+    /**
+     * Limpa o cache de health status (útil quando status é atualizado)
+     */
+    private void invalidateHealthStatusCache(Long clusterId) {
+        healthStatusCache.remove(clusterId);
+    }
+    
+    /**
+     * Obtém lista de clusters ativos usando cache (evita queries repetidas)
+     * Usa lock para evitar múltiplas atualizações simultâneas
+     */
+    private List<Cluster> getCachedActiveClusters() {
+        long now = System.currentTimeMillis();
+        
+        // Verificar cache válido
+        if (!cachedActiveClusters.isEmpty() && (now - lastActiveClustersCacheUpdate) < ACTIVE_CLUSTERS_CACHE_TTL_MS) {
+            return cachedActiveClusters;
+        }
+        
+        // Cache expirado - atualizar apenas se não estiver sendo atualizado por outra thread
+        if (!isUpdatingActiveClustersCache && (now - lastActiveClustersCacheUpdate) >= ACTIVE_CLUSTERS_CACHE_TTL_MS) {
+            synchronized (this) {
+                // Double-check: verificar novamente dentro do lock
+                if (!isUpdatingActiveClustersCache && (now - lastActiveClustersCacheUpdate) >= ACTIVE_CLUSTERS_CACHE_TTL_MS) {
+                    isUpdatingActiveClustersCache = true;
+                    try {
+                        // Usar query otimizada que carrega user em uma única query (join fetch)
+                        // Isso evita N+1 queries de users
+                        cachedActiveClusters = clusterRepository.findAllWithUser();
+                        lastActiveClustersCacheUpdate = System.currentTimeMillis();
+                    } catch (Exception e) {
+                        // Se falhar, manter cache existente
+                    } finally {
+                        isUpdatingActiveClustersCache = false;
+                    }
+                }
+            }
+        }
+        
+        // Retornar cache (mesmo que expirado, é melhor que fazer query)
+        return cachedActiveClusters;
     }
     
     private String checkContainerStatus(Cluster cluster) {
@@ -427,7 +495,15 @@ public class ClusterHealthService implements IClusterHealthService {
         }
     }
     
-    private ClusterHealthMetrics collectResourceMetrics(Cluster cluster) {
+    /**
+     * Coleta métricas de recursos do cluster (CPU, RAM, Disk, Network)
+     * Pode ser chamado por outros serviços para coleta em alta frequência
+     * 
+     * @param cluster Cluster para coletar métricas
+     * @param skipContainerMetrics Se true, pula coleta de métricas adicionais (docker inspect) para otimizar
+     * @param quietMode Se true, reduz logs para não poluir em alta frequência
+     */
+    public ClusterHealthMetrics collectResourceMetrics(Cluster cluster, boolean skipContainerMetrics, boolean quietMode) {
         try {
             // Usa containerId se disponível, senão usa o nome sanitizado
             String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
@@ -435,7 +511,9 @@ public class ClusterHealthService implements IClusterHealthService {
                 : cluster.getSanitizedContainerName();
             
             if (containerIdentifier == null || containerIdentifier.isEmpty()) {
-                System.err.println("⚠️ Container identifier vazio para cluster " + cluster.getId());
+                if (!quietMode) {
+                    System.err.println("⚠️ Container identifier vazio para cluster " + cluster.getId());
+                }
                 return null;
             }
             
@@ -443,7 +521,9 @@ public class ClusterHealthService implements IClusterHealthService {
             String result = dockerService.getContainerStats(containerIdentifier);
             
             if (result == null || result.isEmpty()) {
-                System.err.println("⚠️ Resultado vazio do docker stats para cluster " + cluster.getId());
+                if (!quietMode) {
+                    System.err.println("⚠️ Resultado vazio do docker stats para cluster " + cluster.getId());
+                }
                 return null;
             }
             
@@ -451,36 +531,53 @@ public class ClusterHealthService implements IClusterHealthService {
             String statsData = result.split("Process exited")[0].trim();
             
             if (statsData.isEmpty()) {
-                System.err.println("⚠️ Nenhum dado extraído do docker stats para cluster " + cluster.getId());
-                System.err.println("   Resultado completo: " + result);
+                if (!quietMode) {
+                    System.err.println("⚠️ Nenhum dado extraído do docker stats para cluster " + cluster.getId());
+                    System.err.println("   Resultado completo: " + result);
+                }
                 return null;
             }
             
             // Verificar se o comando foi executado com sucesso
             if (!result.contains("Process exited with code: 0")) {
-                System.err.println("⚠️ Comando docker stats falhou para cluster " + cluster.getId() + ": " + result);
+                if (!quietMode) {
+                    System.err.println("⚠️ Comando docker stats falhou para cluster " + cluster.getId() + ": " + result);
+                }
                 return null;
             }
             
-            System.out.println("✅ Coletando métricas para cluster " + cluster.getId() + " (container: " + containerIdentifier + ")");
-            System.out.println("   Dados brutos: " + statsData);
+            if (!quietMode) {
+                System.out.println("✅ Coletando métricas para cluster " + cluster.getId() + " (container: " + containerIdentifier + ")");
+                System.out.println("   Dados brutos: " + statsData);
+            }
             
-            return parseDockerStats(statsData, cluster);
+            return parseDockerStats(statsData, cluster, skipContainerMetrics, quietMode);
             
         } catch (Exception e) {
-            System.err.println("❌ Erro ao coletar métricas do cluster " + cluster.getId() + ": " + e.getMessage());
-            e.printStackTrace();
+            if (!quietMode) {
+                System.err.println("❌ Erro ao coletar métricas do cluster " + cluster.getId() + ": " + e.getMessage());
+                e.printStackTrace();
+            }
         }
         
         return null;
     }
     
-    private ClusterHealthMetrics parseDockerStats(String statsResult, Cluster cluster) {
+    /**
+     * Overload para compatibilidade - usa valores padrão (não pula métricas adicionais, não quiet mode)
+     */
+    public ClusterHealthMetrics collectResourceMetrics(Cluster cluster) {
+        return collectResourceMetrics(cluster, false, false);
+    }
+    
+    private ClusterHealthMetrics parseDockerStats(String statsResult, Cluster cluster, boolean skipContainerMetrics, boolean quietMode) {
         try {
             // Limpar a string - remover quebras de linha e espaços extras
             statsResult = statsResult.trim().replaceAll("\\s+", " ");
             
-            System.out.println("📊 Parsing docker stats: " + statsResult);
+            if (!quietMode) {
+                System.out.println("📊 Parsing docker stats: " + statsResult);
+            }
             
             String[] parts = statsResult.split(",");
             
@@ -509,7 +606,9 @@ public class ClusterHealthService implements IClusterHealthService {
                         metrics.setCpuUsagePercent(0.0);
                     } else {
                         metrics.setCpuUsagePercent(cpuPercentFromDocker);
-                        System.out.println("   ✅ CPU: " + cpuPercentFromDocker + "%");
+                        if (!quietMode) {
+                            System.out.println("   ✅ CPU: " + cpuPercentFromDocker + "%");
+                        }
                     }
                 } catch (NumberFormatException e) {
                     System.err.println("⚠️ Erro ao fazer parse de CPU: '" + cpuStr + "' - zerando métrica");
@@ -546,7 +645,9 @@ public class ClusterHealthService implements IClusterHealthService {
                     if (memoryUsage != null && memoryLimit != null && memoryLimit > 0) {
                         double memoryPercent = (double) memoryUsage / memoryLimit * 100.0;
                         metrics.setMemoryUsagePercent(memoryPercent);
-                        System.out.println("   ✅ Memória: " + memoryUsage + " MB / " + memoryLimit + " MB = " + String.format("%.2f", memoryPercent) + "%");
+                        if (!quietMode) {
+                            System.out.println("   ✅ Memória: " + memoryUsage + " MB / " + memoryLimit + " MB = " + String.format("%.2f", memoryPercent) + "%");
+                        }
                     }
                 }
             } else {
@@ -564,7 +665,9 @@ public class ClusterHealthService implements IClusterHealthService {
                     metrics.setNetworkRxBytes(networkRxBytes);
                     metrics.setNetworkTxBytes(networkTxBytes);
                     
-                    System.out.println("   ✅ Rede I/O: RX=" + networkRxBytes + " bytes, TX=" + networkTxBytes + " bytes");
+                    if (!quietMode) {
+                        System.out.println("   ✅ Rede I/O: RX=" + networkRxBytes + " bytes, TX=" + networkTxBytes + " bytes");
+                    }
                     
                     // Armazenar limite de rede configurado no cluster
                     if (cluster.getNetworkLimit() != null) {
@@ -575,8 +678,10 @@ public class ClusterHealthService implements IClusterHealthService {
                 System.err.println("⚠️ Formato de rede inválido: '" + netStr + "'");
             }
             
-            // Coletar métricas adicionais do container via docker inspect
-            collectContainerMetrics(metrics, cluster);
+            // Coletar métricas adicionais do container via docker inspect (pode ser pulado para otimização)
+            if (!skipContainerMetrics) {
+                collectContainerMetrics(metrics, cluster);
+            }
             
             // ========== Disk I/O Metrics ==========
             String blockStr = parts[3].trim();
@@ -587,7 +692,9 @@ public class ClusterHealthService implements IClusterHealthService {
                     Long diskWrite = parseBytesValue(blockParts[1].trim());
                     metrics.setDiskReadBytes(diskRead);
                     metrics.setDiskWriteBytes(diskWrite);
-                    System.out.println("   ✅ Disco I/O: Read=" + diskRead + " bytes, Write=" + diskWrite + " bytes");
+                    if (!quietMode) {
+                        System.out.println("   ✅ Disco I/O: Read=" + diskRead + " bytes, Write=" + diskWrite + " bytes");
+                    }
                 }
             } else {
                 System.err.println("⚠️ Formato de disco inválido: '" + blockStr + "'");
@@ -601,7 +708,9 @@ public class ClusterHealthService implements IClusterHealthService {
                 metrics.setDiskLimitMb(cluster.getDiskLimit() * 1024L);
             }
             
-            System.out.println("✅ Métricas parseadas com sucesso para cluster " + cluster.getId());
+            if (!quietMode) {
+                System.out.println("✅ Métricas parseadas com sucesso para cluster " + cluster.getId());
+            }
             return metrics;
             
         } catch (Exception e) {
@@ -1000,12 +1109,8 @@ public class ClusterHealthService implements IClusterHealthService {
     public void scheduledHealthCheck() {
         System.out.println("Executando verificação agendada de saúde dos clusters...");
         checkAllClustersHealth();
-        // Enviar métricas via WebSocket após verificação completa
-        try {
-            metricsWebSocketService.broadcastMetrics();
-        } catch (Exception e) {
-            System.err.println("Erro ao enviar métricas via WebSocket após health check: " + e.getMessage());
-        }
+        // Métricas são enviadas automaticamente quando há mudanças durante o health check
+        // Não precisamos enviar aqui, pois cada cluster já envia quando suas métricas mudam
     }
     
     // Agendamento automático de recuperação

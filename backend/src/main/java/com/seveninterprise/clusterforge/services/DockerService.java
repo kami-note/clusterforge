@@ -8,6 +8,8 @@ package com.seveninterprise.clusterforge.services;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
@@ -17,6 +19,11 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class DockerService implements IDockerService {
+    
+    // Cache de IDs de containers para evitar buscas repetidas
+    private final Map<String, String> containerIdCache = new ConcurrentHashMap<>();
+    private final Map<String, Long> cacheTimestamps = new ConcurrentHashMap<>();
+    private static final long CACHE_TTL_MS = 30000; // Cache válido por 30 segundos
     
     @Override
     public java.util.ArrayList<String> listContainers() {
@@ -77,33 +84,43 @@ public class DockerService implements IDockerService {
 
     @Override
     public void removeContainer(String containerName) {
-        System.out.println("DEBUG: Tentando remover container: " + containerName);
+        boolean isDebugMode = "true".equalsIgnoreCase(System.getenv("DEBUG")) || 
+                             "true".equalsIgnoreCase(System.getProperty("debug"));
         
-        // Lista todos os containers para debug
-        debugListAllContainers();
+        if (isDebugMode) {
+            System.out.println("DEBUG: Tentando remover container: " + containerName);
+            debugListAllContainers();
+        }
         
         // Encontra o ID do container (mais preciso que nome)
         String containerId = findContainerIdByNameOrId(containerName);
         
         if (containerId == null) {
-            System.out.println("Container contendo '" + containerName + "' não existe ou já foi removido. Pulando remoção.");
+            // Limpar cache já que o container não existe
+            clearContainerCache(containerName);
+            if (isDebugMode) {
+                System.out.println("Container contendo '" + containerName + "' não existe ou já foi removido. Pulando remoção.");
+            }
             return;
         }
         
-        System.out.println("DEBUG: ID do container encontrado: " + containerId);
+        if (isDebugMode) {
+            System.out.println("DEBUG: ID do container encontrado: " + containerId);
+        }
         
         // Para primeiro o container se estiver rodando
-        System.out.println("DEBUG: Parando container (ID: " + containerId + ")");
         try {
             String dockerCmd = getDockerCommand();
             String stopCommand = dockerCmd + " stop " + containerId;
             String stopResult = runCommand(stopCommand);
             
-            if (!stopResult.contains("Process exited with code: 0")) {
+            if (isDebugMode && !stopResult.contains("Process exited with code: 0")) {
                 System.out.println("DEBUG: Container já estava parado ou erro ao parar: " + stopResult);
             }
         } catch (Exception e) {
-            System.out.println("DEBUG: Erro ao parar container (ignorando para tentar remover): " + e.getMessage());
+            if (isDebugMode) {
+                System.out.println("DEBUG: Erro ao parar container (ignorando para tentar remover): " + e.getMessage());
+            }
         }
         
         // Aguarda um pouco para garantir que o container foi parado
@@ -114,20 +131,23 @@ public class DockerService implements IDockerService {
         }
         
         // Remove o container usando o ID
-        System.out.println("DEBUG: Removendo container (ID: " + containerId + ")");
         try {
             String dockerCmd = getDockerCommand();
             String command = dockerCmd + " rm -f " + containerId; // -f força a remoção mesmo se rodando
             String result = runCommand(command);
             
             if (result.contains("Process exited with code: 0")) {
-                System.out.println("DEBUG: Container (ID: " + containerId + ") removido com sucesso.");
+                // Limpar cache após remoção bem-sucedida
+                clearContainerCache(containerName);
+                if (isDebugMode) {
+                    System.out.println("DEBUG: Container (ID: " + containerId + ") removido com sucesso.");
+                }
             } else {
-                System.err.println("DEBUG: Falha ao remover container: " + result);
+                System.err.println("Falha ao remover container: " + result);
                 throw new RuntimeException("Failed to remove container (ID: " + containerId + "): " + result);
             }
         } catch (Exception e) {
-            System.err.println("DEBUG: Erro ao executar rm no container: " + e.getMessage());
+            System.err.println("Erro ao remover container: " + e.getMessage());
             throw new RuntimeException("Erro ao remover container (ID: " + containerId + "): " + e.getMessage(), e);
         }
     }
@@ -136,15 +156,30 @@ public class DockerService implements IDockerService {
      * Encontra o ID do container Docker a partir do nome ou ID
      * Retorna o ID completo do container ou null
      * Usar ID é mais preciso que usar nome (evita ambiguidade)
+     * Usa cache para evitar buscas repetidas
      */
     private String findContainerIdByNameOrId(String nameOrId) {
+        // Verificar cache primeiro
+        Long cacheTime = cacheTimestamps.get(nameOrId);
+        if (cacheTime != null && (System.currentTimeMillis() - cacheTime) < CACHE_TTL_MS) {
+            String cachedId = containerIdCache.get(nameOrId);
+            if (cachedId != null) {
+                return cachedId;
+            }
+        }
+        
         try {
             String dockerCmd = getDockerCommand();
             // Busca tanto ID quanto Name para encontrar o container
             String command = dockerCmd + " ps -a --format '{{.ID}}\t{{.Names}}'";
             String result = runCommand(command);
             
-            System.out.println("DEBUG: Buscando container com padrão: " + nameOrId);
+            // Apenas logar em modo DEBUG se habilitado
+            boolean isDebugMode = "true".equalsIgnoreCase(System.getenv("DEBUG")) || 
+                                 "true".equalsIgnoreCase(System.getProperty("debug"));
+            if (isDebugMode) {
+                System.out.println("DEBUG: Buscando container com padrão: " + nameOrId);
+            }
             
             // Procura linhas que contenham o padrão no ID ou no nome
             String[] lines = result.split("\n");
@@ -164,18 +199,54 @@ public class DockerService implements IDockerService {
                     if (containerId.equals(nameOrId) || 
                         containerId.startsWith(nameOrId) ||
                         containerName.contains(nameOrId)) {
-                        System.out.println("DEBUG: Container encontrado - ID: " + containerId + ", Nome: " + containerName);
+                        // Atualizar cache
+                        containerIdCache.put(nameOrId, containerId);
+                        cacheTimestamps.put(nameOrId, System.currentTimeMillis());
+                        
+                        if (isDebugMode) {
+                            System.out.println("DEBUG: Container encontrado - ID: " + containerId + ", Nome: " + containerName);
+                        }
                         return containerId; // Retorna o ID completo
                     }
                 }
             }
             
-            System.out.println("DEBUG: Container com padrão '" + nameOrId + "' não encontrado.");
+            // Container não encontrado - cachear null também para evitar buscas repetidas
+            containerIdCache.put(nameOrId, null);
+            cacheTimestamps.put(nameOrId, System.currentTimeMillis());
+            
+            if (isDebugMode) {
+                System.out.println("DEBUG: Container com padrão '" + nameOrId + "' não encontrado.");
+            }
             return null;
         } catch (Exception e) {
-            System.err.println("DEBUG: Erro ao buscar container por padrão '" + nameOrId + "': " + e.getMessage());
+            // Limpar cache em caso de erro
+            containerIdCache.remove(nameOrId);
+            cacheTimestamps.remove(nameOrId);
+            
+            boolean isDebugMode = "true".equalsIgnoreCase(System.getenv("DEBUG")) || 
+                                 "true".equalsIgnoreCase(System.getProperty("debug"));
+            if (isDebugMode) {
+                System.err.println("DEBUG: Erro ao buscar container por padrão '" + nameOrId + "': " + e.getMessage());
+            }
             return null;
         }
+    }
+    
+    /**
+     * Limpa o cache de containers (útil quando containers são criados/removidos)
+     */
+    public void clearContainerCache() {
+        containerIdCache.clear();
+        cacheTimestamps.clear();
+    }
+    
+    /**
+     * Limpa o cache de um container específico
+     */
+    public void clearContainerCache(String nameOrId) {
+        containerIdCache.remove(nameOrId);
+        cacheTimestamps.remove(nameOrId);
     }
     
     /**
@@ -249,9 +320,15 @@ public class DockerService implements IDockerService {
     }
     
     /**
-     * Lista todos os containers (para debug)
+     * Lista todos os containers (para debug - apenas se DEBUG estiver habilitado)
      */
     public void debugListAllContainers() {
+        boolean isDebugMode = "true".equalsIgnoreCase(System.getenv("DEBUG")) || 
+                             "true".equalsIgnoreCase(System.getProperty("debug"));
+        if (!isDebugMode) {
+            return; // Não fazer nada se DEBUG não estiver habilitado
+        }
+        
         try {
             String dockerCmd = getDockerCommand();
             String command = dockerCmd + " ps -a --format '{{.Names}}\t{{.Status}}'";

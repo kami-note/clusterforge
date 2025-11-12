@@ -26,8 +26,6 @@ class WebSocketService {
   private reconnectDelay = WEBSOCKET_CONFIG.RECONNECT_DELAY;
   
   private metricsCallbacks: Set<MetricsCallback> = new Set();
-  // Removido: statsCallbacks não é mais utilizado
-  private statsCallbacks: Set<StatsCallback> = new Set();
   private connectionCallbacks: Set<ConnectionCallback> = new Set();
   
   /**
@@ -40,9 +38,9 @@ class WebSocketService {
         console.log('✅ WebSocket já está conectado');
         return;
       }
-      // Se já existe um cliente mas não está conectado, não criar outro
-      console.log('⚠️ Cliente WebSocket já existe mas não está conectado. Aguardando...');
-      return;
+      // Se já existe um cliente mas não está conectado, limpar e reconectar
+      console.log('⚠️ Cliente WebSocket existe mas não está conectado. Limpando e reconectando...');
+      this.disconnect();
     }
     
     const token = this.getToken();
@@ -52,17 +50,34 @@ class WebSocketService {
       return;
     }
     
+    // Validar formato básico do token antes de tentar conectar
+    if (token.split('.').length !== 3) {
+      console.error('❌ Token JWT inválido (formato incorreto)');
+      this.notifyConnectionCallbacks(false);
+      return;
+    }
+    
     console.log('🔄 Tentando conectar WebSocket com token JWT...');
     
-    // Obter URL do backend da configuração
-    const wsUrl = config.api.baseUrl.replace('/api', '').replace('http://', '').replace('https://', '');
-    const protocol = config.api.baseUrl.startsWith('https') ? 'https://' : 'http://';
+    // Obter URL do backend da configuração de forma mais robusta
+    let wsUrl: string;
+    try {
+      const baseUrl = new URL(config.api.baseUrl);
+      // SockJS precisa da URL completa sem o /api
+      wsUrl = `${baseUrl.protocol === 'https:' ? 'https' : 'http'}://${baseUrl.host}/ws/metrics`;
+    } catch (error) {
+      // Fallback para método antigo se URL parsing falhar
+      console.warn('Erro ao parsear URL, usando método fallback:', error);
+      const url = config.api.baseUrl.replace('/api', '').replace('http://', '').replace('https://', '');
+      const protocol = config.api.baseUrl.startsWith('https') ? 'https://' : 'http://';
+      wsUrl = `${protocol}${url}/ws/metrics`;
+    }
     
     this.client = new Client({
       webSocketFactory: () => {
         // SockJS não tem tipos TypeScript, então precisamos fazer cast
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return new SockJS(`${protocol}${wsUrl}/ws/metrics`) as any;
+        return new SockJS(wsUrl) as any;
       },
       reconnectDelay: this.reconnectDelay,
       heartbeatIncoming: WEBSOCKET_CONFIG.HEARTBEAT_INTERVAL,
@@ -77,16 +92,19 @@ class WebSocketService {
         this.notifyConnectionCallbacks(true);
         this.subscribe();
         
-        // Solicitar métricas iniciais após conexão
-        setTimeout(() => {
-          console.log('📥 Solicitando métricas iniciais...');
-          this.requestMetrics();
-        }, 500);
+        // O servidor envia métricas automaticamente quando há mudanças
+        // Não precisamos solicitar - o servidor já envia na conexão inicial
+        console.log('📡 Aguardando métricas do servidor (push automático)...');
       },
       onDisconnect: () => {
         console.log('⚠️ WebSocket desconectado');
         this.isConnected = false;
         this.notifyConnectionCallbacks(false);
+        
+        // Tentar reconectar automaticamente se não foi uma desconexão manual
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.handleReconnect();
+        }
       },
       onStompError: (frame: { command?: string; headers?: Record<string, string>; body?: string } | undefined) => {
         try {
@@ -161,13 +179,18 @@ class WebSocketService {
   
   /**
    * Desconecta do servidor WebSocket
+   * @param resetReconnectAttempts Se true, reseta as tentativas de reconexão (desconexão manual)
    */
-  disconnect(): void {
+  disconnect(resetReconnectAttempts: boolean = false): void {
     if (this.client) {
       this.client.deactivate();
       this.client = null;
       this.isConnected = false;
       this.notifyConnectionCallbacks(false);
+      
+      if (resetReconnectAttempts) {
+        this.reconnectAttempts = 0;
+      }
     }
   }
   
@@ -201,6 +224,9 @@ class WebSocketService {
   
   /**
    * Solicita atualização imediata de métricas
+   * NOTA: Esta função está mantida para compatibilidade, mas o servidor
+   * agora envia métricas automaticamente quando há mudanças (push).
+   * Em produção, esta função pode ser removida.
    */
   requestMetrics(): void {
     if (!this.client || !this.client.connected) {
@@ -208,6 +234,9 @@ class WebSocketService {
       return;
     }
     
+    // Opcional: ainda permite solicitar métricas manualmente se necessário
+    // Mas o servidor já envia automaticamente quando há mudanças
+    console.log('📥 Solicitando métricas manualmente (servidor envia automaticamente quando há mudanças)');
     this.client.publish({
       destination: '/app/request-metrics',
       body: JSON.stringify({}),
@@ -265,23 +294,38 @@ class WebSocketService {
   }
   
   /**
-   * Lida com reconexão automática
+   * Lida com reconexão automática com backoff exponencial
    */
   private handleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Máximo de tentativas de reconexão atingido');
+      console.error(`❌ Máximo de tentativas de reconexão (${this.maxReconnectAttempts}) atingido. Parando tentativas.`);
+      this.notifyConnectionCallbacks(false);
       return;
     }
     
     this.reconnectAttempts++;
-    console.log(`Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts}...`);
+    
+    // Backoff exponencial: delay inicial * 2^(tentativa-1), com máximo de 30 segundos
+    const exponentialDelay = Math.min(
+      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      30000
+    );
+    
+    console.log(`🔄 Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts} em ${exponentialDelay}ms...`);
     
     setTimeout(() => {
       if (!this.isConnected) {
+        // Verificar token antes de reconectar
+        const token = this.getToken();
+        if (!token) {
+          console.warn('⚠️ Token não encontrado. Não será possível reconectar.');
+          return;
+        }
+        
         this.disconnect();
         this.connect();
       }
-    }, this.reconnectDelay * this.reconnectAttempts);
+    }, exponentialDelay);
   }
   
   /**
