@@ -3,7 +3,12 @@
  * Implementa autenticação JWT e tratamento centralizado de erros
  */
 
+import type { AuthResponse } from '@/types';
 import { config } from './config';
+
+const AUTH_EVENT_HEADER = 'X-Auth-Event';
+const AUTH_REASON_HEADER = 'X-Auth-Reason';
+const AUTH_EVENT_LOGOUT = 'LOGOUT';
 
 export interface ApiError {
   message: string;
@@ -14,7 +19,7 @@ export interface ApiError {
 export class HttpClient {
   private baseUrl: string;
   private isRefreshing = false;
-  private refreshPromise: Promise<void> | null = null;
+  private refreshPromise: Promise<AuthResponse | null> | null = null;
 
   constructor() {
     this.baseUrl = config.api.baseUrl;
@@ -137,6 +142,7 @@ export class HttpClient {
    * Define o token JWT no localStorage
    */
   setToken(token: string): void {
+    if (typeof window === 'undefined') return;
     localStorage.setItem(config.auth.tokenKey, token);
   }
 
@@ -144,7 +150,9 @@ export class HttpClient {
    * Remove o token do localStorage
    */
   clearToken(): void {
+    if (typeof window === 'undefined') return;
     localStorage.removeItem(config.auth.tokenKey);
+    this.clearTokenExpiry();
   }
 
   private getRefreshToken(): string | null {
@@ -153,53 +161,128 @@ export class HttpClient {
   }
 
   setRefreshToken(refreshToken: string): void {
+    if (typeof window === 'undefined') return;
     localStorage.setItem(config.auth.refreshTokenKey, refreshToken);
   }
 
   clearRefreshToken(): void {
+    if (typeof window === 'undefined') return;
     localStorage.removeItem(config.auth.refreshTokenKey);
   }
 
+  setTokenExpiry(expiresAt: number): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(config.auth.tokenExpiresKey, String(expiresAt));
+  }
+
+  clearTokenExpiry(): void {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(config.auth.tokenExpiresKey);
+  }
+
+  getTokenExpiry(): number | null {
+    if (typeof window === 'undefined') return null;
+    const raw = localStorage.getItem(config.auth.tokenExpiresKey);
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  clearSession(): void {
+    this.clearToken();
+    this.clearRefreshToken();
+  }
+
   private async tryRefreshToken(): Promise<boolean> {
+    const refreshed = await this.refreshSession();
+    return refreshed !== null;
+  }
+
+  async refreshSession(): Promise<AuthResponse | null> {
     const refreshToken = this.getRefreshToken();
-    if (!refreshToken) return false;
+    if (!refreshToken) {
+      return null;
+    }
+
     if (this.isRefreshing && this.refreshPromise) {
       try {
-        await this.refreshPromise;
-        return true;
+        return await this.refreshPromise;
       } catch {
-        return false;
+        return null;
       }
     }
+
     this.isRefreshing = true;
-    this.refreshPromise = (async () => {
-      try {
-        const resp = await fetch(`${this.baseUrl}/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken }),
-          signal: AbortSignal.timeout(config.api.timeout),
-        });
-        if (!resp.ok) {
-          throw new Error('Refresh failed');
-        }
-        const data = await resp.json();
-        if (data?.token) this.setToken(data.token);
-        if (data?.refreshToken) this.setRefreshToken(data.refreshToken);
-      } finally {
+    this.refreshPromise = this.performRefresh(refreshToken)
+      .catch((error) => {
+        throw error;
+      })
+      .finally(() => {
         this.isRefreshing = false;
         this.refreshPromise = null;
-      }
-    })();
+      });
 
     try {
-      await this.refreshPromise;
-      return true;
-    } catch {
-      this.clearToken();
-      this.clearRefreshToken();
-      return false;
+      return await this.refreshPromise;
+    } catch (error) {
+      this.handleRefreshFailure('REFRESH_FAILED');
+      return null;
     }
+  }
+
+  private async performRefresh(refreshToken: string): Promise<AuthResponse> {
+    const resp = await fetch(`${this.baseUrl}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+      signal: AbortSignal.timeout(config.api.timeout),
+    });
+
+    if (!resp.ok) {
+      this.handleUnauthorizedResponse(resp);
+      throw new Error('Refresh failed');
+    }
+
+    const data: AuthResponse = await resp.json();
+    this.applyAuthResponse(data);
+    return data;
+  }
+
+  private applyAuthResponse(response: AuthResponse): void {
+    if (response?.token) {
+      this.setToken(response.token);
+    }
+    if (response?.refreshToken) {
+      this.setRefreshToken(response.refreshToken);
+    }
+    if (typeof response?.expiresIn === 'number') {
+      this.setTokenExpiry(Date.now() + response.expiresIn);
+    } else {
+      this.clearTokenExpiry();
+    }
+  }
+
+  private handleRefreshFailure(reason: string): void {
+    this.clearSession();
+    this.broadcastAuthEvent('logout', reason);
+  }
+
+  private handleUnauthorizedResponse(response: Response): void {
+    const event = response.headers.get(AUTH_EVENT_HEADER);
+    const reason = response.headers.get(AUTH_REASON_HEADER) ?? 'UNAUTHORIZED';
+
+    if (event === AUTH_EVENT_LOGOUT) {
+      this.broadcastAuthEvent('logout', reason);
+    }
+  }
+
+  private broadcastAuthEvent(event: 'logout', reason: string): void {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(
+      new CustomEvent(`auth:${event}`, {
+        detail: { reason },
+      }),
+    );
   }
 
   /**
@@ -226,8 +309,8 @@ export class HttpClient {
 
     // 401 Unauthorized - limpa tokens e redireciona
     if (response.status === 401) {
-      this.clearToken();
-      this.clearRefreshToken();
+      this.handleUnauthorizedResponse(response);
+      this.clearSession();
       // Redireciona para login se estiver no browser
       if (typeof window !== 'undefined') {
         window.location.href = '/auth/login';

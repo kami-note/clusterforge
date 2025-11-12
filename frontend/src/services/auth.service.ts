@@ -17,11 +17,7 @@ class AuthService {
       password,
     });
 
-    // Armazena tokens
-    httpClient.setToken(response.token);
-    if (response.refreshToken && typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, response.refreshToken);
-    }
+    this.persistSession(response);
 
     return response;
   }
@@ -40,15 +36,16 @@ class AuthService {
    * Realiza logout
    */
   async logout(): Promise<void> {
+    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN) : null;
     try {
-      const refreshToken = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN) : null;
       if (refreshToken) {
         await httpClient.post('/auth/logout', { refreshToken });
       }
-    } catch {}
-    httpClient.clearToken();
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+    } catch (error) {
+      console.error('Logout API error:', error);
+      throw error;
+    } finally {
+      this.clearSession();
     }
   }
 
@@ -72,8 +69,11 @@ class AuthService {
       const payload = token.split('.')[1];
       const decoded = JSON.parse(atob(payload));
 
+      const userIdRaw = (decoded && (decoded.userId ?? decoded.sub)) ?? undefined;
+      const parsedId = typeof userIdRaw === 'number' ? userIdRaw : Number.parseInt(userIdRaw as string, 10);
+
       return {
-        id: decoded.sub ? parseInt(decoded.sub) || 0 : 0,
+        id: Number.isNaN(parsedId) ? undefined : parsedId,
         username: decoded.sub || '',
         email: decoded.sub || '',
         type: decoded.role === 'ADMIN' ? 'admin' : 'client',
@@ -85,6 +85,22 @@ class AuthService {
     }
   }
 
+  async refresh(): Promise<AuthResponse | null> {
+    return httpClient.refreshSession();
+  }
+
+  getTokenExpiry(): number | null {
+    return httpClient.getTokenExpiry();
+  }
+
+  clearSession(): void {
+    httpClient.clearSession();
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+      localStorage.removeItem(STORAGE_KEYS.USER);
+    }
+  }
+
   /**
    * Obtém o token atual
    */
@@ -92,6 +108,15 @@ class AuthService {
     return typeof window !== 'undefined' 
       ? localStorage.getItem(STORAGE_KEYS.TOKEN) 
       : null;
+  }
+
+  private persistSession(response: AuthResponse): void {
+    httpClient.setToken(response.token);
+    if (response.refreshToken) {
+      httpClient.setRefreshToken(response.refreshToken);
+    }
+    const expiresAt = Date.now() + response.expiresIn;
+    httpClient.setTokenExpiry(expiresAt);
   }
 }
 

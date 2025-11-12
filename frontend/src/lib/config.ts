@@ -14,5 +14,6 @@ export const config = {
     tokenKey: STORAGE_KEYS.TOKEN,
     refreshTokenKey: STORAGE_KEYS.REFRESH_TOKEN,
     userKey: STORAGE_KEYS.USER,
+    tokenExpiresKey: STORAGE_KEYS.TOKEN_EXPIRES_AT,
   },
 };

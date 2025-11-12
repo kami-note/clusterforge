@@ -75,9 +75,14 @@ public class AuthController {
                 new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
 
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = jwtProvider.generateToken((org.springframework.security.core.userdetails.UserDetails) authentication.getPrincipal());
+        User user = userRepository.findByUsername(loginRequest.getUsername())
+                .orElseThrow(() -> new IllegalStateException("Usuário autenticado, mas não encontrado no repositório"));
 
-        String refresh = refreshTokenService.createRefreshTokenForUser(loginRequest.getUsername());
+        String jwt = jwtProvider.generateToken(
+                (org.springframework.security.core.userdetails.UserDetails) authentication.getPrincipal(),
+                user.getId());
+
+        String refresh = refreshTokenService.createRefreshTokenForUser(user.getUsername());
         return ResponseEntity.ok(new AuthenticationResponse(jwt, refresh, accessExpirationMs));
     }
 
@@ -92,7 +97,7 @@ public class AuthController {
                     org.springframework.security.core.userdetails.UserDetails userDetails =
                             new org.springframework.security.core.userdetails.User(user.getUsername(), user.getPassword(),
                                     java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + user.getRole().name())));
-                    String newAccess = jwtProvider.generateToken(userDetails);
+                    String newAccess = jwtProvider.generateToken(userDetails, user.getId());
                     // Rotaciona o refresh token (revoga o antigo e emite outro)
                     refreshTokenService.revokeRefreshToken(request.getRefreshToken());
                     String newRefresh = refreshTokenService.createRefreshTokenForUser(user.getUsername());

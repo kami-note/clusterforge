@@ -1,6 +1,7 @@
 package com.seveninterprise.clusterforge.security;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
@@ -52,6 +53,10 @@ public class JwtProvider {
     }
 
     public String generateToken(UserDetails userDetails) {
+        return generateToken(userDetails, null);
+    }
+
+    public String generateToken(UserDetails userDetails, Long userId) {
         // Extrai o role do usuário
         String role = userDetails.getAuthorities().stream()
                 .findFirst()
@@ -61,16 +66,22 @@ public class JwtProvider {
                     return auth.startsWith("ROLE_") ? auth.substring(5) : auth;
                 })
                 .orElse("USER");
-        
-        return createToken(userDetails.getUsername(), role);
+
+        return createToken(userDetails.getUsername(), role, userId);
     }
 
-    private String createToken(String subject, String role) {
-        return Jwts.builder()
+    private String createToken(String subject, String role, Long userId) {
+        JwtBuilder builder = Jwts.builder()
                 .setSubject(subject)
                 .claim("role", role) // Adiciona o role como claim
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + accessExpirationMs))
+                .setExpiration(new Date(System.currentTimeMillis() + accessExpirationMs));
+
+        if (userId != null) {
+            builder.claim("userId", userId);
+        }
+
+        return builder
                 .signWith(SECRET_KEY)
                 .compact();
     }
