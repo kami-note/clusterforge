@@ -87,7 +87,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const [command, setCommand] = useState('java -Xmx6G -Xms6G -jar server.jar nogui');
   const [consoleOutput, setConsoleOutput] = useState(mockLogs.join('\n'));
   const [isLogsPaused, setIsLogsPaused] = useState(false);
-  const [metricsError] = useState<string | null>(null);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
   const consoleRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedInitialDataRef = useRef(false);
 
@@ -198,8 +198,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   }, []);
 
   // Helper para converter oklch para hex (usando elemento temporário)
-  const oklchToHex = useCallback((oklch: string, fallback: string = '#8884d8'): string => {
+  // No tema escuro, prioriza cores mais brilhantes para melhor visibilidade
+  const oklchToHex = useCallback((oklch: string, fallback: string = '#8884d8', preferFallback: boolean = false): string => {
     if (typeof document === 'undefined') {
+      return fallback;
+    }
+    
+    // Se preferFallback for true (tema escuro), usar fallback diretamente para garantir visibilidade
+    if (preferFallback) {
       return fallback;
     }
     
@@ -222,6 +228,24 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         const r = parseInt(rgb[0]);
         const g = parseInt(rgb[1]);
         const b = parseInt(rgb[2]);
+        
+        // Verificar luminosidade da cor
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        
+        // No tema claro: se a cor for muito clara (luminosidade alta), usar fallback
+        // No tema escuro: se a cor for muito escura (luminosidade baixa), usar fallback
+        // Verificar se estamos em tema claro ou escuro
+        const root = document.documentElement;
+        const isDark = root.classList.contains('dark');
+        
+        if (isDark && luminance < 0.3) {
+          // Tema escuro: cor muito escura, usar fallback
+          return fallback;
+        } else if (!isDark && luminance > 0.85) {
+          // Tema claro: cor muito clara, usar fallback para garantir contraste
+          return fallback;
+        }
+        
         const hex = '#' + [r, g, b].map(x => {
           const hex = x.toString(16);
           return hex.length === 1 ? '0' + hex : hex;
@@ -240,10 +264,10 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   // Obter cores do tema convertidas para hex
   // Cores padrão visíveis (serão substituídas quando o tema for detectado)
   const [chartColors, setChartColors] = useState({
-    chart1: '#ef4444', // vermelho (tema claro) ou azul (tema escuro)
-    chart2: '#3b82f6', // azul (tema claro) ou verde (tema escuro)
-    chart3: '#1e40af', // azul escuro (tema claro) ou amarelo (tema escuro)
-    chart4: '#fbbf24', // amarelo (tema claro) ou roxo (tema escuro)
+    chart1: '#dc2626', // vermelho escuro (tema claro) ou azul claro (tema escuro)
+    chart2: '#2563eb', // azul escuro (tema claro) ou verde (tema escuro)
+    chart3: '#d97706', // laranja escuro (tema claro) ou amarelo (tema escuro)
+    chart4: '#ea580c', // laranja escuro (tema claro) ou roxo (tema escuro)
   });
 
   // Carregar dados iniciais (apenas cluster, sem métricas - métricas vêm do WebSocket)
@@ -284,7 +308,9 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           }
           
           // Verificar WebSocket apenas para métricas, não para sobrescrever status inicial
-          const wsMetrics = realtimeMetrics && !isNaN(clusterIdNum) ? realtimeMetrics[clusterIdNum] : null;
+          const wsMetrics = realtimeMetrics && !isNaN(clusterIdNum) && realtimeMetrics[clusterIdNum] 
+            ? realtimeMetrics[clusterIdNum] 
+            : null;
           
           // Se houver métricas do WebSocket, usar apenas para inicializar gráfico
           if (wsMetrics && connected && !isCancelled) {
@@ -383,12 +409,27 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     if (!cluster) return;
 
     const clusterIdNum = parseInt(clusterId);
-    if (isNaN(clusterIdNum)) return;
+    if (isNaN(clusterIdNum)) {
+      setMetricsError('ID do cluster inválido');
+      return;
+    }
 
-    const wsMetrics = realtimeMetrics[clusterIdNum];
+    const wsMetrics = realtimeMetrics && realtimeMetrics[clusterIdNum] 
+      ? realtimeMetrics[clusterIdNum] 
+      : null;
     
     // Só processar se WebSocket estiver conectado E houver métricas
-    if (!wsMetrics || !connected) return;
+    if (!wsMetrics || !connected) {
+      if (!connected) {
+        setMetricsError(null); // Limpar erro quando desconectado (já há aviso visual)
+      }
+      return;
+    }
+    
+    // Limpar erro quando receber métricas válidas
+    if (metricsError) {
+      setMetricsError(null);
+    }
     
     // Debug: verificar apenas métricas essenciais recebidas do WebSocket
     if (process.env.NODE_ENV === 'development') {
@@ -454,11 +495,12 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     
     if (hasValidMetrics) {
       setAllResourceData(prev => {
-        // Se não há dados ainda, criar array inicial
+        // Se não há dados ainda, criar array inicial com timestamps diferentes
         if (prev.length === 0) {
+          const now = Date.now();
           const initialNetwork = metrics.networkUsage !== undefined ? Math.round(metrics.networkUsage) : 0;
-          const initialData: ResourceDataPoint[] = Array.from({ length: 20 }, () => ({
-            time: new Date().toLocaleTimeString('pt-BR', {
+          const initialData: ResourceDataPoint[] = Array.from({ length: 20 }, (_, i) => ({
+            time: new Date(now - (19 - i) * 30000).toLocaleTimeString('pt-BR', {
               hour: '2-digit',
               minute: '2-digit',
               second: '2-digit'
@@ -553,16 +595,97 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     }
   }, [consoleOutput, isLogsPaused]);
 
+  // Estado para cores do tema (eixos, grid, etc.)
+  const [themeColors, setThemeColors] = useState({
+    foreground: '#000000',
+    mutedForeground: '#888888',
+  });
+
+  // Função para converter rgb/rgba para hex
+  const rgbToHex = useCallback((rgb: string): string => {
+    const match = rgb.match(/\d+/g);
+    if (match && match.length >= 3) {
+      const r = parseInt(match[0]);
+      const g = parseInt(match[1]);
+      const b = parseInt(match[2]);
+      return '#' + [r, g, b].map(x => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+      }).join('');
+    }
+    return '#000000';
+  }, []);
+
+  // Função para obter cor CSS do tema e converter para hex
+  const getThemeColor = useCallback((cssVar: string, fallback: string = '#000000'): string => {
+    if (typeof document === 'undefined') {
+      return fallback;
+    }
+    try {
+      const root = document.documentElement;
+      // Obter valor da variável CSS
+      const cssValue = getComputedStyle(root).getPropertyValue(cssVar).trim();
+      
+      if (cssValue) {
+        // Se já for hex, retornar diretamente
+        if (cssValue.startsWith('#')) {
+          return cssValue;
+        }
+        
+        // Se for oklch, criar elemento temporário para obter cor computada
+        if (cssValue.startsWith('oklch')) {
+          const tempElement = document.createElement('div');
+          tempElement.style.color = cssValue;
+          tempElement.style.position = 'absolute';
+          tempElement.style.visibility = 'hidden';
+          tempElement.style.width = '1px';
+          tempElement.style.height = '1px';
+          document.body.appendChild(tempElement);
+          
+          const computedColor = window.getComputedStyle(tempElement).color;
+          document.body.removeChild(tempElement);
+          
+          // Converter rgb para hex
+          return rgbToHex(computedColor);
+        }
+        
+        // Se for rgb/rgba, converter para hex
+        if (cssValue.startsWith('rgb')) {
+          return rgbToHex(cssValue);
+        }
+        
+        return cssValue;
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Erro ao obter cor do tema:', error);
+      }
+    }
+    return fallback;
+  }, [rgbToHex]);
+
+  // Atualizar cores do tema quando mudar
+  const updateThemeColors = useCallback(() => {
+    setThemeColors({
+      foreground: getThemeColor('--foreground', '#000000'),
+      mutedForeground: getThemeColor('--muted-foreground', '#888888'),
+    });
+  }, [getThemeColor]);
+
   // Obter cores do tema quando componente montar
   useEffect(() => {
+    // Atualizar cores do tema
+    updateThemeColors();
+    
     // Obter cores reais do CSS e converter para hex
     const root = document.documentElement;
     const isDark = root.classList.contains('dark');
     
     // Cores oklch baseadas no globals.css
+    // Para tema escuro, usar cores mais brilhantes para melhor visibilidade
     const oklchColors = isDark 
       ? {
-          chart1: 'oklch(0.488 0.243 264.376)', // azul escuro
+          chart1: 'oklch(0.488 0.243 264.376)', // azul escuro - usar fallback mais brilhante
           chart2: 'oklch(0.696 0.17 162.48)',   // verde
           chart3: 'oklch(0.769 0.188 70.08)',  // amarelo
           chart4: 'oklch(0.627 0.265 303.9)', // roxo/rosa
@@ -574,12 +697,18 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           chart4: 'oklch(0.828 0.189 84.429)', // amarelo/verde claro
         };
     
-    // Converter para hex com fallbacks específicos - cores mais contrastantes
+    // Converter para hex com fallbacks específicos
+    // No tema escuro: cores brilhantes para visibilidade
+    // No tema claro: cores escuras e saturadas para contraste
     const colors = {
-      chart1: oklchToHex(oklchColors.chart1, isDark ? '#6366f1' : '#ef4444'), // azul escuro ou vermelho
-      chart2: oklchToHex(oklchColors.chart2, isDark ? '#10b981' : '#3b82f6'), // verde ou azul
-      chart3: oklchToHex(oklchColors.chart3, isDark ? '#f59e0b' : '#eab308'), // amarelo mais brilhante
-      chart4: oklchToHex(oklchColors.chart4, isDark ? '#a855f7' : '#f97316'), // roxo ou laranja
+      // CPU - vermelho escuro no tema claro, azul claro no tema escuro
+      chart1: oklchToHex(oklchColors.chart1, isDark ? '#818cf8' : '#dc2626', isDark), // vermelho escuro (red-600) ou azul claro (indigo-400)
+      // RAM - azul escuro no tema claro, verde brilhante no tema escuro
+      chart2: oklchToHex(oklchColors.chart2, isDark ? '#34d399' : '#2563eb', isDark), // azul escuro (blue-600) ou verde esmeralda (emerald-400)
+      // Disco - amarelo/laranja escuro no tema claro, amarelo brilhante no tema escuro
+      chart3: oklchToHex(oklchColors.chart3, isDark ? '#fbbf24' : '#d97706', isDark), // laranja escuro (amber-600) ou amarelo (amber-400)
+      // Network (não usado, mas mantido para consistência)
+      chart4: oklchToHex(oklchColors.chart4, isDark ? '#c084fc' : '#ea580c', isDark), // laranja escuro (orange-600) ou roxo (purple-400)
     };
     
     // Log para debug
@@ -588,11 +717,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     }
     
     setChartColors(colors);
-  }, [oklchToHex]);
+  }, [oklchToHex, updateThemeColors]);
 
   // Observar mudanças de tema
   useEffect(() => {
     const updateColors = () => {
+      // Atualizar cores do tema (eixos, grid, etc.)
+      updateThemeColors();
+      
       const root = document.documentElement;
       const isDark = root.classList.contains('dark');
       
@@ -610,15 +742,21 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             chart4: 'oklch(0.828 0.189 84.429)',
           };
       
+      // Usar cores mais brilhantes no tema escuro, cores escuras no tema claro
+      // No tema escuro: forçar uso de cores mais brilhantes para garantir visibilidade
+      // No tema claro: usar cores escuras e saturadas para melhor contraste
       const colors = {
-        chart1: oklchToHex(oklchColors.chart1, isDark ? '#6366f1' : '#ef4444'),
-        chart2: oklchToHex(oklchColors.chart2, isDark ? '#10b981' : '#3b82f6'),
-        chart3: oklchToHex(oklchColors.chart3, isDark ? '#f59e0b' : '#1e40af'),
-        chart4: oklchToHex(oklchColors.chart4, isDark ? '#a855f7' : '#fbbf24'),
+        chart1: oklchToHex(oklchColors.chart1, isDark ? '#818cf8' : '#dc2626', isDark), // vermelho escuro (red-600) ou azul claro (indigo-400)
+        chart2: oklchToHex(oklchColors.chart2, isDark ? '#34d399' : '#2563eb', isDark), // azul escuro (blue-600) ou verde esmeralda (emerald-400)
+        chart3: oklchToHex(oklchColors.chart3, isDark ? '#fbbf24' : '#d97706', isDark), // laranja escuro (amber-600) ou amarelo (amber-400)
+        chart4: oklchToHex(oklchColors.chart4, isDark ? '#c084fc' : '#ea580c', isDark), // laranja escuro (orange-600) ou roxo (purple-400)
       };
       
       setChartColors(colors);
     };
+
+    // Atualizar cores imediatamente
+    updateColors();
 
     const observer = new MutationObserver(() => {
       // Pequeno delay para garantir que o CSS foi atualizado
@@ -631,7 +769,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     });
 
     return () => observer.disconnect();
-  }, [oklchToHex]);
+  }, [oklchToHex, updateThemeColors]);
 
   const handleAction = (action: 'start' | 'stop' | 'restart' | 'reinstall') => {
     const newStatus = action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting';
@@ -804,10 +942,23 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   } : { cpu: 0, ram: 0, disk: 0 });
 
   // Calcular domínios para os eixos Y
-  // Para percentuais: limite máximo de 100%, mas permite range dinâmico para valores pequenos
-  const percentageDomain = calculateDynamicDomain(resourceData, ['cpu', 'ram', 'disk'], 0.1, 0.1, 100);
-  // Para rede: sem limite máximo, range totalmente dinâmico
-  // const networkDomain = calculateDynamicDomain(resourceData, ['network'], 0.1, 0.2); // removido
+  // Para percentuais: usar domínio fixo [0, 100] para melhor visualização
+  // Apenas usar domínio dinâmico se todos os valores forem muito baixos (< 10%)
+  const maxValue = resourceData.length > 0 
+    ? Math.max(
+        ...resourceData.map(p => Math.max(
+          p.cpu || 0,
+          p.ram || 0,
+          p.disk || 0
+        ))
+      )
+    : 0;
+  
+  // Se o valor máximo for menor que 10%, usar domínio dinâmico para melhor visualização
+  // Caso contrário, usar domínio fixo [0, 100] para percentuais
+  const percentageDomain = maxValue < 10 && resourceData.length > 0
+    ? calculateDynamicDomain(resourceData, ['cpu', 'ram', 'disk'], 0.1, 0.1, 100)
+    : [0, 100] as [number, number];
 
   return (
     <div className="p-6 space-y-6">
@@ -988,18 +1139,35 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                       }
                     }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                    <CartesianGrid 
+                      strokeDasharray="3 3" 
+                      opacity={0.3}
+                      stroke={themeColors.mutedForeground}
+                    />
                     <XAxis 
                       dataKey="time" 
-                      tick={{ fontSize: 12 }}
+                      tick={{ 
+                        fontSize: 12,
+                        fill: themeColors.foreground
+                      }}
                       interval="preserveStartEnd"
+                      stroke={themeColors.mutedForeground}
                     />
                     <YAxis 
                       yAxisId="left"
                       domain={percentageDomain}
-                      tick={{ fontSize: 12 }}
-                      label={{ value: 'Uso (%)', angle: -90, position: 'insideLeft' }}
+                      tick={{ 
+                        fontSize: 12,
+                        fill: themeColors.foreground
+                      }}
+                      label={{ 
+                        value: 'Uso (%)', 
+                        angle: -90, 
+                        position: 'insideLeft',
+                        style: { fill: themeColors.foreground }
+                      }}
                       allowDecimals={true}
+                      stroke={themeColors.mutedForeground}
                     />
                     {/* Eixo de rede removido */}
                     <Tooltip 
@@ -1157,12 +1325,12 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 <label className="text-sm text-muted-foreground">Endereço do Servidor</label>
                 <div className="flex items-center space-x-2 mt-1">
                   <code className="flex-1 p-2 bg-muted rounded text-sm">
-                    {cluster.port}
+                    {cluster.port ? `localhost:${cluster.port}` : 'N/A'}
                   </code>
                   <Button 
                     variant="outline" 
                     size="sm"
-                    onClick={() => copyToClipboard(cluster.port || '')}
+                    onClick={() => copyToClipboard(cluster.port ? `localhost:${cluster.port}` : '')}
                   >
                     <Copy className="h-3 w-3" />
                   </Button>
@@ -1176,11 +1344,11 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 <div className="space-y-2 mt-2">
                   <div className="flex items-center space-x-2">
                     <span className="text-xs w-16">Host:</span>
-                    <code className="flex-1 p-1 bg-muted rounded text-xs">{cluster.port}</code>
+                    <code className="flex-1 p-1 bg-muted rounded text-xs">localhost</code>
                     <Button 
                       variant="outline" 
                       size="sm"
-                      onClick={() => copyToClipboard(cluster.port || '')}
+                      onClick={() => copyToClipboard('localhost')}
                     >
                       <Copy className="h-3 w-3" />
                     </Button>
@@ -1265,7 +1433,20 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               <Separator />
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">Criado em:</span>
-                <span className="text-sm">{new Date(cluster.lastUpdate).toLocaleDateString('pt-BR')}</span>
+                <span className="text-sm">
+                  {(() => {
+                    try {
+                      const date = new Date(cluster.lastUpdate);
+                      if (isNaN(date.getTime())) {
+                        // Se não for uma data válida, mostrar o valor original
+                        return cluster.lastUpdate || 'Desconhecido';
+                      }
+                      return date.toLocaleDateString('pt-BR');
+                    } catch {
+                      return cluster.lastUpdate || 'Desconhecido';
+                    }
+                  })()}
+                </span>
               </div>
             </CardContent>
           </Card>
