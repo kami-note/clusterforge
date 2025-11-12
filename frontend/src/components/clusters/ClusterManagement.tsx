@@ -234,8 +234,10 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       let status: 'active' | 'stopped' | 'reinstalling' = cluster.status === 'running' ? 'active' : cluster.status === 'stopped' ? 'stopped' : 'active';
       
       // Usar métricas em tempo real se disponíveis, senão usar valores da API
-      const cpuUsage = realtimeMetrics?.cpuUsagePercent || cluster.cpu || 0;
-      const cpuLimit = realtimeMetrics?.cpuLimitCores ? realtimeMetrics.cpuLimitCores * 100 : 100;
+      // IMPORTANTE: cpuUsagePercent já vem normalizado (0-100%) do backend, não precisa recalcular
+      const cpuUsagePercent = realtimeMetrics?.cpuUsagePercent;
+      const cpuUsage = cpuUsagePercent !== undefined ? cpuUsagePercent : (cluster.cpu || 0);
+      const cpuLimit = 100; // Sempre 100% pois cpuUsagePercent já é normalizado
       
       const memoryUsageMb = realtimeMetrics?.memoryUsageMb || cluster.memory || 0;
       const memoryLimitMb = realtimeMetrics?.memoryLimitMb || cluster.memory || 4096; // Default 4GB
@@ -796,9 +798,17 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                 ) : (
           <div className="space-y-2">
             {filteredClusters.map((cluster) => {
-              const cpuPercentage = getResourcePercentage(cluster.resources.cpu.used, cluster.resources.cpu.limit);
-              const ramPercentage = getResourcePercentage(cluster.resources.ram.used, cluster.resources.ram.limit);
-              const diskPercentage = getResourcePercentage(cluster.resources.disk.used, cluster.resources.disk.limit);
+              // Se temos métricas em tempo real, usar percentuais normalizados diretamente
+              // Caso contrário, calcular usando getResourcePercentage
+              const cpuPercentage = cluster.realtimeMetrics?.cpuUsagePercent !== undefined
+                ? cluster.realtimeMetrics.cpuUsagePercent
+                : getResourcePercentage(cluster.resources.cpu.used, cluster.resources.cpu.limit);
+              const ramPercentage = cluster.realtimeMetrics?.memoryUsagePercent !== undefined
+                ? cluster.realtimeMetrics.memoryUsagePercent
+                : getResourcePercentage(cluster.resources.ram.used, cluster.resources.ram.limit);
+              const diskPercentage = cluster.realtimeMetrics?.diskUsagePercent !== undefined
+                ? cluster.realtimeMetrics.diskUsagePercent
+                : getResourcePercentage(cluster.resources.disk.used, cluster.resources.disk.limit);
 
               const isProcessing = processingClusters.has(cluster.id);
               // Determinar tipo de processamento baseado no status atual

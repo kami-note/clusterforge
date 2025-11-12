@@ -351,6 +351,9 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     pageLoadTime.current = Date.now();
     setVisiblePoints(10);
     
+    // Limpar dados antigos do gráfico quando mudar de cluster
+    setAllResourceData([]);
+    
     return () => {
       isCancelled = true;
       hasLoadedInitialDataRef.current = false;
@@ -437,6 +440,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         cpuUsagePercent: wsMetrics.cpuUsagePercent,
         memoryUsagePercent: wsMetrics.memoryUsagePercent,
         diskUsagePercent: wsMetrics.diskUsagePercent,
+        cpuLimitCores: wsMetrics.cpuLimitCores,
         networkMB: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
           ? ((wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
           : 'N/A'
@@ -520,13 +524,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         const newDisk = sanitizeValue(metrics.diskUsagePercent);
         const newNetwork = metrics.networkUsage !== undefined ? Math.round(metrics.networkUsage) : 0;
         
-        // Debug: verificar valores que serão adicionados ao gráfico (apenas primeiros pontos)
-        if (process.env.NODE_ENV === 'development' && prev.length < 2) {
+        // Debug: verificar valores que serão adicionados ao gráfico
+        if (process.env.NODE_ENV === 'development') {
           console.log('📈 Valores plotados no gráfico:', {
-            cpu: `${newCpu}%`,
-            ram: `${newRam}%`,
-            disk: metrics.diskUsagePercent !== undefined ? `${newDisk}%` : 'N/A (null)',
-            network: metrics.networkUsage !== undefined ? `${newNetwork} MB/s` : 'N/A'
+            cpu: `${newCpu}% (original: ${metrics.cpuUsagePercent}%)`,
+            ram: `${newRam}% (original: ${metrics.memoryUsagePercent}%)`,
+            disk: metrics.diskUsagePercent !== undefined ? `${newDisk}% (original: ${metrics.diskUsagePercent}%)` : 'N/A (null)',
+            network: metrics.networkUsage !== undefined ? `${newNetwork} MB/s` : 'N/A',
+            totalPontos: prev.length + 1
           });
         }
         

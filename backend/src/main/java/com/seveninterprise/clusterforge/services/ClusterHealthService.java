@@ -595,6 +595,7 @@ public class ClusterHealthService implements IClusterHealthService {
             // ========== CPU Metrics ==========
             // O Docker Stats retorna CPU como percentual do limite do container (se configurado)
             // ou percentual do host (se não houver limite)
+            // IMPORTANTE: Normalizar para percentual relativo ao sistema total
             String cpuStr = parts[0].replace("%", "").trim();
             if (!cpuStr.isEmpty() && !cpuStr.equals("--")) {
                 try {
@@ -605,10 +606,46 @@ public class ClusterHealthService implements IClusterHealthService {
                         System.err.println("⚠️ Valor de CPU inválido detectado: " + cpuPercentFromDocker + "% - zerando métrica");
                         metrics.setCpuUsagePercent(0.0);
                     } else {
-                        metrics.setCpuUsagePercent(cpuPercentFromDocker);
-                        if (!quietMode) {
-                            System.out.println("   ✅ CPU: " + cpuPercentFromDocker + "%");
+                        // IMPORTANTE: O Docker Stats retorna CPU de forma diferente dependendo da configuração:
+                        // 1. SEM limite de CPU: retorna percentual do sistema total (pode ser > 100% em sistemas multi-core)
+                        // 2. COM limite de CPU via cgroups: pode retornar de duas formas:
+                        //    a) Percentual RELATIVO AO LIMITE (ex: 100% = 100% do limite de 0.3 cores)
+                        //    b) Percentual DO SISTEMA TOTAL (ex: 30% = 30% do sistema total)
+                        //
+                        // Para detectar qual formato está sendo usado:
+                        // - Se cpuPercentFromDocker > (cpuLimit * 100), então já está normalizado ao sistema total
+                        // - Caso contrário, está relativo ao limite e precisa normalizar
+                        // IMPORTANTE: O Docker Stats retorna percentual RELATIVO AO SISTEMA TOTAL quando há limite configurado
+                        // Quando há limite configurado (ex: 0.3 cores = 30% de 1 core), o Docker retorna:
+                        // - 30% quando o container usa 100% do seu limite (0.3 cores = 30% do sistema)
+                        // - 15% quando o container usa 50% do seu limite (0.15 cores = 15% do sistema)
+                        //
+                        // Para UX, faz mais sentido mostrar o percentual RELATIVO AO LIMITE do container.
+                        // Então precisamos converter: percentual_sistema / limite_percentual = percentual_limite
+                        // Exemplo: Docker retorna 30%, limite é 0.3 cores (30% do sistema)
+                        // Conversão: 30% / 30% = 100% (container usando 100% do seu limite)
+                        //
+                        double cpuPercent = cpuPercentFromDocker;
+                        if (cluster.getCpuLimit() != null && cluster.getCpuLimit() > 0 && cluster.getCpuLimit() < 1.0) {
+                            double cpuLimitPercent = cluster.getCpuLimit() * 100.0; // Ex: 0.3 cores = 30%
+                            // Converter percentual do sistema total para percentual relativo ao limite
+                            // Se Docker retorna 30% e limite é 30%, então: 30% / 30% = 100% (uso do limite)
+                            if (cpuLimitPercent > 0) {
+                                cpuPercent = (cpuPercentFromDocker / cpuLimitPercent) * 100.0;
+                                // Limitar a 100% para exibição (não pode usar mais que 100% do limite)
+                                cpuPercent = Math.min(cpuPercent, 100.0);
+                            }
+                        } else {
+                            // Sem limite ou limite >= 1.0 core, usar valor diretamente
+                            cpuPercent = Math.min(cpuPercentFromDocker, 100.0);
                         }
+                        
+                        if (!quietMode) {
+                            System.out.println("   ✅ CPU: " + String.format("%.2f", cpuPercent) + 
+                                "% relativo ao limite (Docker: " + cpuPercentFromDocker + "% do sistema, Limite: " + 
+                                (cluster.getCpuLimit() != null ? cluster.getCpuLimit() + " cores (" + (cluster.getCpuLimit() * 100.0) + "% do sistema)" : "N/A") + ")");
+                        }
+                        metrics.setCpuUsagePercent(cpuPercent);
                     }
                 } catch (NumberFormatException e) {
                     System.err.println("⚠️ Erro ao fazer parse de CPU: '" + cpuStr + "' - zerando métrica");
