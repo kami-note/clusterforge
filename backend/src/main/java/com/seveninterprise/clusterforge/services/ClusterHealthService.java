@@ -139,19 +139,52 @@ public class ClusterHealthService implements IClusterHealthService {
             // 4. Determinar status geral de saúde
             ClusterHealthStatus.HealthState newState = determineHealthState(healthStatus, containerStatus, responseTime);
             
-            // 4.1. Se container não existe ou está parado, atualizar status do cluster para STOPPED
-            if (containerNotFound || containerStopped) {
-                try {
-                    Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(null);
-                    if (clusterToUpdate != null && !"STOPPED".equals(clusterToUpdate.getStatus())) {
-                        clusterToUpdate.setStatus("STOPPED");
-                        clusterRepository.save(clusterToUpdate);
-                        System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para STOPPED (container " + 
-                                         (containerNotFound ? "não existe" : "parado") + ")");
+            // 4.1. Sincronizar status do cluster com o estado real do container Docker
+            // Isso garante que o banco de dados sempre reflita o estado real, mesmo se houver
+            // inconsistências (ex: container iniciado manualmente, falhas, etc.)
+            try {
+                Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(null);
+                if (clusterToUpdate != null) {
+                    boolean statusChanged = false;
+                    String oldStatus = clusterToUpdate.getStatus();
+                    
+                    if (containerNotFound || containerStopped) {
+                        // Container não existe ou está parado - atualizar para STOPPED
+                        if (!"STOPPED".equals(clusterToUpdate.getStatus())) {
+                            clusterToUpdate.setStatus("STOPPED");
+                            statusChanged = true;
+                            System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para STOPPED (container " + 
+                                             (containerNotFound ? "não existe" : "parado") + ")");
+                        }
+                    } else if ("running".equalsIgnoreCase(containerStatus)) {
+                        // Container está rodando - atualizar para RUNNING
+                        if (!"RUNNING".equals(clusterToUpdate.getStatus())) {
+                            clusterToUpdate.setStatus("RUNNING");
+                            statusChanged = true;
+                            System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para RUNNING (container está rodando)");
+                            
+                            // Atualizar containerId se necessário (pode ter mudado após restart)
+                            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                                ? cluster.getContainerId() 
+                                : cluster.getSanitizedContainerName();
+                            
+                            // Buscar o ID real do container
+                            String actualContainerId = dockerService.getContainerId(containerIdentifier);
+                            if (actualContainerId != null && !actualContainerId.equals(clusterToUpdate.getContainerId())) {
+                                clusterToUpdate.setContainerId(actualContainerId);
+                                System.out.println("🔄 ContainerId do cluster " + cluster.getId() + " atualizado: " + actualContainerId);
+                            }
+                        }
                     }
-                } catch (Exception e) {
-                    System.err.println("⚠️ Erro ao atualizar status do cluster: " + e.getMessage());
+                    
+                    if (statusChanged) {
+                        clusterRepository.save(clusterToUpdate);
+                        System.out.println("✅ Sincronização de status concluída: " + oldStatus + " → " + clusterToUpdate.getStatus());
+                    }
                 }
+            } catch (Exception e) {
+                System.err.println("⚠️ Erro ao sincronizar status do cluster: " + e.getMessage());
+                e.printStackTrace();
             }
             
             // 5. Atualizar contadores e timestamps
@@ -1139,6 +1172,99 @@ public class ClusterHealthService implements IClusterHealthService {
             }
         }
         return "unknown";
+    }
+    
+    /**
+     * Sincronização rápida de status - verifica apenas o estado do container Docker
+     * e sincroniza com o banco de dados. Mais leve que o health check completo.
+     * Executado com mais frequência para garantir sincronização em tempo real.
+     */
+    @Scheduled(fixedDelayString = "${clusterforge.status.sync.interval:30000}")
+    public void scheduledStatusSync() {
+        try {
+            List<Cluster> allClusters = clusterRepository.findAll();
+            int syncedCount = 0;
+            
+            for (Cluster cluster : allClusters) {
+                try {
+                    if (syncClusterStatus(cluster)) {
+                        syncedCount++;
+                    }
+                } catch (Exception e) {
+                    // Não quebrar a sincronização de outros clusters se um falhar
+                    System.err.println("⚠️ Erro ao sincronizar status do cluster " + cluster.getId() + ": " + e.getMessage());
+                }
+            }
+            
+            if (syncedCount > 0) {
+                System.out.println("✅ Sincronização de status concluída: " + syncedCount + " cluster(s) atualizado(s)");
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Erro na sincronização periódica de status: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Sincroniza o status de um cluster específico com o estado real do container Docker
+     * Método leve que apenas verifica o status do container e atualiza o banco se necessário
+     * 
+     * @param cluster Cluster a ser sincronizado
+     * @return true se houve mudança de status, false caso contrário
+     */
+    @Transactional
+    public boolean syncClusterStatus(Cluster cluster) {
+        try {
+            // Verificar status real do container Docker
+            String containerStatus = checkContainerStatus(cluster);
+            
+            // Obter cluster atualizado do banco
+            Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(null);
+            if (clusterToUpdate == null) {
+                return false;
+            }
+            
+            String oldStatus = clusterToUpdate.getStatus();
+            boolean statusChanged = false;
+            
+            boolean containerNotFound = "NOT_FOUND".equals(containerStatus) || containerStatus.startsWith("ERROR");
+            boolean containerStopped = !"running".equalsIgnoreCase(containerStatus);
+            boolean containerRunning = "running".equalsIgnoreCase(containerStatus);
+            
+            if (containerNotFound || containerStopped) {
+                // Container não existe ou está parado - atualizar para STOPPED
+                if (!"STOPPED".equals(clusterToUpdate.getStatus())) {
+                    clusterToUpdate.setStatus("STOPPED");
+                    statusChanged = true;
+                }
+            } else if (containerRunning) {
+                // Container está rodando - atualizar para RUNNING
+                if (!"RUNNING".equals(clusterToUpdate.getStatus())) {
+                    clusterToUpdate.setStatus("RUNNING");
+                    statusChanged = true;
+                    
+                    // Atualizar containerId se necessário (pode ter mudado após restart)
+                    String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                        ? cluster.getContainerId() 
+                        : cluster.getSanitizedContainerName();
+                    
+                    String actualContainerId = dockerService.getContainerId(containerIdentifier);
+                    if (actualContainerId != null && !actualContainerId.equals(clusterToUpdate.getContainerId())) {
+                        clusterToUpdate.setContainerId(actualContainerId);
+                    }
+                }
+            }
+            
+            if (statusChanged) {
+                clusterRepository.save(clusterToUpdate);
+                System.out.println("🔄 Status sincronizado: Cluster " + cluster.getId() + " (" + oldStatus + " → " + clusterToUpdate.getStatus() + ")");
+                return true;
+            }
+            
+            return false;
+        } catch (Exception e) {
+            System.err.println("⚠️ Erro ao sincronizar status do cluster " + cluster.getId() + ": " + e.getMessage());
+            return false;
+        }
     }
     
     // Agendamento automático de verificações de saúde

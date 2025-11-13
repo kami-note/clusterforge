@@ -879,23 +879,24 @@ public class ClusterService implements IClusterService {
                 ? cluster.getContainerId() 
                 : cluster.getSanitizedContainerName();
             
-            // Usa docker-compose down para parar o cluster
-            // Isso é mais confiável que parar container por ID/nome
-            String dockerCmd = getDockerCommand();
-            String composeCmd;
-            
-            if (dockerCmd.contains("sudo")) {
-                composeCmd = "sudo bash -c 'cd " + clusterPath + " && docker-compose down'";
-            } else {
-                composeCmd = "bash -c 'cd " + clusterPath + " && docker-compose down'";
+            if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                // Se não tem identificador, assume que já está parado
+                cluster.setStatus("STOPPED");
+                clusterRepository.save(cluster);
+                return buildResponse(cluster, "STOPPED", "Cluster já está parado (sem container identificado)");
             }
             
-            String result = dockerService.runCommand(composeCmd);
-            boolean commandSuccess = isDockerCommandSuccessful(result);
-            
-            if (commandSuccess) {
+            // Método 1: Tenta parar o container diretamente usando docker stop
+            // Isso é mais confiável que docker-compose down porque:
+            // 1. Para o container sem removê-lo
+            // 2. Respeita a política restart: unless-stopped (não reinicia após stop explícito)
+            // 3. É mais rápido e direto
+            try {
+                System.out.println("🛑 Parando container diretamente: " + containerIdentifier);
+                dockerService.stopContainer(containerIdentifier);
+                
                 // Aguardar um pouco para o Docker processar a parada
-                Thread.sleep(1500);
+                Thread.sleep(2000);
                 
                 // Verificar se o container realmente parou
                 if (verifyContainerStopped(containerIdentifier)) {
@@ -903,51 +904,61 @@ public class ClusterService implements IClusterService {
                     clusterRepository.save(cluster);
                     return buildResponse(cluster, "STOPPED", "Cluster parado e verificado com sucesso");
                 } else {
-                    // Comando executou mas container ainda está rodando - tenta método alternativo
-                    System.out.println("⚠️ Comando docker-compose down executado mas container ainda está rodando. Tentando método alternativo...");
-                    try {
-                        dockerService.stopContainer(containerIdentifier);
-                        Thread.sleep(1500);
-                        
-                        if (verifyContainerStopped(containerIdentifier)) {
-                            cluster.setStatus("STOPPED");
-                            clusterRepository.save(cluster);
-                            return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso (método alternativo)");
-                        } else {
-                            // Container ainda não parou após tentativas
-                            cluster.setStatus("ERROR");
-                            clusterRepository.save(cluster);
-                            return buildResponse(cluster, "ERROR", "Falha ao verificar parada do cluster. Container pode ainda estar rodando.");
-                        }
-                    } catch (Exception fallbackError) {
-                        System.err.println("Erro no método alternativo de parar: " + fallbackError.getMessage());
-                        cluster.setStatus("ERROR");
-                        clusterRepository.save(cluster);
-                        return buildResponse(cluster, "ERROR", "Falha ao parar cluster: " + fallbackError.getMessage());
-                    }
+                    System.out.println("⚠️ Container ainda está rodando após docker stop. Tentando docker-compose stop...");
                 }
-            } else {
-                // docker-compose down falhou - tenta método alternativo
-                try {
-                    dockerService.stopContainer(containerIdentifier);
-                    Thread.sleep(1500);
+            } catch (Exception e) {
+                System.out.println("⚠️ Erro ao parar container diretamente: " + e.getMessage() + ". Tentando método alternativo...");
+            }
+            
+            // Método 2: Se docker stop falhou, tenta docker-compose stop
+            // Isso para os containers sem removê-los (diferente de docker-compose down)
+            try {
+                String dockerCmd = getDockerCommand();
+                String composeCmd;
+                
+                if (dockerCmd.contains("sudo")) {
+                    composeCmd = "sudo bash -c 'cd " + clusterPath + " && docker-compose stop'";
+                } else {
+                    composeCmd = "bash -c 'cd " + clusterPath + " && docker-compose stop'";
+                }
+                
+                System.out.println("🛑 Tentando docker-compose stop...");
+                String result = dockerService.runCommand(composeCmd);
+                boolean commandSuccess = isDockerCommandSuccessful(result);
+                
+                if (commandSuccess) {
+                    // Aguardar um pouco para o Docker processar a parada
+                    Thread.sleep(2000);
                     
+                    // Verificar se o container realmente parou
                     if (verifyContainerStopped(containerIdentifier)) {
                         cluster.setStatus("STOPPED");
                         clusterRepository.save(cluster);
-                        return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso (método alternativo)");
+                        return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso (docker-compose stop)");
                     } else {
-                        cluster.setStatus("ERROR");
-                        clusterRepository.save(cluster);
-                        return buildResponse(cluster, "ERROR", "Falha ao parar cluster: comando executado mas container ainda está rodando");
+                        System.out.println("⚠️ Container ainda está rodando após docker-compose stop.");
                     }
-                } catch (Exception fallbackError) {
-                    System.err.println("Erro no método alternativo de parar: " + fallbackError.getMessage());
-                    cluster.setStatus("ERROR");
-                    clusterRepository.save(cluster);
-                    return buildResponse(cluster, "ERROR", "Falha ao parar cluster: " + result);
+                } else {
+                    System.out.println("⚠️ docker-compose stop falhou: " + result);
                 }
+            } catch (Exception e) {
+                System.err.println("⚠️ Erro ao executar docker-compose stop: " + e.getMessage());
             }
+            
+            // Se ambos os métodos falharam, verifica uma última vez o status
+            // Pode ser que o container já tenha parado mas a verificação anterior falhou
+            Thread.sleep(1000);
+            if (verifyContainerStopped(containerIdentifier)) {
+                cluster.setStatus("STOPPED");
+                clusterRepository.save(cluster);
+                return buildResponse(cluster, "STOPPED", "Cluster parado (verificação final confirmou)");
+            }
+            
+            // Se chegou aqui, não conseguiu parar o container
+            cluster.setStatus("ERROR");
+            clusterRepository.save(cluster);
+            return buildResponse(cluster, "ERROR", "Falha ao parar cluster: container ainda está rodando após todas as tentativas");
+            
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             System.err.println("Interrompido durante parada do cluster: " + e.getMessage());

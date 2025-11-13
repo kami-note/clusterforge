@@ -73,11 +73,31 @@ public class DockerService implements IDockerService {
             return;
         }
         
+        // Verifica se o container já está parado antes de tentar parar
+        String statusResult = inspectContainer(containerId, "{{.State.Status}}");
+        if (statusResult != null && statusResult.contains("Process exited with code: 0")) {
+            String status = statusResult.replace("Process exited with code: 0", "").trim().toLowerCase();
+            if (status.contains("stopped") || status.contains("exited")) {
+                System.out.println("Container " + containerId + " já está parado.");
+                return;
+            }
+        }
+        
         String dockerCmd = getDockerCommand();
         // Usa ID do container ao invés de nome
         String command = dockerCmd + " stop " + containerId;
         String result = runCommand(command);
-        if (!result.contains("Process exited with code: 0")) {
+        
+        // Verifica se o comando foi bem-sucedido ou se o container já estava parado
+        if (result.contains("Process exited with code: 0")) {
+            // Sucesso
+            return;
+        } else if (result.contains("is not running") || result.contains("already stopped")) {
+            // Container já estava parado - isso é considerado sucesso
+            System.out.println("Container " + containerId + " já estava parado.");
+            return;
+        } else {
+            // Erro real ao parar
             throw new RuntimeException("Failed to stop container (ID: " + containerId + "): " + result);
         }
     }
