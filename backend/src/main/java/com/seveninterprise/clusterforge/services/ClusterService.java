@@ -15,6 +15,7 @@ import com.seveninterprise.clusterforge.repository.ClusterRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterHealthStatusRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterHealthMetricsRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterBackupRepository;
+import com.seveninterprise.clusterforge.services.FtpCredentialsService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -68,6 +69,9 @@ public class ClusterService implements IClusterService {
     private final ClusterHealthService clusterHealthService;
     private final ClusterBackupService clusterBackupService;
     
+    // Serviço de credenciais FTP
+    private final FtpCredentialsService ftpCredentialsService;
+    
     public ClusterService(ClusterRepository clusterRepository,
                          ClusterNamingService clusterNamingService,
                          PortManagementService portManagementService,
@@ -81,7 +85,8 @@ public class ClusterService implements IClusterService {
                          IDockerComposeService dockerComposeService,
                          IResourceLimitService resourceLimitService,
                          ClusterHealthService clusterHealthService,
-                         ClusterBackupService clusterBackupService) {
+                         ClusterBackupService clusterBackupService,
+                         FtpCredentialsService ftpCredentialsService) {
         this.clusterRepository = clusterRepository;
         this.clusterNamingService = clusterNamingService;
         this.portManagementService = portManagementService;
@@ -96,6 +101,7 @@ public class ClusterService implements IClusterService {
         this.resourceLimitService = resourceLimitService;
         this.clusterHealthService = clusterHealthService;
         this.clusterBackupService = clusterBackupService;
+        this.ftpCredentialsService = ftpCredentialsService;
     }
     
     @Override
@@ -129,6 +135,10 @@ public class ClusterService implements IClusterService {
             int port = portManagementService.findAvailablePort();
             int ftpPort = portManagementService.findAvailableFtpPort();
             
+            // Gera credenciais FTP
+            FtpCredentialsService.FtpCredentials ftpCredentials = ftpCredentialsService.generateFtpCredentials();
+            System.out.println("🔐 Credenciais FTP geradas - Username: " + ftpCredentials.getUsername() + ", Porta: " + ftpPort);
+            
             // Cria diretório para o cluster usando FileSystemService
             String clusterPath = fileSystemService.createClusterDirectory(clusterName, clustersBasePath);
             
@@ -143,6 +153,9 @@ public class ClusterService implements IClusterService {
             cluster.setName(clusterName);
             cluster.setPort(port);
             cluster.setFtpPort(ftpPort);
+            cluster.setFtpUsername(ftpCredentials.getUsername());
+            // Armazena senha em texto plano (será usada no docker-compose, não precisa criptografar)
+            cluster.setFtpPassword(ftpCredentials.getPlainPassword());
             cluster.setRootPath(clusterPath);
             cluster.setUser(owner);
             
@@ -219,12 +232,21 @@ public class ClusterService implements IClusterService {
             return response;
             
         } catch (Exception e) {
+            System.err.println("❌ ERRO ao criar cluster: " + e.getMessage());
+            e.printStackTrace();
+            
+            // Log detalhado do stack trace para debug
+            java.io.StringWriter sw = new java.io.StringWriter();
+            java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+            e.printStackTrace(pw);
+            System.err.println("Stack trace completo:\n" + sw.toString());
+            
             return new CreateClusterResponse(
                 null,
                 null,
                 0,
                 "ERROR",
-                "Erro ao criar cluster: " + e.getMessage()
+                "Erro ao criar cluster: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName())
             );
         }
     }

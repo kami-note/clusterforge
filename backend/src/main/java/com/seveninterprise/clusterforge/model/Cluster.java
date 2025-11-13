@@ -31,6 +31,12 @@ public class Cluster {
     @Column(name = "ftp_port")
     private Integer ftpPort;      // Porta externa para serviço FTP/SFTP associado
     
+    @Column(name = "ftp_username")
+    private String ftpUsername;    // Usuário FTP para acesso ao cluster
+    
+    @Column(name = "ftp_password")
+    private String ftpPassword;    // Senha FTP em texto plano (necessária para docker-compose)
+    
     // Resource Limits
     private Double cpuLimit;      // CPU limit in cores (e.g., 1.5 = 1.5 cores)
     private Long memoryLimit;     // Memory limit in MB
@@ -132,6 +138,22 @@ public class Cluster {
 
     public void setFtpPort(Integer ftpPort) {
         this.ftpPort = ftpPort;
+    }
+    
+    public String getFtpUsername() {
+        return ftpUsername;
+    }
+    
+    public void setFtpUsername(String ftpUsername) {
+        this.ftpUsername = ftpUsername;
+    }
+    
+    public String getFtpPassword() {
+        return ftpPassword;
+    }
+    
+    public void setFtpPassword(String ftpPassword) {
+        this.ftpPassword = ftpPassword;
     }
     
     // Métodos auxiliares para lógicas básicas

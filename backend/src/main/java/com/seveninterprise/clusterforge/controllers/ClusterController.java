@@ -3,6 +3,7 @@ package com.seveninterprise.clusterforge.controllers;
 import com.seveninterprise.clusterforge.dto.ClusterListItemDto;
 import com.seveninterprise.clusterforge.dto.CreateClusterRequest;
 import com.seveninterprise.clusterforge.dto.CreateClusterResponse;
+import com.seveninterprise.clusterforge.dto.FtpCredentialsResponse;
 import com.seveninterprise.clusterforge.dto.UpdateClusterLimitsRequest;
 import com.seveninterprise.clusterforge.model.Cluster;
 import com.seveninterprise.clusterforge.model.User;
@@ -170,6 +171,57 @@ public class ClusterController {
                 getAuthenticatedUser(), 
                 isAdmin()
             );
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            return handleException(e);
+        }
+    }
+    
+    /**
+     * Obtém credenciais FTP de um cluster
+     * 
+     * GET /api/clusters/{clusterId}/ftp-credentials
+     * 
+     * Retorna as credenciais FTP (host, porta, usuário e senha) para acesso ao cluster.
+     * 
+     * Controle de Acesso:
+     * - Admin: Pode ver credenciais de qualquer cluster
+     * - Usuário: Pode ver apenas credenciais dos próprios clusters
+     * 
+     * @param clusterId ID do cluster
+     * @return FtpCredentialsResponse com credenciais FTP
+     */
+    @GetMapping("/{clusterId}/ftp-credentials")
+    public ResponseEntity<?> getFtpCredentials(@PathVariable Long clusterId) {
+        try {
+            User authenticatedUser = getAuthenticatedUser();
+            Cluster cluster = clusterService.getClusterById(clusterId);
+            
+            // Verifica permissão: admin pode ver qualquer cluster, usuário só os próprios
+            if (!isAdmin() && !cluster.isOwnedBy(authenticatedUser.getId())) {
+                return ResponseEntity.status(403).body("Não autorizado a ver credenciais deste cluster");
+            }
+            
+            // Verifica se cluster tem FTP configurado
+            if (cluster.getFtpPort() == null || cluster.getFtpUsername() == null || cluster.getFtpPassword() == null) {
+                return ResponseEntity.status(404).body("FTP não configurado para este cluster");
+            }
+            
+            // Obtém host configurável ou usa localhost como padrão
+            String ftpHost = System.getenv("FTP_HOST");
+            if (ftpHost == null || ftpHost.isEmpty()) {
+                ftpHost = "localhost";
+            }
+            
+            FtpCredentialsResponse response = new FtpCredentialsResponse(
+                ftpHost,
+                cluster.getFtpPort(),
+                cluster.getFtpUsername(),
+                cluster.getFtpPassword() // Senha em texto plano (armazenada assim para uso no docker-compose)
+                // AVISO DE SEGURANÇA: Senha em texto plano é necessária para docker-compose
+                // Considerar implementar criptografia no futuro
+            );
+            
             return ResponseEntity.ok(response);
         } catch (RuntimeException e) {
             return handleException(e);

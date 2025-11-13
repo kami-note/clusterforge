@@ -417,7 +417,27 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       }
     } catch (error: unknown) {
       console.error('Error creating cluster:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao criar cluster. Tente novamente.';
+      
+      // Tenta extrair mensagem de erro de forma mais robusta
+      let errorMessage = 'Erro ao criar cluster. Tente novamente.';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'object' && error !== null) {
+        // Tenta extrair mensagem de objeto de erro da API
+        const apiError = error as any;
+        if (apiError.message) {
+          errorMessage = apiError.message;
+        } else if (apiError.error) {
+          errorMessage = apiError.error;
+        } else {
+          // Se for objeto vazio ou sem mensagem, usa string do objeto
+          errorMessage = JSON.stringify(error) || errorMessage;
+        }
+      }
+      
+      console.error('Mensagem de erro extraída:', errorMessage);
+      
       const parsedError = parseDockerError(errorMessage);
       if (parsedError) {
         setErrorDetails(parsedError);

@@ -293,12 +293,24 @@ export class HttpClient {
     let errorDetails: Record<string, string[]> | undefined;
 
     try {
-      const errorData = await response.json();
-      errorMessage = errorData.message || errorData.error || errorMessage;
-      errorDetails = errorData.errors;
-    } catch {
-      // Se não conseguir parsear JSON, usa o status
+      const text = await response.text();
+      if (text) {
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.message || errorData.error || errorMessage;
+          errorDetails = errorData.errors;
+        } catch (parseError) {
+          // Se não conseguir parsear JSON, usa o texto como mensagem
+          errorMessage = text || this.getErrorMessage(response.status);
+          console.error('Erro ao parsear resposta de erro:', parseError, 'Texto:', text);
+        }
+      } else {
+        errorMessage = this.getErrorMessage(response.status);
+      }
+    } catch (e) {
+      // Se não conseguir ler a resposta, usa o status
       errorMessage = this.getErrorMessage(response.status);
+      console.error('Erro ao ler resposta:', e);
     }
 
     const error: ApiError = {

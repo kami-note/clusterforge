@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useClusters } from '@/hooks/useClusters';
 import { Cluster } from '@/types';
+import { clusterService, FtpCredentials } from '@/services/cluster.service';
 import { monitoringService, ClusterMetrics, ClusterHealthStatus } from '@/services/monitoring.service';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 
@@ -90,6 +91,8 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const consoleRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedInitialDataRef = useRef(false);
+  const [ftpCredentials, setFtpCredentials] = useState<{ host: string; port: number; username: string; password: string } | null>(null);
+  const [ftpLoading, setFtpLoading] = useState(false);
 
   // Função auxiliar para sanitizar valores numéricos
   const sanitizeValue = useCallback((value: number | undefined | null): number => {
@@ -304,6 +307,24 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           } catch (error) {
             if (process.env.NODE_ENV === 'development') {
               console.debug("Failed to fetch health status from API, using cluster status:", error);
+            }
+          }
+          
+          // Buscar credenciais FTP
+          try {
+            setFtpLoading(true);
+            const ftpCreds = await clusterService.getFtpCredentials(clusterIdNum);
+            if (!isCancelled) {
+              setFtpCredentials(ftpCreds);
+            }
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.debug("Failed to fetch FTP credentials:", error);
+            }
+            // Não definir credenciais se falhar (pode não estar configurado)
+          } finally {
+            if (!isCancelled) {
+              setFtpLoading(false);
             }
           }
           
@@ -1346,52 +1367,65 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
 
               <div>
                 <label className="text-sm text-muted-foreground">Acesso FTP/SFTP</label>
-                <div className="space-y-2 mt-2">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs w-16">Host:</span>
-                    <code className="flex-1 p-1 bg-muted rounded text-xs">localhost</code>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => copyToClipboard('localhost')}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
+                {ftpLoading ? (
+                  <div className="mt-2 space-y-2">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs w-16">Usuário:</span>
-                    <code className="flex-1 p-1 bg-muted rounded text-xs">user</code>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => copyToClipboard('user')}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
+                ) : ftpCredentials ? (
+                  <div className="space-y-2 mt-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Host:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.host}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(ftpCredentials.host)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Usuário:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.username}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(ftpCredentials.username)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Senha:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.password}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(ftpCredentials.password)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Porta:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.port}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(ftpCredentials.port.toString())}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs w-16">Senha:</span>
-                    <code className="flex-1 p-1 bg-muted rounded text-xs">••••••••</code>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => copyToClipboard('password')}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
+                ) : (
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    FTP não configurado para este cluster
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs w-16">Porta:</span>
-                    <code className="flex-1 p-1 bg-muted rounded text-xs">21</code>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => copyToClipboard('21')}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
+                )}
               </div>
             </CardContent>
           </Card>

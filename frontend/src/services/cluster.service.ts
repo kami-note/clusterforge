@@ -119,6 +119,20 @@ class ClusterService {
   async stopCluster(clusterId: number): Promise<CreateClusterResponse> {
     return httpClient.post<CreateClusterResponse>(`/clusters/${clusterId}/stop`);
   }
+
+  /**
+   * Obtém credenciais FTP de um cluster
+   */
+  async getFtpCredentials(clusterId: number): Promise<FtpCredentials> {
+    return httpClient.get<FtpCredentials>(`/clusters/${clusterId}/ftp-credentials`);
+  }
+}
+
+export interface FtpCredentials {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
 }
 
 export const clusterService = new ClusterService();
