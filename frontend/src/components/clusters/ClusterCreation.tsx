@@ -36,6 +36,7 @@ import {
 import { toast } from 'sonner';
 import { templateService } from '@/services/template.service';
 import { clusterService, type CreateClusterRequest } from '@/services/cluster.service';
+import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 
 // Types
 export interface ClusterData {
@@ -82,6 +83,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   const [loading, setLoading] = useState(false);
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [errorDetails, setErrorDetails] = useState<DockerErrorDetails | null>(null);
 
   // Mapeamento de ícones aleatórios para templates (constantes - não mudam)
   const iconMap: { [key: string]: React.ComponentType<{ className?: string }> } = {
@@ -138,6 +140,78 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     
     // Recursos padrão para templates desconhecidos
     return { cpu: 25, ram: 2, disk: 10 }; // 25% CPU
+  };
+
+  // Função para parsear mensagens de erro do Docker
+  const parseDockerError = (message: string): DockerErrorDetails | null => {
+    if (!message) return null;
+
+    const lowerMessage = message.toLowerCase();
+    
+    // Detectar tipo de erro
+    let errorType = 'UNKNOWN';
+    let resolvable = false;
+    
+    if (lowerMessage.includes('restart loop') || lowerMessage.includes('reiniciou') || lowerMessage.includes('restarting')) {
+      errorType = 'RESTART_LOOP';
+      resolvable = true;
+    } else if (lowerMessage.includes('port') && (lowerMessage.includes('already in use') || lowerMessage.includes('allocated'))) {
+      errorType = 'PORT_CONFLICT';
+      resolvable = true;
+    } else if (lowerMessage.includes('network')) {
+      errorType = 'NETWORK_ERROR';
+      resolvable = true;
+    } else if (lowerMessage.includes('memory') || lowerMessage.includes('cpu') || lowerMessage.includes('resource')) {
+      errorType = 'RESOURCE_ERROR';
+      resolvable = false;
+    } else if (lowerMessage.includes('permission') || lowerMessage.includes('access denied')) {
+      errorType = 'PERMISSION_ERROR';
+      resolvable = false;
+    } else if (lowerMessage.includes('compose') || lowerMessage.includes('yaml')) {
+      errorType = 'COMPOSE_ERROR';
+      resolvable = false;
+    } else if (lowerMessage.includes('image')) {
+      errorType = 'IMAGE_ERROR';
+      resolvable = true;
+    } else if (lowerMessage.includes('volume') || lowerMessage.includes('mount')) {
+      errorType = 'VOLUME_ERROR';
+      resolvable = true;
+    } else if (lowerMessage.includes('exit code') || lowerMessage.includes('exitcode')) {
+      errorType = 'EXIT_CODE_ERROR';
+      resolvable = false;
+    }
+
+    // Extrair logs se presentes
+    let logs: string | undefined;
+    let exitCode: string | undefined;
+    
+    if (message.includes('Logs do container:') || message.includes('Últimos logs:')) {
+      const logsMatch = message.match(/(?:Logs do container:|Últimos logs:)\s*([\s\S]*)/);
+      if (logsMatch) {
+        logs = logsMatch[1].trim();
+      }
+    }
+    
+    if (message.includes('Exit code:')) {
+      const exitMatch = message.match(/Exit code:\s*(\d+)/);
+      if (exitMatch) {
+        exitCode = exitMatch[1];
+      }
+    }
+
+    // Verificar se foi resolvido automaticamente
+    const resolved = message.includes('resolvido automaticamente') || 
+                     message.includes('após resolver') ||
+                     message.includes('resolvido com sucesso');
+
+    return {
+      errorType,
+      message,
+      logs,
+      exitCode,
+      resolvable,
+      resolved,
+    };
   };
 
   // Função para obter ícone do template
@@ -287,6 +361,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     
     console.log('Iniciando criação do cluster...');
     setLoading(true);
+    setErrorDetails(null); // Limpar erros anteriores
     
     try {
       // Monta a requisição para o backend
@@ -331,12 +406,25 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         
         onSubmit(clusterData);
       } else {
-        toast.error(response.message || 'Erro ao criar cluster');
+        // Parsear erro da resposta
+        const parsedError = parseDockerError(response.message || 'Erro ao criar cluster');
+        if (parsedError) {
+          setErrorDetails(parsedError);
+          toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { duration: 10000 });
+        } else {
+          toast.error(response.message || 'Erro ao criar cluster');
+        }
       }
     } catch (error: unknown) {
       console.error('Error creating cluster:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro ao criar cluster. Tente novamente.';
-      toast.error(errorMessage);
+      const parsedError = parseDockerError(errorMessage);
+      if (parsedError) {
+        setErrorDetails(parsedError);
+        toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { duration: 10000 });
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -360,6 +448,18 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             </p>
           </div>
         </div>
+
+        {/* Exibir erros detalhados se houver */}
+        {errorDetails && (
+          <DockerErrorDisplay 
+            error={errorDetails}
+            onRetry={() => {
+              setErrorDetails(null);
+              handleSubmit();
+            }}
+            showLogs={true}
+          />
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">

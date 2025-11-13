@@ -95,6 +95,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               service: null,
               startupCommand: '',
               port: details.port?.toString() || details.rootPath,
+              ftpPort: details.ftpPort?.toString(),
             };
           } catch (error) {
             const message = handleError(error);
@@ -113,6 +114,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               service: null,
               startupCommand: '',
               port: cluster.port?.toString(),
+              ftpPort: (cluster as any).ftpPort?.toString(),
             };
           }
         })
@@ -183,6 +185,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         service: null,
         startupCommand: '',
         port: clusterDetails.port?.toString(),
+        ftpPort: clusterDetails.ftpPort?.toString(),
       };
 
       return cluster;

@@ -21,6 +21,8 @@ public interface ClusterRepository extends JpaRepository<Cluster, Long> {
     
     boolean existsByPort(int port);
     
+    boolean existsByFtpPort(int ftpPort);
+    
     /**
      * Busca todos os clusters SEM carregar o relacionamento User (mais rápido)
      * Usa fetch join apenas para evitar lazy loading

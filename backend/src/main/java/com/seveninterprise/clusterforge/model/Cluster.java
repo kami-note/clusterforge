@@ -1,5 +1,6 @@
 package com.seveninterprise.clusterforge.model;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -26,6 +27,9 @@ public class Cluster {
     private String rootPath;
     private String status;        // Status do cluster (CREATED, RUNNING, STOPPED, FAILED)
     private String containerId;   // ID do container Docker (mais preciso que nome)
+    
+    @Column(name = "ftp_port")
+    private Integer ftpPort;      // Porta externa para serviço FTP/SFTP associado
     
     // Resource Limits
     private Double cpuLimit;      // CPU limit in cores (e.g., 1.5 = 1.5 cores)
@@ -120,6 +124,14 @@ public class Cluster {
 
     public void setContainerId(String containerId) {
         this.containerId = containerId;
+    }
+    
+    public Integer getFtpPort() {
+        return ftpPort;
+    }
+
+    public void setFtpPort(Integer ftpPort) {
+        this.ftpPort = ftpPort;
     }
     
     // Métodos auxiliares para lógicas básicas

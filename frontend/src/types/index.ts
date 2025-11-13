@@ -47,6 +47,7 @@ export interface Cluster {
   service: ServiceTemplate | null;
   startupCommand: string;
   port?: string;
+  ftpPort?: string;
 }
 
 export interface ClusterData {
@@ -180,6 +181,7 @@ export interface ClusterListItem {
   name: string;
   status?: string;
   port?: number;
+  ftpPort?: number;
   rootPath?: string;
   userId?: number;
   owner?: {
@@ -224,6 +226,7 @@ export interface CreateClusterResponse {
   clusterId: number | null;
   clusterName: string;
   port: number;
+  ftpPort?: number;
   status: string;
   message: string;
   ownerCredentials?: {

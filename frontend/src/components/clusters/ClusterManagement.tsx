@@ -30,6 +30,7 @@ import { useClusters } from '@/hooks/useClusters';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { clusterService } from '@/services/cluster.service';
 import { toast } from 'sonner';
+import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 
 interface Cluster {
   id: string;
@@ -202,6 +203,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const [alertFilter, setAlertFilter] = useState('all');
   const [wsErrorShown, setWsErrorShown] = useState(false);
   const [processingClusters, setProcessingClusters] = useState<Set<string>>(new Set());
+  const [clusterErrors, setClusterErrors] = useState<Map<string, DockerErrorDetails>>(new Map());
   
   // Mostrar erro de WebSocket apenas uma vez
   useEffect(() => {
@@ -434,6 +436,79 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     );
   };
 
+  // Função para parsear mensagens de erro do Docker
+  const parseDockerError = (errorMessage: string, responseMessage?: string): DockerErrorDetails | null => {
+    const message = responseMessage || errorMessage;
+    if (!message) return null;
+
+    const lowerMessage = message.toLowerCase();
+    
+    // Detectar tipo de erro
+    let errorType = 'UNKNOWN';
+    let resolvable = false;
+    
+    if (lowerMessage.includes('restart loop') || lowerMessage.includes('reiniciou') || lowerMessage.includes('restarting')) {
+      errorType = 'RESTART_LOOP';
+      resolvable = true;
+    } else if (lowerMessage.includes('port') && (lowerMessage.includes('already in use') || lowerMessage.includes('allocated'))) {
+      errorType = 'PORT_CONFLICT';
+      resolvable = true;
+    } else if (lowerMessage.includes('network')) {
+      errorType = 'NETWORK_ERROR';
+      resolvable = true;
+    } else if (lowerMessage.includes('memory') || lowerMessage.includes('cpu') || lowerMessage.includes('resource')) {
+      errorType = 'RESOURCE_ERROR';
+      resolvable = false;
+    } else if (lowerMessage.includes('permission') || lowerMessage.includes('access denied')) {
+      errorType = 'PERMISSION_ERROR';
+      resolvable = false;
+    } else if (lowerMessage.includes('compose') || lowerMessage.includes('yaml')) {
+      errorType = 'COMPOSE_ERROR';
+      resolvable = false;
+    } else if (lowerMessage.includes('image')) {
+      errorType = 'IMAGE_ERROR';
+      resolvable = true;
+    } else if (lowerMessage.includes('volume') || lowerMessage.includes('mount')) {
+      errorType = 'VOLUME_ERROR';
+      resolvable = true;
+    } else if (lowerMessage.includes('exit code') || lowerMessage.includes('exitcode')) {
+      errorType = 'EXIT_CODE_ERROR';
+      resolvable = false;
+    }
+
+    // Extrair logs se presentes
+    let logs: string | undefined;
+    let exitCode: string | undefined;
+    
+    if (message.includes('Logs do container:') || message.includes('Últimos logs:')) {
+      const logsMatch = message.match(/(?:Logs do container:|Últimos logs:)\s*([\s\S]*)/);
+      if (logsMatch) {
+        logs = logsMatch[1].trim();
+      }
+    }
+    
+    if (message.includes('Exit code:')) {
+      const exitMatch = message.match(/Exit code:\s*(\d+)/);
+      if (exitMatch) {
+        exitCode = exitMatch[1];
+      }
+    }
+
+    // Verificar se foi resolvido automaticamente
+    const resolved = message.includes('resolvido automaticamente') || 
+                     message.includes('após resolver') ||
+                     message.includes('resolvido com sucesso');
+
+    return {
+      errorType,
+      message,
+      logs,
+      exitCode,
+      resolvable,
+      resolved,
+    };
+  };
+
   // Função assíncrona para iniciar cluster com verificação de status
   const startClusterWithVerification = async (clusterId: string) => {
     const clusterIdNum = parseInt(clusterId);
@@ -442,9 +517,10 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     setProcessingClusters(prev => new Set(prev).add(clusterId));
     toast.loading('Enviando ordem de inicialização...', { id: `action-${clusterId}` });
     
+    let startResponse: any = null;
     try {
       // 1. Enviar ordem de iniciar
-      const startResponse = await clusterService.startCluster(clusterIdNum);
+      startResponse = await clusterService.startCluster(clusterIdNum);
       
       if (startResponse.status !== 'RUNNING' && startResponse.status !== 'ERROR') {
         throw new Error(startResponse.message || 'Resposta inesperada do servidor');
@@ -469,9 +545,24 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             isRunning = true;
             // Recarregar da API para ter status atualizado
             await updateCluster(clusterId, { status: 'running' });
+            // Limpar erro se existir
+            setClusterErrors(prev => {
+              const next = new Map(prev);
+              next.delete(clusterId);
+              return next;
+            });
             toast.success('Cluster iniciado e verificado com sucesso', { id: `action-${clusterId}` });
           } else if (clusterDetails.status === 'ERROR') {
-            throw new Error('Cluster entrou em estado de erro');
+            // Parsear mensagem de erro da resposta
+            const errorDetails = parseDockerError(startResponse?.message || 'Cluster entrou em estado de erro');
+            if (errorDetails) {
+              setClusterErrors(prev => {
+                const next = new Map(prev);
+                next.set(clusterId, errorDetails);
+                return next;
+              });
+            }
+            throw new Error(startResponse?.message || 'Cluster entrou em estado de erro');
           }
           
           attempts++;
@@ -504,7 +595,35 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       console.error('Erro ao iniciar cluster:', error);
-      toast.error('Erro ao iniciar cluster: ' + errorMessage, { id: `action-${clusterId}` });
+      
+      // Parsear erro para extrair informações do Docker
+      const errorDetails = parseDockerError(errorMessage, startResponse?.message);
+      if (errorDetails) {
+        setClusterErrors(prev => {
+          const next = new Map(prev);
+          next.set(clusterId, errorDetails);
+          return next;
+        });
+        
+        // Mostrar toast com link para ver detalhes
+        toast.error('Erro ao iniciar cluster. Clique para ver detalhes.', { 
+          id: `action-${clusterId}`,
+          duration: 10000,
+          action: {
+            label: 'Ver Detalhes',
+            onClick: () => {
+              // Scroll para o erro ou abrir modal
+              const errorElement = document.getElementById(`error-${clusterId}`);
+              if (errorElement) {
+                errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }
+          }
+        });
+      } else {
+        toast.error('Erro ao iniciar cluster: ' + errorMessage, { id: `action-${clusterId}` });
+      }
+      
       throw error;
     } finally {
       // Remover do estado de processamento
@@ -821,15 +940,33 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
               // Se está processando mas não é stopped nem active, provavelmente é restart
               const isProcessingRestarting = isProcessing && !isProcessingStopping && !isProcessingStarting;
 
+              const clusterError = clusterErrors.get(cluster.id);
+
               return (
-                <Card 
-                  key={cluster.id} 
-                  className={`
-                    transition-all duration-200 hover:shadow-md
-                    ${cluster.hasAlert ? 'border-red-200 dark:border-red-800' : ''}
-                    ${isProcessing ? 'opacity-75 pointer-events-none' : ''}
-                  `}
-                >
+                <div key={cluster.id} id={`error-${cluster.id}`}>
+                  {clusterError && (
+                    <div className="mb-2">
+                      <DockerErrorDisplay 
+                        error={clusterError}
+                        onRetry={() => {
+                          if (cluster.status === 'stopped') {
+                            handleAction(cluster.id, 'start');
+                          } else {
+                            handleAction(cluster.id, 'restart');
+                          }
+                        }}
+                        showLogs={true}
+                      />
+                    </div>
+                  )}
+                  <Card 
+                    className={`
+                      transition-all duration-200 hover:shadow-md
+                      ${cluster.hasAlert ? 'border-red-200 dark:border-red-800' : ''}
+                      ${isProcessing ? 'opacity-75 pointer-events-none' : ''}
+                      ${clusterError ? 'border-orange-200 dark:border-orange-800' : ''}
+                    `}
+                  >
                   <CardContent className="p-3">
                     <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
                       {/* Informações Básicas */}
@@ -994,6 +1131,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           </div>
         </CardContent>
       </Card>
+                </div>
               );
             })}
           </div>

@@ -4,6 +4,7 @@ public class CreateClusterResponse {
     private Long clusterId;
     private String clusterName;
     private int port;
+    private Integer ftpPort;
     private String status;
     private String message;
     private UserCredentialsDto ownerCredentials; // Credenciais do usuário dono (quando admin cria)
@@ -49,6 +50,14 @@ public class CreateClusterResponse {
     
     public void setPort(int port) {
         this.port = port;
+    }
+    
+    public Integer getFtpPort() {
+        return ftpPort;
+    }
+
+    public void setFtpPort(Integer ftpPort) {
+        this.ftpPort = ftpPort;
     }
     
     public String getStatus() {

@@ -24,4 +24,7 @@ public interface IDockerService {
     public String inspectContainer(String containerName, String format);    // Executa docker inspect com formato
     public String getContainerStats(String containerName);                  // Executa docker stats
     public String getContainerId(String containerName);                     // Obtém o ID do container pelo nome
+    public String getContainerLogs(String containerName, int tailLines);    // Obtém logs do container (últimas N linhas)
+    public String getContainerExitCode(String containerName);                // Obtém exit code do container
+    public String getContainerError(String containerName);                   // Obtém mensagem de erro do container
 }

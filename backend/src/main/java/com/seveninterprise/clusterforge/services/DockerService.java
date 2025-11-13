@@ -371,5 +371,59 @@ public class DockerService implements IDockerService {
             "'{{.CPUPerc}},{{.MemUsage}},{{.NetIO}},{{.BlockIO}}'";
         return runCommand(command);
     }
+    
+    @Override
+    public String getContainerLogs(String containerName, int tailLines) {
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerName);
+        
+        if (containerId == null) {
+            return "";
+        }
+        
+        String dockerCmd = getDockerCommand();
+        String command = dockerCmd + " logs --tail " + tailLines + " " + containerId;
+        return runCommand(command);
+    }
+    
+    @Override
+    public String getContainerExitCode(String containerName) {
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerName);
+        
+        if (containerId == null) {
+            return "";
+        }
+        
+        String dockerCmd = getDockerCommand();
+        String command = dockerCmd + " inspect " + containerId + " --format='{{.State.ExitCode}}'";
+        return runCommand(command);
+    }
+    
+    @Override
+    public String getContainerError(String containerName) {
+        // Obtém informações de erro do container
+        String containerId = findContainerIdByNameOrId(containerName);
+        
+        if (containerId == null) {
+            return "";
+        }
+        
+        // Obtém exit code
+        String exitCode = getContainerExitCode(containerName);
+        if (exitCode == null || exitCode.isEmpty() || !exitCode.contains("Process exited with code: 0")) {
+            return "Container não encontrado ou erro ao obter exit code";
+        }
+        
+        // Extrai o exit code
+        String codeStr = exitCode.split("Process exited")[0].trim();
+        if (!"0".equals(codeStr)) {
+            // Obtém logs recentes para diagnóstico
+            String logs = getContainerLogs(containerName, 50);
+            return "Exit code: " + codeStr + "\nÚltimos logs:\n" + logs;
+        }
+        
+        return "";
+    }
 
 }

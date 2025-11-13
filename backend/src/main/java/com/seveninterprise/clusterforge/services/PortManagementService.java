@@ -20,6 +20,12 @@ public class PortManagementService {
     @Value("${system.port.end:8999}")
     private int maxPort;
     
+    @Value("${system.ftp.port.start:20000}")
+    private int minFtpPort;
+    
+    @Value("${system.ftp.port.end:20100}")
+    private int maxFtpPort;
+    
     public PortManagementService(ClusterRepository clusterRepository) {
         this.clusterRepository = clusterRepository;
     }
@@ -41,9 +47,34 @@ public class PortManagementService {
         throw new RuntimeException("Nenhuma porta disponível no range " + minPort + "-" + maxPort);
     }
     
+    /**
+     * Busca porta disponível para serviços FTP/SFTP
+     */
+    public int findAvailableFtpPort() {
+        Set<Integer> usedFtpPorts = getUsedFtpPortsFromDatabase();
+        
+        for (int port = minFtpPort; port <= maxFtpPort; port++) {
+            if (!usedFtpPorts.contains(port) && isPortAvailable(port)) {
+                return port;
+            }
+        }
+        
+        throw new RuntimeException("Nenhuma porta FTP disponível no range " + minFtpPort + "-" + maxFtpPort);
+    }
+    
     private Set<Integer> getUsedPortsFromDatabase() {
         Set<Integer> usedPorts = new HashSet<>();
         clusterRepository.findAll().forEach(cluster -> usedPorts.add(cluster.getPort()));
+        return usedPorts;
+    }
+    
+    private Set<Integer> getUsedFtpPortsFromDatabase() {
+        Set<Integer> usedPorts = new HashSet<>();
+        clusterRepository.findAll().forEach(cluster -> {
+            if (cluster.getFtpPort() != null) {
+                usedPorts.add(cluster.getFtpPort());
+            }
+        });
         return usedPorts;
     }
     
@@ -68,6 +99,17 @@ public class PortManagementService {
         }
         
         // Verifica se está disponível no sistema
+        return isPortAvailable(port);
+    }
+    
+    /**
+     * Verifica se uma porta FTP específica está disponível
+     */
+    public boolean isFtpPortAvailableForNewCluster(int port) {
+        if (clusterRepository.existsByFtpPort(port)) {
+            return false;
+        }
+        
         return isPortAvailable(port);
     }
     

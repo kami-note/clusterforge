@@ -4,6 +4,7 @@ public class ClusterListItemDto {
     private Long id;
     private String name;
     private int port;
+    private Integer ftpPort;
     private String rootPath;
     private OwnerInfoDto owner;
     
@@ -46,6 +47,14 @@ public class ClusterListItemDto {
     
     public void setPort(int port) {
         this.port = port;
+    }
+    
+    public Integer getFtpPort() {
+        return ftpPort;
+    }
+
+    public void setFtpPort(Integer ftpPort) {
+        this.ftpPort = ftpPort;
     }
     
     public String getRootPath() {

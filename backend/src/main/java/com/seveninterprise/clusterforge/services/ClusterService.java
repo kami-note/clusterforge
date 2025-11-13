@@ -127,6 +127,7 @@ public class ClusterService implements IClusterService {
             
             // Busca porta disponível
             int port = portManagementService.findAvailablePort();
+            int ftpPort = portManagementService.findAvailableFtpPort();
             
             // Cria diretório para o cluster usando FileSystemService
             String clusterPath = fileSystemService.createClusterDirectory(clusterName, clustersBasePath);
@@ -141,6 +142,7 @@ public class ClusterService implements IClusterService {
             Cluster cluster = new Cluster();
             cluster.setName(clusterName);
             cluster.setPort(port);
+            cluster.setFtpPort(ftpPort);
             cluster.setRootPath(clusterPath);
             cluster.setUser(owner);
             
@@ -194,7 +196,7 @@ public class ClusterService implements IClusterService {
                         ownerCredentials.getPlainPassword()
                     );
                 
-                return new CreateClusterResponse(
+                CreateClusterResponse response = new CreateClusterResponse(
                     savedCluster.getId(),
                     clusterName,
                     port,
@@ -202,15 +204,19 @@ public class ClusterService implements IClusterService {
                     message,
                     credentialsDto
                 );
+                response.setFtpPort(savedCluster.getFtpPort());
+                return response;
             }
             
-            return new CreateClusterResponse(
+            CreateClusterResponse response = new CreateClusterResponse(
                 savedCluster.getId(),
                 clusterName,
                 port,
                 status,
                 message
             );
+            response.setFtpPort(savedCluster.getFtpPort());
+            return response;
             
         } catch (Exception e) {
             return new CreateClusterResponse(
@@ -241,7 +247,27 @@ public class ClusterService implements IClusterService {
             }
                             
             if (!success) {
-                System.err.println("Docker compose failed: " + result);
+                System.err.println("❌ Docker compose failed: " + result);
+                
+                // Detecção e resolução de erros específicos
+                DockerErrorInfo errorInfo = detectDockerError(result, clusterName);
+                if (errorInfo != null) {
+                    System.err.println("🔍 Erro detectado: " + errorInfo.getErrorType());
+                    System.err.println("📝 Detalhes: " + errorInfo.getDetails());
+                    
+                    // Tenta resolver automaticamente
+                    if (errorInfo.isResolvable()) {
+                        System.out.println("🔧 Tentando resolver erro automaticamente...");
+                        boolean resolved = attemptErrorResolution(errorInfo, clusterName, clusterPath, composeCmd);
+                        if (resolved) {
+                            System.out.println("✅ Erro resolvido automaticamente");
+                            dockerService.clearContainerCache();
+                            return true;
+                        } else {
+                            System.err.println("❌ Não foi possível resolver o erro automaticamente");
+                        }
+                    }
+                }
                 
                 // Se falhou por causa de address pools, tenta limpar redes novamente
                 if (result.contains("all predefined address pools have been fully subnetted")) {
@@ -253,11 +279,275 @@ public class ClusterService implements IClusterService {
                     success = isDockerCommandSuccessful(result);
                     System.out.println("Segunda tentativa result: " + result);
                 }
+            } else {
+                // Mesmo se o comando foi bem-sucedido, verifica se o container está em restart loop
+                Thread.sleep(3000); // Aguarda um pouco para o container iniciar
+                String containerId = dockerService.getContainerId(clusterName);
+                if (containerId != null) {
+                    if (detectRestartLoop(containerId)) {
+                        System.err.println("⚠️ Container detectado em restart loop. Capturando logs...");
+                        String logs = dockerService.getContainerLogs(clusterName, 100);
+                        System.err.println("📋 Logs do container:\n" + logs);
+                        
+                        // Tenta resolver restart loop
+                        if (attemptRestartLoopResolution(clusterName, containerId, clusterPath)) {
+                            System.out.println("✅ Restart loop resolvido");
+                            return true;
+                        } else {
+                            System.err.println("❌ Não foi possível resolver restart loop");
+                            return false;
+                        }
+                    }
+                }
             }
             
             return success;
         } catch (Exception e) {
             System.err.println("Exception in instantiateDockerContainer: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
+    /**
+     * Classe interna para representar informações de erro do Docker
+     */
+    private static class DockerErrorInfo {
+        private final String errorType;
+        private final String details;
+        private final boolean resolvable;
+        
+        public DockerErrorInfo(String errorType, String details, boolean resolvable) {
+            this.errorType = errorType;
+            this.details = details;
+            this.resolvable = resolvable;
+        }
+        
+        public String getErrorType() { return errorType; }
+        public String getDetails() { return details; }
+        public boolean isResolvable() { return resolvable; }
+    }
+    
+    /**
+     * Detecta o tipo de erro do Docker a partir da saída do comando
+     */
+    private DockerErrorInfo detectDockerError(String commandResult, String clusterName) {
+        if (commandResult == null || commandResult.isEmpty()) {
+            return new DockerErrorInfo("UNKNOWN", "Resultado do comando vazio", false);
+        }
+        
+        String lowerResult = commandResult.toLowerCase();
+        
+        // Conflito de porta
+        if (lowerResult.contains("bind") && (lowerResult.contains("address already in use") || 
+            lowerResult.contains("port is already allocated"))) {
+            return new DockerErrorInfo("PORT_CONFLICT", 
+                "Porta já está em uso por outro container", true);
+        }
+        
+        // Problema de rede
+        if (lowerResult.contains("network") && (lowerResult.contains("not found") || 
+            lowerResult.contains("already exists"))) {
+            return new DockerErrorInfo("NETWORK_ERROR", 
+                "Problema com rede Docker: " + commandResult, true);
+        }
+        
+        // Problema de recursos (memória, CPU)
+        if (lowerResult.contains("memory") || lowerResult.contains("cpu") || 
+            lowerResult.contains("resource")) {
+            return new DockerErrorInfo("RESOURCE_ERROR", 
+                "Problema com recursos do sistema: " + commandResult, false);
+        }
+        
+        // Problema de permissão
+        if (lowerResult.contains("permission denied") || lowerResult.contains("access denied")) {
+            return new DockerErrorInfo("PERMISSION_ERROR", 
+                "Problema de permissão ao executar comando Docker", false);
+        }
+        
+        // Problema com docker-compose.yml
+        if (lowerResult.contains("compose") || lowerResult.contains("yaml") || 
+            lowerResult.contains("invalid")) {
+            return new DockerErrorInfo("COMPOSE_ERROR", 
+                "Erro no arquivo docker-compose.yml: " + commandResult, false);
+        }
+        
+        // Problema com imagem
+        if (lowerResult.contains("image") && (lowerResult.contains("not found") || 
+            lowerResult.contains("pull"))) {
+            return new DockerErrorInfo("IMAGE_ERROR", 
+                "Problema com imagem Docker: " + commandResult, true);
+        }
+        
+        // Problema com volume
+        if (lowerResult.contains("volume") || lowerResult.contains("mount")) {
+            return new DockerErrorInfo("VOLUME_ERROR", 
+                "Problema com volume Docker: " + commandResult, true);
+        }
+        
+        // Exit code não zero
+        if (commandResult.contains("Process exited with code:") && 
+            !commandResult.contains("Process exited with code: 0")) {
+            String exitCode = extractExitCode(commandResult);
+            return new DockerErrorInfo("EXIT_CODE_ERROR", 
+                "Comando falhou com exit code: " + exitCode, false);
+        }
+        
+        return new DockerErrorInfo("UNKNOWN", "Erro desconhecido: " + commandResult, false);
+    }
+    
+    /**
+     * Extrai o exit code da saída do comando
+     */
+    private String extractExitCode(String result) {
+        if (result == null) return "unknown";
+        int idx = result.indexOf("Process exited with code:");
+        if (idx >= 0) {
+            String remaining = result.substring(idx + "Process exited with code:".length()).trim();
+            String[] parts = remaining.split("\\s");
+            if (parts.length > 0) {
+                return parts[0];
+            }
+        }
+        return "unknown";
+    }
+    
+    /**
+     * Tenta resolver automaticamente um erro detectado
+     */
+    private boolean attemptErrorResolution(DockerErrorInfo errorInfo, String clusterName, 
+                                          String clusterPath, String composeCmd) {
+        try {
+            switch (errorInfo.getErrorType()) {
+                case "PORT_CONFLICT":
+                    // Para resolver conflito de porta, precisaríamos encontrar outra porta disponível
+                    // Por enquanto, apenas limpa containers órfãos que possam estar usando a porta
+                    System.out.println("🔧 Tentando resolver conflito de porta...");
+                    dockerService.pruneUnusedNetworks();
+                    // Tenta novamente após limpar
+                    String retryResult = dockerService.runCommand(composeCmd);
+                    return isDockerCommandSuccessful(retryResult);
+                    
+                case "NETWORK_ERROR":
+                    // Limpa redes e tenta novamente
+                    System.out.println("🔧 Tentando resolver problema de rede...");
+                    dockerService.pruneUnusedNetworks();
+                    Thread.sleep(2000);
+                    retryResult = dockerService.runCommand(composeCmd);
+                    return isDockerCommandSuccessful(retryResult);
+                    
+                case "IMAGE_ERROR":
+                    // Tenta fazer pull da imagem novamente
+                    System.out.println("🔧 Tentando resolver problema de imagem...");
+                    // Extrai nome da imagem do docker-compose.yml se possível
+                    // Por enquanto, apenas tenta novamente
+                    retryResult = dockerService.runCommand(composeCmd);
+                    return isDockerCommandSuccessful(retryResult);
+                    
+                case "VOLUME_ERROR":
+                    // Limpa volumes órfãos e tenta novamente
+                    System.out.println("🔧 Tentando resolver problema de volume...");
+                    dockerService.pruneUnusedNetworks();
+                    retryResult = dockerService.runCommand(composeCmd);
+                    return isDockerCommandSuccessful(retryResult);
+                    
+                default:
+                    return false;
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao tentar resolver: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Detecta se um container está em restart loop
+     */
+    private boolean detectRestartLoop(String containerId) {
+        try {
+            // Verifica o status do container
+            String statusResult = dockerService.inspectContainer(containerId, "{{.State.Status}}");
+            if (statusResult == null || !statusResult.contains("Process exited with code: 0")) {
+                return false;
+            }
+            
+            String status = extractContainerStatusFromResult(statusResult);
+            if (!"restarting".equalsIgnoreCase(status)) {
+                return false;
+            }
+            
+            // Verifica o restart count
+            String restartCountStr = dockerService.inspectContainer(containerId, "{{.RestartCount}}");
+            if (restartCountStr != null && restartCountStr.contains("Process exited with code: 0")) {
+                String countStr = restartCountStr.split("Process exited")[0].trim();
+                try {
+                    int restartCount = Integer.parseInt(countStr);
+                    // Se restartou mais de 3 vezes em pouco tempo, provavelmente está em loop
+                    if (restartCount > 3) {
+                        System.err.println("⚠️ Container reiniciou " + restartCount + " vezes - possível restart loop");
+                        return true;
+                    }
+                } catch (NumberFormatException e) {
+                    // Ignora
+                }
+            }
+            
+            // Aguarda um pouco e verifica novamente se ainda está restarting
+            Thread.sleep(5000);
+            statusResult = dockerService.inspectContainer(containerId, "{{.State.Status}}");
+            if (statusResult != null && statusResult.contains("Process exited with code: 0")) {
+                status = extractContainerStatusFromResult(statusResult);
+                if ("restarting".equalsIgnoreCase(status)) {
+                    return true; // Ainda está restarting após 5 segundos
+                }
+            }
+            
+            return false;
+        } catch (Exception e) {
+            System.err.println("Erro ao detectar restart loop: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Tenta resolver um restart loop
+     */
+    private boolean attemptRestartLoopResolution(String clusterName, String containerId, String clusterPath) {
+        try {
+            System.out.println("🔧 Tentando resolver restart loop...");
+            
+            // 1. Para o container
+            System.out.println("   → Parando container...");
+            dockerService.stopContainer(containerId);
+            Thread.sleep(2000);
+            
+            // 2. Remove o container
+            System.out.println("   → Removendo container...");
+            dockerService.removeContainer(containerId);
+            Thread.sleep(2000);
+            
+            // 3. Limpa redes
+            System.out.println("   → Limpando redes...");
+            dockerService.pruneUnusedNetworks();
+            Thread.sleep(1000);
+            
+            // 4. Tenta iniciar novamente
+            System.out.println("   → Reiniciando container...");
+            String composeCmd = buildDockerComposeCommand(clusterPath);
+            String result = dockerService.runCommand(composeCmd);
+            
+            if (isDockerCommandSuccessful(result)) {
+                // Aguarda um pouco e verifica se não está mais em restart loop
+                Thread.sleep(5000);
+                String newContainerId = dockerService.getContainerId(clusterName);
+                if (newContainerId != null && !detectRestartLoop(newContainerId)) {
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (Exception e) {
+            System.err.println("Erro ao resolver restart loop: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -324,21 +614,25 @@ public class ClusterService implements IClusterService {
             ClusterListItemDto.OwnerInfoDto ownerInfo = new ClusterListItemDto.OwnerInfoDto(
                 cluster.getOwnerId()
             );
-            return new ClusterListItemDto(
+            ClusterListItemDto dto = new ClusterListItemDto(
                 cluster.getId(),
                 cluster.getName(),
                 cluster.getPort(),
                 cluster.getRootPath(),
                 ownerInfo
             );
+            dto.setFtpPort(cluster.getFtpPort());
+            return dto;
         }
         
-        return new ClusterListItemDto(
+        ClusterListItemDto dto = new ClusterListItemDto(
             cluster.getId(),
             cluster.getName(),
             cluster.getPort(),
             cluster.getRootPath()
         );
+        dto.setFtpPort(cluster.getFtpPort());
+        return dto;
     }
     
     @Override
@@ -473,6 +767,26 @@ public class ClusterService implements IClusterService {
                 
                 // Verificar se o container realmente está rodando
                 if (verifyContainerRunning(containerIdentifier)) {
+                    // Verifica se não está em restart loop
+                    if (detectRestartLoop(containerIdentifier)) {
+                        System.err.println("⚠️ Container detectado em restart loop após iniciar. Capturando logs...");
+                        String logs = dockerService.getContainerLogs(cluster.getName(), 100);
+                        System.err.println("📋 Logs do container:\n" + logs);
+                        
+                        // Tenta resolver restart loop
+                        if (attemptRestartLoopResolution(cluster.getName(), containerIdentifier, clusterPath)) {
+                            cluster.setStatus("RUNNING");
+                            clusterRepository.save(cluster);
+                            return buildResponse(cluster, "RUNNING", "Cluster iniciado com sucesso após resolver restart loop");
+                        } else {
+                            cluster.setStatus("ERROR");
+                            clusterRepository.save(cluster);
+                            String errorDetails = dockerService.getContainerError(cluster.getName());
+                            return buildResponse(cluster, "ERROR", 
+                                "Container em restart loop. Não foi possível resolver automaticamente.\n" + errorDetails);
+                        }
+                    }
+                    
                     cluster.setStatus("RUNNING");
                     clusterRepository.save(cluster);
                     
@@ -484,6 +798,27 @@ public class ClusterService implements IClusterService {
                 } else {
                     // Comando executou mas container não está rodando
                     System.out.println("⚠️ Comando docker-compose up executado mas container não está rodando. Verificando...");
+                    
+                    // Verifica se está em restart loop
+                    if (containerId != null && detectRestartLoop(containerId)) {
+                        System.err.println("⚠️ Container detectado em restart loop. Capturando logs...");
+                        String logs = dockerService.getContainerLogs(cluster.getName(), 100);
+                        System.err.println("📋 Logs do container:\n" + logs);
+                        
+                        // Tenta resolver restart loop
+                        if (attemptRestartLoopResolution(cluster.getName(), containerId, clusterPath)) {
+                            cluster.setStatus("RUNNING");
+                            clusterRepository.save(cluster);
+                            return buildResponse(cluster, "RUNNING", "Cluster iniciado com sucesso após resolver restart loop");
+                        } else {
+                            cluster.setStatus("ERROR");
+                            clusterRepository.save(cluster);
+                            String errorDetails = dockerService.getContainerError(cluster.getName());
+                            return buildResponse(cluster, "ERROR", 
+                                "Container em restart loop. Não foi possível resolver automaticamente.\n" + errorDetails);
+                        }
+                    }
+                    
                     // Tenta verificar novamente após mais um tempo (pode estar inicializando)
                     Thread.sleep(3000);
                     
@@ -492,9 +827,20 @@ public class ClusterService implements IClusterService {
                         clusterRepository.save(cluster);
                         return buildResponse(cluster, "RUNNING", "Cluster iniciado com sucesso (aguardou inicialização)");
                     } else {
+                        // Captura logs e informações de erro para diagnóstico
+                        String errorDetails = "";
+                        if (containerId != null) {
+                            errorDetails = dockerService.getContainerError(cluster.getName());
+                            if (errorDetails.isEmpty()) {
+                                String logs = dockerService.getContainerLogs(cluster.getName(), 50);
+                                errorDetails = "Logs do container:\n" + logs;
+                            }
+                        }
+                        
                         cluster.setStatus("ERROR");
                         clusterRepository.save(cluster);
-                        return buildResponse(cluster, "ERROR", "Falha ao verificar inicialização do cluster. Container pode não estar rodando.");
+                        return buildResponse(cluster, "ERROR", 
+                            "Falha ao verificar inicialização do cluster. Container pode não estar rodando.\n" + errorDetails);
                     }
                 }
             } else {
@@ -738,7 +1084,40 @@ public class ClusterService implements IClusterService {
                     
                     // Container está rodando se status é: running
                     if ("running".equalsIgnoreCase(status)) {
+                        // Verifica se não está em restart loop (mesmo que status seja running)
+                        // Pode estar em restart loop se restart count é alto
+                        String restartCountStr = dockerService.inspectContainer(containerIdentifier, "{{.RestartCount}}");
+                        if (restartCountStr != null && restartCountStr.contains("Process exited with code: 0")) {
+                            String countStr = restartCountStr.split("Process exited")[0].trim();
+                            try {
+                                int restartCount = Integer.parseInt(countStr);
+                                if (restartCount > 5) {
+                                    System.err.println("⚠️ Container com alto número de restarts (" + restartCount + ") - possível problema");
+                                }
+                            } catch (NumberFormatException e) {
+                                // Ignora
+                            }
+                        }
                         return true;
+                    }
+                    
+                    // Se está em restarting, pode ser um restart loop
+                    if ("restarting".equalsIgnoreCase(status)) {
+                        System.err.println("⚠️ Container está em estado 'restarting' - possível restart loop");
+                        // Verifica restart count
+                        String restartCountStr = dockerService.inspectContainer(containerIdentifier, "{{.RestartCount}}");
+                        if (restartCountStr != null && restartCountStr.contains("Process exited with code: 0")) {
+                            String countStr = restartCountStr.split("Process exited")[0].trim();
+                            try {
+                                int restartCount = Integer.parseInt(countStr);
+                                if (restartCount > 3) {
+                                    System.err.println("⚠️ Container reiniciou " + restartCount + " vezes - restart loop detectado");
+                                    return false; // Retorna false para indicar problema
+                                }
+                            } catch (NumberFormatException e) {
+                                // Ignora
+                            }
+                        }
                     }
                     
                     // Se não está running ainda, aguarda e tenta novamente
@@ -821,13 +1200,15 @@ public class ClusterService implements IClusterService {
     }
     
     private CreateClusterResponse buildResponse(Cluster cluster, String status, String message) {
-        return new CreateClusterResponse(
+        CreateClusterResponse response = new CreateClusterResponse(
             cluster.getId(),
             cluster.getName(),
             cluster.getPort(),
             status,
             message
         );
+        response.setFtpPort(cluster.getFtpPort());
+        return response;
     }
     
     @Override
