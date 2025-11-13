@@ -177,9 +177,15 @@ public class ClusterService implements IClusterService {
             
             // Obtém o ID do container Docker (mais preciso que nome)
             if (dockerSuccess) {
-                String containerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
-                cluster.setContainerId(containerId);
-                System.out.println("Container ID obtido: " + containerId + " para cluster: " + clusterName);
+                // Usa containerId se já estiver salvo, senão busca pelo nome sanitizado
+                String containerId = cluster.getContainerId();
+                if (containerId == null || containerId.isEmpty()) {
+                    containerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
+                }
+                if (containerId != null && !containerId.isEmpty()) {
+                    cluster.setContainerId(containerId);
+                    System.out.println("Container ID obtido: " + containerId + " para cluster: " + clusterName);
+                }
             }
             
             String status = dockerSuccess ? "RUNNING" : "CREATED";
@@ -543,9 +549,11 @@ public class ClusterService implements IClusterService {
             dockerService.stopContainer(containerId);
             Thread.sleep(2000);
             
-            // 2. Remove o container
+            // 2. Remove o container (containerId será invalidado)
             System.out.println("   → Removendo container...");
             dockerService.removeContainer(containerId);
+            // Limpar cache do containerId removido
+            dockerService.clearContainerCache(containerId);
             Thread.sleep(2000);
             
             // 3. Limpa redes
@@ -561,8 +569,11 @@ public class ClusterService implements IClusterService {
             if (isDockerCommandSuccessful(result)) {
                 // Aguarda um pouco e verifica se não está mais em restart loop
                 Thread.sleep(5000);
+                // Buscar novo containerId pelo nome (container foi recriado, ID mudou)
                 String newContainerId = dockerService.getContainerId(clusterName);
                 if (newContainerId != null && !detectRestartLoop(newContainerId)) {
+                    // IMPORTANTE: Atualizar containerId no cluster se possível
+                    // Nota: Não temos acesso ao cluster aqui, mas o startCluster() já faz isso
                     return true;
                 }
             }
@@ -779,13 +790,27 @@ public class ClusterService implements IClusterService {
                 Thread.sleep(2000);
                 
                 // Obtém o identificador do container para verificação
-                String containerIdentifier = cluster.getSanitizedContainerName();
-                String containerId = dockerService.getContainerId(containerIdentifier);
-                if (containerId != null && !containerId.isEmpty()) {
-                    cluster.setContainerId(containerId);
-                    containerIdentifier = containerId; // Usar ID se disponível (mais preciso)
-                    System.out.println("Container ID atualizado: " + containerId + " para cluster: " + cluster.getName());
+                // SEMPRE priorizar usar o containerId se disponível
+                String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                    ? cluster.getContainerId() 
+                    : null;
+                
+                // Se não tem containerId, buscar pelo nome sanitizado
+                if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                    String sanitizedName = cluster.getSanitizedContainerName();
+                    if (sanitizedName != null && !sanitizedName.isEmpty()) {
+                        containerIdentifier = dockerService.getContainerId(sanitizedName);
+                        if (containerIdentifier != null && !containerIdentifier.isEmpty()) {
+                            cluster.setContainerId(containerIdentifier);
+                            System.out.println("Container ID atualizado: " + containerIdentifier + " para cluster: " + cluster.getName());
+                        } else {
+                            containerIdentifier = sanitizedName;
+                        }
+                    }
                 }
+                
+                // containerId é o mesmo que containerIdentifier (pode ser ID ou nome)
+                String containerId = containerIdentifier;
                 
                 // Verificar se o container realmente está rodando
                 if (verifyContainerRunning(containerIdentifier)) {
@@ -1310,10 +1335,21 @@ public class ClusterService implements IClusterService {
                 CreateClusterResponse startResponse = startCluster(clusterId, savedCluster.getUser().getId());
                 
                 if ("RUNNING".equals(startResponse.getStatus())) {
-                    // Atualiza o containerId após reiniciar
-                    String newContainerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
-                    savedCluster.setContainerId(newContainerId);
-                    clusterRepository.save(savedCluster);
+                    // IMPORTANTE: Após reiniciar, o container pode ter sido recriado
+                    // Sempre buscar o containerId atual pelo nome para garantir que está correto
+                    String sanitizedName = savedCluster.getSanitizedContainerName();
+                    if (sanitizedName != null && !sanitizedName.isEmpty()) {
+                        dockerService.clearContainerCache(sanitizedName);
+                        String newContainerId = dockerService.getContainerId(sanitizedName);
+                        if (newContainerId != null && !newContainerId.isEmpty()) {
+                            // Atualizar apenas se mudou (container foi recriado)
+                            if (!newContainerId.equals(savedCluster.getContainerId())) {
+                                savedCluster.setContainerId(newContainerId);
+                                clusterRepository.save(savedCluster);
+                                System.out.println("🔄 ContainerId atualizado após reiniciar: " + newContainerId);
+                            }
+                        }
+                    }
                     
                     return buildResponse(savedCluster, "UPDATED", 
                         "Limites atualizados e cluster reiniciado com sucesso");

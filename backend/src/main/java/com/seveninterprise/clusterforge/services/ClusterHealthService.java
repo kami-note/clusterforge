@@ -485,19 +485,77 @@ public class ClusterHealthService implements IClusterHealthService {
     
     private String checkContainerStatus(Cluster cluster) {
         try {
-            // Usa containerId se disponível, senão usa o nome sanitizado
+            // Usa containerId se disponível, senão tenta buscar pelo nome sanitizado
             String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
                 ? cluster.getContainerId() 
-                : cluster.getSanitizedContainerName();
+                : null;
+            
+            // Se não tem containerId, tenta buscar pelo nome sanitizado
+            if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                String sanitizedName = cluster.getSanitizedContainerName();
+                if (sanitizedName != null && !sanitizedName.isEmpty()) {
+                    // Limpar cache antes de buscar para garantir busca atualizada
+                    dockerService.clearContainerCache(sanitizedName);
+                    // Tenta obter o ID do container pelo nome sanitizado
+                    // O findContainerIdByNameOrId usa contains(), então vai encontrar mesmo com prefixo/sufixo
+                    containerIdentifier = dockerService.getContainerId(sanitizedName);
+                    if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                        // Se não encontrou pelo nome sanitizado, tenta usar diretamente
+                        // (pode ser que o nome completo tenha prefixo/sufixo)
+                        containerIdentifier = sanitizedName;
+                    }
+                }
+            }
+            
+            if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                return "NOT_FOUND";
+            }
             
             String result = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
             
-            if (result != null && !result.isEmpty() && result.contains("Process exited with code: 0")) {
-                return extractStatusFromResult(result);
+            // Se o resultado está vazio, o container não existe
+            if (result == null || result.isEmpty()) {
+                // Se estava usando containerId e não encontrou, limpar cache e tentar buscar novamente pelo nome
+                if (containerIdentifier.equals(cluster.getContainerId()) && 
+                    cluster.getSanitizedContainerName() != null && 
+                    !cluster.getSanitizedContainerName().isEmpty()) {
+                    dockerService.clearContainerCache(cluster.getSanitizedContainerName());
+                    String retryIdentifier = dockerService.getContainerId(cluster.getSanitizedContainerName());
+                    if (retryIdentifier != null && !retryIdentifier.isEmpty()) {
+                        result = dockerService.inspectContainer(retryIdentifier, "{{.State.Status}}");
+                        containerIdentifier = retryIdentifier;
+                    }
+                }
+                
+                if (result == null || result.isEmpty()) {
+                    return "NOT_FOUND";
+                }
+            }
+            
+            // Se o comando foi executado com sucesso (código 0), extrair o status
+            if (result.contains("Process exited with code: 0")) {
+                String status = extractStatusFromResult(result);
+                // Se encontrou o container e não tem containerId, tentar atualizar
+                // Nota: Não salvamos aqui para evitar problemas de transação
+                // O syncClusterStatus já faz essa atualização
+                if ((cluster.getContainerId() == null || cluster.getContainerId().isEmpty()) && 
+                    !containerIdentifier.equals(cluster.getSanitizedContainerName())) {
+                    if (!"NOT_FOUND".equals(status) && !status.startsWith("ERROR")) {
+                        // Atualiza em memória o containerId encontrado
+                        cluster.setContainerId(containerIdentifier);
+                    }
+                }
+                return status;
             } else {
-                return "NOT_FOUND";
+                // Se o comando falhou, verificar se é porque o container não existe
+                // ou se há outro erro
+                if (result.contains("No such container") || result.contains("not found")) {
+                    return "NOT_FOUND";
+                }
+                return "ERROR: " + result;
             }
         } catch (Exception e) {
+            System.err.println("❌ Erro ao verificar status do container para cluster " + cluster.getId() + ": " + e.getMessage());
             return "ERROR: " + e.getMessage();
         }
     }
@@ -1149,9 +1207,23 @@ public class ClusterHealthService implements IClusterHealthService {
                 // Ignora se não conseguir remover
             }
             
-            // 3. Reiniciar container
+            // 3. Reiniciar container (pode recriar se não existir)
             dockerService.startContainer(containerIdentifier);
             Thread.sleep(5000); // Aguardar inicialização
+            
+            // IMPORTANTE: Após recriar, o containerId pode ter mudado
+            // Buscar novo containerId e atualizar no cluster
+            String sanitizedName = cluster.getSanitizedContainerName();
+            if (sanitizedName != null && !sanitizedName.isEmpty()) {
+                dockerService.clearContainerCache(sanitizedName);
+                String newContainerId = dockerService.getContainerId(sanitizedName);
+                if (newContainerId != null && !newContainerId.isEmpty() && 
+                    !newContainerId.equals(cluster.getContainerId())) {
+                    cluster.setContainerId(newContainerId);
+                    clusterRepository.save(cluster);
+                    System.out.println("🔄 ContainerId atualizado após recuperação: " + newContainerId);
+                }
+            }
             
             // 4. Verificar se recuperação foi bem-sucedida
             ClusterHealthStatus status = checkClusterHealth(cluster);
@@ -1164,13 +1236,21 @@ public class ClusterHealthService implements IClusterHealthService {
     }
     
     private String extractStatusFromResult(String result) {
-        // Extrair status do resultado do comando docker inspect
-        String[] lines = result.split("\n");
-        for (String line : lines) {
-            if (line.trim().matches("(running|stopped|exited|created|paused)")) {
-                return line.trim();
+        if (result == null || result.isEmpty()) {
+            return "unknown";
+        }
+        
+        // Remove o texto "Process exited with code: 0" se presente
+        String cleaned = result.replace("Process exited with code: 0", "").trim();
+        
+        // Procura por status conhecidos (case-insensitive)
+        String[] statuses = {"running", "stopped", "exited", "created", "paused"};
+        for (String status : statuses) {
+            if (cleaned.toLowerCase().contains(status)) {
+                return status;
             }
         }
+        
         return "unknown";
     }
     
@@ -1214,6 +1294,14 @@ public class ClusterHealthService implements IClusterHealthService {
     @Transactional
     public boolean syncClusterStatus(Cluster cluster) {
         try {
+            // Limpar cache antes de verificar para garantir busca atualizada
+            if (cluster.getSanitizedContainerName() != null && !cluster.getSanitizedContainerName().isEmpty()) {
+                dockerService.clearContainerCache(cluster.getSanitizedContainerName());
+            }
+            if (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) {
+                dockerService.clearContainerCache(cluster.getContainerId());
+            }
+            
             // Verificar status real do container Docker
             String containerStatus = checkContainerStatus(cluster);
             
@@ -1235,21 +1323,29 @@ public class ClusterHealthService implements IClusterHealthService {
                 if (!"STOPPED".equals(clusterToUpdate.getStatus())) {
                     clusterToUpdate.setStatus("STOPPED");
                     statusChanged = true;
+                    System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para STOPPED (containerStatus: " + containerStatus + ")");
                 }
             } else if (containerRunning) {
                 // Container está rodando - atualizar para RUNNING
                 if (!"RUNNING".equals(clusterToUpdate.getStatus())) {
                     clusterToUpdate.setStatus("RUNNING");
                     statusChanged = true;
+                    System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para RUNNING");
                     
                     // Atualizar containerId se necessário (pode ter mudado após restart)
                     String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
                         ? cluster.getContainerId() 
                         : cluster.getSanitizedContainerName();
                     
-                    String actualContainerId = dockerService.getContainerId(containerIdentifier);
-                    if (actualContainerId != null && !actualContainerId.equals(clusterToUpdate.getContainerId())) {
+                    // Limpar cache e buscar o ID real do container
+                    if (containerIdentifier != null && !containerIdentifier.isEmpty()) {
+                        dockerService.clearContainerCache(containerIdentifier);
+                    }
+                    String actualContainerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
+                    if (actualContainerId != null && !actualContainerId.isEmpty() && 
+                        !actualContainerId.equals(clusterToUpdate.getContainerId())) {
                         clusterToUpdate.setContainerId(actualContainerId);
+                        System.out.println("🔄 ContainerId do cluster " + cluster.getId() + " atualizado: " + actualContainerId);
                     }
                 }
             }

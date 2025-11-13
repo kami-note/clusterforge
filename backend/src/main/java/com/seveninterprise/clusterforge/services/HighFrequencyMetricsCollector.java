@@ -30,6 +30,7 @@ public class HighFrequencyMetricsCollector {
     private final ClusterHealthService clusterHealthService;
     private final MetricsWebSocketService metricsWebSocketService;
     private final ClusterHealthMetricsRepository metricsRepository;
+    private final DockerService dockerService;
     
     // Executor para coletar métricas em paralelo
     private final ExecutorService metricsCollectorExecutor;
@@ -54,11 +55,13 @@ public class HighFrequencyMetricsCollector {
             ClusterRepository clusterRepository,
             ClusterHealthService clusterHealthService,
             MetricsWebSocketService metricsWebSocketService,
-            ClusterHealthMetricsRepository metricsRepository) {
+            ClusterHealthMetricsRepository metricsRepository,
+            DockerService dockerService) {
         this.clusterRepository = clusterRepository;
         this.clusterHealthService = clusterHealthService;
         this.metricsWebSocketService = metricsWebSocketService;
         this.metricsRepository = metricsRepository;
+        this.dockerService = dockerService;
         
         // Thread pool otimizado para coleta rápida de métricas
         // Usa número de cores disponíveis para paralelismo
@@ -81,8 +84,19 @@ public class HighFrequencyMetricsCollector {
             // Usar cache de clusters para evitar queries a cada 100ms
             List<Cluster> runningClusters = getCachedRunningClusters();
             
+            // Log apenas a cada 5 segundos para não poluir logs
+            long now = System.currentTimeMillis();
+            boolean shouldLog = (now - lastClusterCacheUpdate) < 100; // Log apenas logo após atualização do cache
+            
             if (runningClusters.isEmpty()) {
+                if (shouldLog) {
+                    System.out.println("⚠️ Nenhum cluster rodando encontrado para coletar métricas");
+                }
                 return;
+            }
+            
+            if (shouldLog && runningClusters.size() > 0) {
+                System.out.println("📊 Coletando métricas para " + runningClusters.size() + " cluster(s) rodando");
             }
             
             // Coletar métricas de todos os clusters em paralelo
@@ -207,16 +221,97 @@ public class HighFrequencyMetricsCollector {
                     try {
                         // Usar query otimizada que carrega user em uma única query (join fetch)
                         // Isso evita N+1 queries de users
-                        cachedRunningClusters = clusterRepository.findAllWithUser().stream()
+                        List<Cluster> allClusters = clusterRepository.findAllWithUser();
+                        System.out.println("🔍 Verificando " + allClusters.size() + " cluster(s) para coleta de métricas...");
+                        
+                        cachedRunningClusters = allClusters.stream()
                             .filter(cluster -> {
-                                // Verificar se cluster tem container rodando
-                                String containerId = cluster.getContainerId();
-                                if (containerId == null || containerId.isEmpty()) {
-                                    containerId = cluster.getSanitizedContainerName();
+                                // Verificar se cluster tem container realmente rodando
+                                // SEMPRE priorizar usar o containerId se disponível (mais preciso e rápido)
+                                try {
+                                    String containerIdentifier = cluster.getContainerId();
+                                    boolean usingContainerId = (containerIdentifier != null && !containerIdentifier.isEmpty());
+                                    
+                                    // Se não tem containerId, buscar pelo nome sanitizado
+                                    if (!usingContainerId) {
+                                        String sanitizedName = cluster.getSanitizedContainerName();
+                                        if (sanitizedName != null && !sanitizedName.isEmpty()) {
+                                            dockerService.clearContainerCache(sanitizedName);
+                                            containerIdentifier = dockerService.getContainerId(sanitizedName);
+                                            if (containerIdentifier != null && !containerIdentifier.isEmpty()) {
+                                                // Encontrou pelo nome - atualizar containerId no cluster (em memória)
+                                                cluster.setContainerId(containerIdentifier);
+                                                usingContainerId = true;
+                                            } else {
+                                                // Não encontrou pelo nome, tentar usar o nome diretamente
+                                                containerIdentifier = sanitizedName;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (containerIdentifier == null || containerIdentifier.isEmpty()) {
+                                        return false;
+                                    }
+                                    
+                                    // Verificar status real do container usando o identificador
+                                    String result = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
+                                    
+                                    // Se o containerId não funcionou, tentar buscar pelo nome sanitizado
+                                    if ((result == null || result.isEmpty() || 
+                                         result.contains("No such container") || result.contains("not found")) 
+                                        && usingContainerId) {
+                                        // ContainerId está desatualizado - tentar buscar pelo nome
+                                        String sanitizedName = cluster.getSanitizedContainerName();
+                                        if (sanitizedName != null && !sanitizedName.isEmpty()) {
+                                            dockerService.clearContainerCache(sanitizedName);
+                                            String foundId = dockerService.getContainerId(sanitizedName);
+                                            if (foundId != null && !foundId.isEmpty()) {
+                                                // Encontrou pelo nome - atualizar containerId
+                                                containerIdentifier = foundId;
+                                                cluster.setContainerId(foundId);
+                                                result = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (result == null || result.isEmpty()) {
+                                        return false;
+                                    }
+                                    
+                                    // Se o comando foi executado com sucesso (código 0), extrair o status
+                                    if (result.contains("Process exited with code: 0")) {
+                                        // Extrair status
+                                        String status = result.replace("Process exited with code: 0", "").trim().toLowerCase();
+                                        return status.contains("running");
+                                    } else {
+                                        // Se o comando falhou, verificar se é porque o container não existe
+                                        if (result.contains("No such container") || result.contains("not found")) {
+                                            return false;
+                                        }
+                                        // Outro erro - tentar usar o resultado como está
+                                        return result.toLowerCase().contains("running");
+                                    }
+                                } catch (Exception e) {
+                                    // Em caso de erro, não incluir o cluster (evita coletas de containers inexistentes)
+                                    return false;
                                 }
-                                return containerId != null && !containerId.isEmpty();
                             })
                             .collect(Collectors.toList());
+                        
+                        // Atualizar containerIds no banco para clusters que foram encontrados
+                        // Fazer isso de forma assíncrona para não bloquear o cache
+                        if (!cachedRunningClusters.isEmpty()) {
+                            CompletableFuture.runAsync(() -> {
+                                try {
+                                    clusterRepository.saveAll(cachedRunningClusters);
+                                } catch (Exception e) {
+                                    // Não quebrar se falhar ao salvar
+                                    System.err.println("⚠️ Erro ao atualizar containerIds: " + e.getMessage());
+                                }
+                            });
+                        }
+                        
+                        System.out.println("✅ Total de " + cachedRunningClusters.size() + " cluster(s) rodando encontrado(s) para coleta de métricas");
                         lastClusterCacheUpdate = System.currentTimeMillis();
                     } catch (Exception e) {
                         // Se falhar, manter cache existente

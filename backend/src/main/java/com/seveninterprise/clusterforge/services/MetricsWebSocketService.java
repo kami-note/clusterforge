@@ -257,12 +257,17 @@ public class MetricsWebSocketService {
             singleMetric.put(cluster.getId(), metricsMessage);
             messagingTemplate.convertAndSend("/topic/metrics", singleMetric);
             
-        } catch (Exception e) {
-            // Não logar em produção para não poluir logs
-            if ("true".equalsIgnoreCase(System.getenv("DEBUG")) || 
-                "true".equalsIgnoreCase(System.getProperty("debug"))) {
-                System.err.println("Erro ao enviar métricas diretamente para cluster " + cluster.getId() + ": " + e.getMessage());
+            // Log apenas a cada 5 segundos para não poluir
+            boolean isDebugMode = "true".equalsIgnoreCase(System.getenv("DEBUG")) || 
+                                 "true".equalsIgnoreCase(System.getProperty("debug"));
+            if (isDebugMode) {
+                System.out.println("📡 Métricas enviadas via WebSocket para cluster " + cluster.getId());
             }
+            
+        } catch (Exception e) {
+            // Logar erro sempre para debug
+            System.err.println("❌ Erro ao enviar métricas diretamente para cluster " + cluster.getId() + ": " + e.getMessage());
+            e.printStackTrace();
         }
     }
     
