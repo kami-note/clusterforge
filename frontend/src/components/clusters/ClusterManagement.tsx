@@ -384,9 +384,12 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   }: { 
     label: string; 
     icon: React.ComponentType<{ className?: string }>; 
-    percentage: number;
+    percentage: number | null | undefined;
     realtime?: boolean;
   }) => {
+    // Garantir que percentage seja sempre um número válido
+    const safePercentage = percentage != null && !isNaN(percentage) ? Math.max(0, Math.min(100, percentage)) : 0;
+    
     const getStatusColor = (percent: number) => {
       if (percent >= 90) return {
         text: 'text-red-600 dark:text-red-400',
@@ -405,7 +408,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       };
     };
 
-    const status = getStatusColor(percentage);
+    const status = getStatusColor(safePercentage);
 
     return (
       <div className="flex items-center gap-2 min-w-[100px]">
@@ -417,13 +420,13 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
               <div className="h-1 w-1 bg-green-500 dark:bg-green-400 rounded-full animate-pulse" />
             )}
             <span className={`text-xs font-bold tabular-nums ml-auto ${status.text}`}>
-              {percentage.toFixed(0)}%
+              {safePercentage.toFixed(0)}%
             </span>
           </div>
           <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
             <div 
               className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${status.gradient}`}
-              style={{ width: `${Math.min(percentage, 100)}%` }}
+              style={{ width: `${safePercentage}%` }}
             />
           </div>
         </div>
@@ -800,14 +803,15 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             {filteredClusters.map((cluster) => {
               // Se temos métricas em tempo real, usar percentuais normalizados diretamente
               // Caso contrário, calcular usando getResourcePercentage
-              const cpuPercentage = cluster.realtimeMetrics?.cpuUsagePercent !== undefined
-                ? cluster.realtimeMetrics.cpuUsagePercent
+              // Garantir que sempre retorne um número válido (nunca null ou undefined)
+              const cpuPercentage = cluster.realtimeMetrics?.cpuUsagePercent != null
+                ? (isNaN(cluster.realtimeMetrics.cpuUsagePercent) ? 0 : cluster.realtimeMetrics.cpuUsagePercent)
                 : getResourcePercentage(cluster.resources.cpu.used, cluster.resources.cpu.limit);
-              const ramPercentage = cluster.realtimeMetrics?.memoryUsagePercent !== undefined
-                ? cluster.realtimeMetrics.memoryUsagePercent
+              const ramPercentage = cluster.realtimeMetrics?.memoryUsagePercent != null
+                ? (isNaN(cluster.realtimeMetrics.memoryUsagePercent) ? 0 : cluster.realtimeMetrics.memoryUsagePercent)
                 : getResourcePercentage(cluster.resources.ram.used, cluster.resources.ram.limit);
-              const diskPercentage = cluster.realtimeMetrics?.diskUsagePercent !== undefined
-                ? cluster.realtimeMetrics.diskUsagePercent
+              const diskPercentage = cluster.realtimeMetrics?.diskUsagePercent != null
+                ? (isNaN(cluster.realtimeMetrics.diskUsagePercent) ? 0 : cluster.realtimeMetrics.diskUsagePercent)
                 : getResourcePercentage(cluster.resources.disk.used, cluster.resources.disk.limit);
 
               const isProcessing = processingClusters.has(cluster.id);
