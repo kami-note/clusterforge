@@ -29,6 +29,12 @@ public interface ClusterRepository extends JpaRepository<Cluster, Long> {
      */
     @Query("SELECT c FROM Cluster c LEFT JOIN FETCH c.user")
     List<Cluster> findAllWithUser();
+    
+    /**
+     * Busca apenas os IDs de todos os clusters (otimizado para cache)
+     */
+    @Query("SELECT c.id FROM Cluster c")
+    List<Long> findAllIds();
 }
 
 

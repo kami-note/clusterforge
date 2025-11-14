@@ -16,6 +16,8 @@ import com.seveninterprise.clusterforge.repositories.ClusterHealthStatusReposito
 import com.seveninterprise.clusterforge.repositories.ClusterHealthMetricsRepository;
 import com.seveninterprise.clusterforge.repositories.ClusterBackupRepository;
 import com.seveninterprise.clusterforge.services.FtpCredentialsService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class ClusterService implements IClusterService {
+    
+    private static final Logger log = LoggerFactory.getLogger(ClusterService.class);
     
     // Constants
     private static final String DOCKER_COMPOSE_FILE = "docker-compose.yml";
@@ -77,6 +81,9 @@ public class ClusterService implements IClusterService {
     // Serviço de gerenciamento FTP independente
     private final FtpService ftpService;
     
+    // Serviço de coleta de métricas em alta frequência
+    private final HighFrequencyMetricsCollector highFrequencyMetricsCollector;
+    
     public ClusterService(ClusterRepository clusterRepository,
                          ClusterNamingService clusterNamingService,
                          PortManagementService portManagementService,
@@ -92,7 +99,8 @@ public class ClusterService implements IClusterService {
                          ClusterHealthService clusterHealthService,
                          ClusterBackupService clusterBackupService,
                          FtpCredentialsService ftpCredentialsService,
-                         FtpService ftpService) {
+                         FtpService ftpService,
+                         HighFrequencyMetricsCollector highFrequencyMetricsCollector) {
         this.clusterRepository = clusterRepository;
         this.clusterNamingService = clusterNamingService;
         this.portManagementService = portManagementService;
@@ -109,6 +117,7 @@ public class ClusterService implements IClusterService {
         this.clusterBackupService = clusterBackupService;
         this.ftpCredentialsService = ftpCredentialsService;
         this.ftpService = ftpService;
+        this.highFrequencyMetricsCollector = highFrequencyMetricsCollector;
     }
     
     @Override
@@ -699,57 +708,124 @@ public class ClusterService implements IClusterService {
     @Override
     @Transactional
     public void deleteCluster(Long clusterId, User authenticatedUser, boolean isAdmin) {
+        log.info("🗑️ [DELETE CLUSTER] Iniciando deleção do cluster ID: {}", clusterId);
+        System.out.println("🗑️ [DELETE CLUSTER] Iniciando deleção do cluster ID: " + clusterId);
+        
         Cluster cluster = clusterRepository.findById(clusterId)
-            .orElseThrow(() -> new ClusterException("Cluster não encontrado com ID: " + clusterId));
+            .orElseThrow(() -> {
+                log.error("❌ [DELETE CLUSTER] Cluster não encontrado com ID: {}", clusterId);
+                return new ClusterException("Cluster não encontrado com ID: " + clusterId);
+            });
+        
+        log.info("📋 [DELETE CLUSTER] Cluster encontrado: nome={}, containerId={}, ftpPort={}", 
+            cluster.getName(), cluster.getContainerId(), cluster.getFtpPort());
+        System.out.println("📋 [DELETE CLUSTER] Cluster encontrado: nome=" + cluster.getName() + 
+            ", containerId=" + cluster.getContainerId() + ", ftpPort=" + cluster.getFtpPort());
         
         // Admin pode deletar qualquer cluster, usuário normal só os próprios
         if (!isAdmin && !cluster.isOwnedBy(authenticatedUser.getId())) {
+            log.warn("⚠️ [DELETE CLUSTER] Usuário {} não autorizado a deletar cluster {}", 
+                authenticatedUser.getId(), clusterId);
             throw new ClusterException("Não autorizado a deletar este cluster");
         }
         
-        cleanupClusterResources(cluster);
+        // IMPORTANTE: Marcar cluster como sendo deletado para evitar race condition
+        // Isso impede que o HighFrequencyMetricsCollector colete métricas durante a deleção
+        log.info("🚫 [DELETE CLUSTER] Marcando cluster {} como sendo deletado (bloqueando coleta de métricas)", clusterId);
+        System.out.println("🚫 [DELETE CLUSTER] Marcando cluster " + clusterId + " como sendo deletado (bloqueando coleta de métricas)");
+        highFrequencyMetricsCollector.markClusterAsDeleting(clusterId);
         
-        // Remove a entrada do banco
         try {
-            clusterRepository.delete(cluster);
-        } catch (DataIntegrityViolationException e) {
-            // Se ainda houver constraint de foreign key, tenta limpar novamente
-            String errorMsg = e.getMessage() != null ? e.getMessage() : "";
-            if (errorMsg.contains("foreign key") || errorMsg.contains("FK") || 
-                errorMsg.contains("Cannot delete or update a parent row")) {
-                System.err.println("Erro de foreign key ao deletar cluster " + clusterId + ". Tentando limpar recursos novamente...");
-                // Tenta limpar novamente
-                try {
-                    clusterHealthMetricsRepository.deleteByClusterId(clusterId);
-                    clusterHealthStatusRepository.deleteByClusterId(clusterId);
-                    clusterBackupRepository.deleteByClusterId(clusterId);
-                    // Tenta deletar novamente
-                    clusterRepository.delete(cluster);
-                } catch (Exception retryException) {
-                    throw new ClusterException("Não foi possível deletar o cluster: existem registros relacionados. " +
-                        "Tente novamente em alguns instantes ou contate o administrador. Erro: " + retryException.getMessage());
+            log.info("🧹 [DELETE CLUSTER] Iniciando limpeza de recursos para cluster {}", clusterId);
+            System.out.println("🧹 [DELETE CLUSTER] Iniciando limpeza de recursos para cluster " + clusterId);
+            cleanupClusterResources(cluster);
+            log.info("✅ [DELETE CLUSTER] Limpeza de recursos concluída para cluster {}", clusterId);
+            System.out.println("✅ [DELETE CLUSTER] Limpeza de recursos concluída para cluster " + clusterId);
+            
+            // Remove a entrada do banco
+            log.info("💾 [DELETE CLUSTER] Tentando deletar cluster {} do banco de dados", clusterId);
+            System.out.println("💾 [DELETE CLUSTER] Tentando deletar cluster " + clusterId + " do banco de dados");
+            try {
+                clusterRepository.delete(cluster);
+                log.info("✅ [DELETE CLUSTER] Cluster {} deletado com sucesso do banco de dados", clusterId);
+                System.out.println("✅ [DELETE CLUSTER] Cluster " + clusterId + " deletado com sucesso do banco de dados");
+            } catch (DataIntegrityViolationException e) {
+                // Se ainda houver constraint de foreign key, tenta limpar novamente
+                String errorMsg = e.getMessage() != null ? e.getMessage() : "";
+                log.error("❌ [DELETE CLUSTER] Erro de integridade ao deletar cluster {}: {}", clusterId, errorMsg);
+                System.err.println("❌ [DELETE CLUSTER] Erro de integridade ao deletar cluster " + clusterId + ": " + errorMsg);
+                e.printStackTrace();
+                
+                if (errorMsg.contains("foreign key") || errorMsg.contains("FK") || 
+                    errorMsg.contains("Cannot delete or update a parent row")) {
+                    log.warn("🔄 [DELETE CLUSTER] Erro de foreign key detectado. Tentando limpar recursos novamente para cluster {}", clusterId);
+                    System.err.println("🔄 [DELETE CLUSTER] Erro de foreign key ao deletar cluster " + clusterId + ". Tentando limpar recursos novamente...");
+                    
+                    // Tenta limpar novamente
+                    try {
+                        log.info("🔄 [DELETE CLUSTER] Retry: Deletando health metrics para cluster {}", clusterId);
+                        System.out.println("🔄 [DELETE CLUSTER] Retry: Deletando health metrics para cluster " + clusterId);
+                        clusterHealthMetricsRepository.deleteByClusterId(clusterId);
+                        
+                        log.info("🔄 [DELETE CLUSTER] Retry: Deletando health status para cluster {}", clusterId);
+                        System.out.println("🔄 [DELETE CLUSTER] Retry: Deletando health status para cluster " + clusterId);
+                        clusterHealthStatusRepository.deleteByClusterId(clusterId);
+                        
+                        log.info("🔄 [DELETE CLUSTER] Retry: Deletando backups para cluster {}", clusterId);
+                        System.out.println("🔄 [DELETE CLUSTER] Retry: Deletando backups para cluster " + clusterId);
+                        clusterBackupRepository.deleteByClusterId(clusterId);
+                        
+                        log.info("🔄 [DELETE CLUSTER] Retry: Tentando deletar cluster {} novamente", clusterId);
+                        System.out.println("🔄 [DELETE CLUSTER] Retry: Tentando deletar cluster " + clusterId + " novamente");
+                        clusterRepository.delete(cluster);
+                        log.info("✅ [DELETE CLUSTER] Cluster {} deletado com sucesso após retry", clusterId);
+                        System.out.println("✅ [DELETE CLUSTER] Cluster " + clusterId + " deletado com sucesso após retry");
+                    } catch (Exception retryException) {
+                        log.error("❌ [DELETE CLUSTER] Falha no retry para cluster {}: {}", clusterId, retryException.getMessage(), retryException);
+                        System.err.println("❌ [DELETE CLUSTER] Falha no retry para cluster " + clusterId + ": " + retryException.getMessage());
+                        retryException.printStackTrace();
+                        throw new ClusterException("Não foi possível deletar o cluster: existem registros relacionados. " +
+                            "Tente novamente em alguns instantes ou contate o administrador. Erro: " + retryException.getMessage());
+                    }
+                } else {
+                    log.error("❌ [DELETE CLUSTER] Erro desconhecido ao deletar cluster {}: {}", clusterId, errorMsg);
+                    throw new ClusterException("Erro ao deletar cluster: " + errorMsg);
                 }
-            } else {
-                throw new ClusterException("Erro ao deletar cluster: " + errorMsg);
             }
+        } catch (Exception e) {
+            log.error("❌ [DELETE CLUSTER] Erro inesperado ao deletar cluster {}: {}", clusterId, e.getMessage(), e);
+            System.err.println("❌ [DELETE CLUSTER] Erro inesperado ao deletar cluster " + clusterId + ": " + e.getMessage());
+            e.printStackTrace();
+            throw new ClusterException("Erro ao deletar cluster: " + e.getMessage());
+        } finally {
+            // Sempre remover marcação, mesmo em caso de erro
+            log.info("🔓 [DELETE CLUSTER] Removendo marcação de deleção para cluster {}", clusterId);
+            System.out.println("🔓 [DELETE CLUSTER] Removendo marcação de deleção para cluster " + clusterId);
+            highFrequencyMetricsCollector.unmarkClusterAsDeleting(clusterId);
         }
     }
     
     private void cleanupClusterResources(Cluster cluster) {
         Long clusterId = cluster.getId();
+        log.info("🧹 [CLEANUP] Iniciando limpeza de recursos para cluster {}", clusterId);
+        System.out.println("🧹 [CLEANUP] Iniciando limpeza de recursos para cluster " + clusterId);
 
         // Deleta registros relacionados antes de deletar o cluster
         // IMPORTANTE: Essas deleções devem ser bem-sucedidas para evitar erro de foreign key constraint
         try {
-            // Deleta health metrics associadas ao cluster
+            log.info("📊 [CLEANUP] Deletando health metrics para cluster {}", clusterId);
+            System.out.println("📊 [CLEANUP] Deletando health metrics para cluster " + clusterId);
             clusterHealthMetricsRepository.deleteByClusterId(clusterId);
-            System.out.println("Health metrics deletadas para cluster " + clusterId);
+            log.info("✅ [CLEANUP] Health metrics deletadas para cluster {}", clusterId);
+            System.out.println("✅ [CLEANUP] Health metrics deletadas para cluster " + clusterId);
         } catch (Exception e) {
-            System.err.println("Erro ao remover health metrics para cluster " + clusterId + ": " + e.getMessage());
+            log.error("❌ [CLEANUP] Erro ao remover health metrics para cluster {}: {}", clusterId, e.getMessage(), e);
+            System.err.println("❌ [CLEANUP] Erro ao remover health metrics para cluster " + clusterId + ": " + e.getMessage());
             e.printStackTrace();
             // Propaga exceção se for erro de foreign key ou constraint
             if (e.getMessage() != null && (e.getMessage().contains("foreign key") || 
                 e.getMessage().contains("FK") || e.getMessage().contains("constraint"))) {
+                log.error("❌ [CLEANUP] Erro de constraint ao remover health metrics para cluster {}", clusterId);
                 throw new ClusterException("Não foi possível remover métricas de saúde do cluster. " + 
                     "Tente novamente em alguns instantes ou contate o administrador: " + e.getMessage());
             }
@@ -757,28 +833,38 @@ public class ClusterService implements IClusterService {
         }
 
         try {
-            // Deleta health status associado ao cluster
+            log.info("📊 [CLEANUP] Deletando health status para cluster {}", clusterId);
+            System.out.println("📊 [CLEANUP] Deletando health status para cluster " + clusterId);
             clusterHealthStatusRepository.deleteByClusterId(clusterId);
+            log.info("✅ [CLEANUP] Health status deletado para cluster {}", clusterId);
+            System.out.println("✅ [CLEANUP] Health status deletado para cluster " + clusterId);
         } catch (Exception e) {
-            System.err.println("Erro ao remover health status para cluster " + clusterId + ": " + e.getMessage());
+            log.error("❌ [CLEANUP] Erro ao remover health status para cluster {}: {}", clusterId, e.getMessage(), e);
+            System.err.println("❌ [CLEANUP] Erro ao remover health status para cluster " + clusterId + ": " + e.getMessage());
             e.printStackTrace();
             // Propaga exceção se for erro de foreign key ou constraint
             if (e.getMessage() != null && (e.getMessage().contains("foreign key") || 
                 e.getMessage().contains("FK") || e.getMessage().contains("constraint"))) {
+                log.error("❌ [CLEANUP] Erro de constraint ao remover health status para cluster {}", clusterId);
                 throw new ClusterException("Não foi possível remover status de saúde do cluster. " + 
                     "Tente novamente em alguns instantes ou contate o administrador: " + e.getMessage());
             }
         }
 
         try {
-            // Deleta backups associados ao cluster
+            log.info("💾 [CLEANUP] Deletando backups para cluster {}", clusterId);
+            System.out.println("💾 [CLEANUP] Deletando backups para cluster " + clusterId);
             clusterBackupRepository.deleteByClusterId(clusterId);
+            log.info("✅ [CLEANUP] Backups deletados para cluster {}", clusterId);
+            System.out.println("✅ [CLEANUP] Backups deletados para cluster " + clusterId);
         } catch (Exception e) {
-            System.err.println("Erro ao remover backups para cluster " + clusterId + ": " + e.getMessage());
+            log.error("❌ [CLEANUP] Erro ao remover backups para cluster {}: {}", clusterId, e.getMessage(), e);
+            System.err.println("❌ [CLEANUP] Erro ao remover backups para cluster " + clusterId + ": " + e.getMessage());
             e.printStackTrace();
             // Propaga exceção se for erro de foreign key ou constraint
             if (e.getMessage() != null && (e.getMessage().contains("foreign key") || 
                 e.getMessage().contains("FK") || e.getMessage().contains("constraint"))) {
+                log.error("❌ [CLEANUP] Erro de constraint ao remover backups para cluster {}", clusterId);
                 throw new ClusterException("Não foi possível remover backups do cluster. " + 
                     "Tente novamente em alguns instantes ou contate o administrador: " + e.getMessage());
             }
@@ -787,11 +873,18 @@ public class ClusterService implements IClusterService {
         // Remove o servidor FTP independente (apenas quando o cluster é deletado)
         try {
             if (cluster.getFtpPort() != null && cluster.getFtpUsername() != null) {
-                System.out.println("🗑️ Removendo servidor FTP para cluster: " + cluster.getName());
+                log.info("🗑️ [CLEANUP] Removendo servidor FTP para cluster: {}", cluster.getName());
+                System.out.println("🗑️ [CLEANUP] Removendo servidor FTP para cluster: " + cluster.getName());
                 ftpService.removeFtpServer(cluster);
+                log.info("✅ [CLEANUP] Servidor FTP removido para cluster {}", clusterId);
+                System.out.println("✅ [CLEANUP] Servidor FTP removido para cluster " + clusterId);
+            } else {
+                log.info("ℹ️ [CLEANUP] Cluster {} não possui servidor FTP configurado", clusterId);
+                System.out.println("ℹ️ [CLEANUP] Cluster " + clusterId + " não possui servidor FTP configurado");
             }
         } catch (Exception e) {
-            System.err.println("Warning: Failed to remove FTP server: " + e.getMessage());
+            log.warn("⚠️ [CLEANUP] Falha ao remover servidor FTP para cluster {}: {}", clusterId, e.getMessage());
+            System.err.println("⚠️ [CLEANUP] Warning: Failed to remove FTP server: " + e.getMessage());
             // Não falha a deleção do cluster se FTP falhar
         }
         
@@ -802,26 +895,35 @@ public class ClusterService implements IClusterService {
                 ? cluster.getContainerId() 
                 : cluster.getSanitizedContainerName();
             
-            System.out.println("DEBUG: Removendo container para cluster " + clusterId + ". ID/Nome: " + containerIdentifier);
+            log.info("🐳 [CLEANUP] Removendo container Docker para cluster {}. ID/Nome: {}", clusterId, containerIdentifier);
+            System.out.println("🐳 [CLEANUP] Removendo container para cluster " + clusterId + ". ID/Nome: " + containerIdentifier);
             dockerService.removeContainer(containerIdentifier);
             // Cache já é limpo dentro do removeContainer, mas garantimos aqui também
             dockerService.clearContainerCache(containerIdentifier);
-            System.out.println("DEBUG: Container " + containerIdentifier + " removido com sucesso.");
+            log.info("✅ [CLEANUP] Container {} removido com sucesso para cluster {}", containerIdentifier, clusterId);
+            System.out.println("✅ [CLEANUP] Container " + containerIdentifier + " removido com sucesso.");
         } catch (RuntimeException e) {
             // Silenciosamente ignora se o container não existe
             // O dockerService já imprime mensagem informativa neste caso
             if (e.getMessage() != null && !e.getMessage().contains("não existe")) {
-                System.err.println("Warning: Failed to remove Docker container: " + e.getMessage());
+                log.warn("⚠️ [CLEANUP] Falha ao remover container Docker para cluster {}: {}", clusterId, e.getMessage());
+                System.err.println("⚠️ [CLEANUP] Warning: Failed to remove Docker container: " + e.getMessage());
             } else {
-                System.out.println("DEBUG: Container não existe ou já foi removido. Ignorando erro.");
+                log.info("ℹ️ [CLEANUP] Container não existe ou já foi removido para cluster {}", clusterId);
+                System.out.println("ℹ️ [CLEANUP] Container não existe ou já foi removido. Ignorando erro.");
             }
         } catch (Exception e) {
-            System.err.println("Warning: Failed to remove Docker container: " + e.getMessage());
+            log.warn("⚠️ [CLEANUP] Falha inesperada ao remover container Docker para cluster {}: {}", clusterId, e.getMessage());
+            System.err.println("⚠️ [CLEANUP] Warning: Failed to remove Docker container: " + e.getMessage());
         }
         
         // Remoção de diretório desabilitada conforme solicitado
         // O volume Docker deve ser gerenciado separadamente
-        System.out.println("ℹ️ Remoção do diretório de cluster desabilitada: " + cluster.getRootPath());
+        log.info("ℹ️ [CLEANUP] Remoção do diretório de cluster desabilitada: {}", cluster.getRootPath());
+        System.out.println("ℹ️ [CLEANUP] Remoção do diretório de cluster desabilitada: " + cluster.getRootPath());
+        
+        log.info("✅ [CLEANUP] Limpeza de recursos concluída para cluster {}", clusterId);
+        System.out.println("✅ [CLEANUP] Limpeza de recursos concluída para cluster " + clusterId);
     }
     
     @Override
