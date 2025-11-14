@@ -103,4 +103,9 @@ public interface ClusterHealthStatusRepository extends JpaRepository<ClusterHeal
            "h.memoryUsageMb > h.cluster.memoryLimit * 0.9 OR " +
            "h.diskUsageMb > h.cluster.diskLimit * 1024 * 0.9)")
     List<ClusterHealthStatus> findClustersWithCriticalResourceUsage();
+
+    /**
+     * Remove status de saúde por ID do cluster
+     */
+    void deleteByClusterId(Long clusterId);
 }

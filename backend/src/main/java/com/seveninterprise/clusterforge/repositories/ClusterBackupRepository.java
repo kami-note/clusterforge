@@ -159,4 +159,9 @@ public interface ClusterBackupRepository extends JpaRepository<ClusterBackup, Lo
            "WHERE b.status = 'COMPLETED' AND b.backupSizeBytes IS NOT NULL " +
            "GROUP BY b.cluster.id")
     List<Object[]> getTotalBackupSizeByCluster();
+
+    /**
+     * Remove backups por ID do cluster
+     */
+    void deleteByClusterId(Long clusterId);
 }

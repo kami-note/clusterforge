@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -96,15 +97,51 @@ public class FtpService {
         
         String containerName = getFtpContainerName(cluster);
         
-        // Verifica se o container já existe
+        // Verifica se o container já está rodando
         if (isFtpContainerRunning(containerName)) {
             logger.info("Servidor FTP já está rodando: {}", containerName);
             return;
         }
         
-        // Remove container existente se houver (parado ou com conflito)
-        // Isso resolve problemas de conflito de nome ou porta
-        removeFtpContainerIfExists(containerName);
+        // Verifica se o container existe (mesmo que parado)
+        String existingContainerId = dockerService.getContainerId(containerName);
+        if (existingContainerId != null) {
+            logger.info("Container FTP existe mas não está rodando. Removendo antes de recriar: {} (ID: {})", 
+                       containerName, existingContainerId);
+            // Remove container existente se houver (parado ou com conflito)
+            // Isso resolve problemas de conflito de nome ou porta
+            removeFtpContainerIfExists(containerName);
+            
+            // Aguarda um pouco para garantir que o container foi removido
+            waitWithTimeout(removeWaitTimeout);
+            
+            // Verifica novamente se foi removido
+            String stillExists = dockerService.getContainerId(containerName);
+            if (stillExists != null) {
+                logger.warn("Container FTP ainda existe após tentativa de remoção. Tentando remoção forçada: {}", 
+                           containerName);
+                // Tenta remoção forçada adicional
+                try {
+                    String dockerCmd = getDockerCommand();
+                    String forceRemoveCmd = dockerCmd + " rm -f " + containerName;
+                    dockerService.runCommand(forceRemoveCmd);
+                    // Limpa o cache após remoção forçada
+                    dockerService.clearContainerCache(containerName);
+                    dockerService.clearContainerCache(stillExists);
+                    waitWithTimeout(removeWaitTimeout);
+                    
+                    // Verifica uma última vez
+                    String finalCheck = dockerService.getContainerId(containerName);
+                    if (finalCheck != null) {
+                        throw new ClusterException("Não foi possível remover container FTP existente: " + containerName + 
+                                                  ". Container ID: " + finalCheck);
+                    }
+                } catch (Exception e) {
+                    throw new ClusterException("Erro ao remover container FTP existente: " + containerName + 
+                                              ". Erro: " + e.getMessage(), e);
+                }
+            }
+        }
         
         // Aguarda um pouco para garantir que portas foram liberadas
         waitWithTimeout(removeWaitTimeout);
@@ -141,6 +178,25 @@ public class FtpService {
                     containerName, clusterSrcPath, cluster.getFtpPort());
         
         try {
+            // Verificação final antes de criar (evita condição de corrida)
+            String finalCheckBeforeCreate = dockerService.getContainerId(containerName);
+            if (finalCheckBeforeCreate != null) {
+                logger.warn("Container FTP ainda existe no momento da criação. Removendo forçadamente: {}", 
+                           containerName);
+                try {
+                    String forceRemoveCmd = dockerCmd + " rm -f " + containerName;
+                    dockerService.runCommand(forceRemoveCmd);
+                    // Limpa o cache após remoção forçada
+                    dockerService.clearContainerCache(containerName);
+                    dockerService.clearContainerCache(finalCheckBeforeCreate);
+                    waitWithTimeout(removeWaitTimeout);
+                } catch (Exception forceEx) {
+                    logger.error("Erro ao remover container antes de criar: {}", forceEx.getMessage());
+                    throw new ClusterException("Container FTP ainda existe e não pode ser removido: " + containerName, 
+                                              forceEx);
+                }
+            }
+            
             String result = dockerService.runCommand(command);
             
             if (result.contains("Process exited with code: 0")) {
@@ -154,10 +210,69 @@ public class FtpService {
                     logger.warn("Container FTP criado mas não está rodando: {}", containerName);
                 }
             } else {
-                logger.error("Erro ao criar servidor FTP: {}", result);
-                throw new ClusterException("Falha ao criar servidor FTP: " + result);
+                // Verifica se é erro de conflito
+                String errorMsg = result;
+                if (errorMsg.contains("Conflict") || errorMsg.contains("already in use") || 
+                    errorMsg.contains("container name")) {
+                    logger.warn("Conflito detectado ao criar container FTP. Tentando resolver: {}", containerName);
+                    
+                    // Tenta remover e recriar
+                    removeFtpContainerIfExists(containerName);
+                    waitWithTimeout(removeWaitTimeout * 2);
+                    
+                    // Tenta criar novamente
+                    result = dockerService.runCommand(command);
+                    if (result.contains("Process exited with code: 0")) {
+                        logger.info("Servidor FTP criado com sucesso após resolver conflito: {}", containerName);
+                        waitWithTimeout(createWaitTimeout);
+                        
+                        if (!isFtpContainerRunning(containerName)) {
+                            logger.warn("Container FTP criado mas não está rodando: {}", containerName);
+                        }
+                    } else {
+                        logger.error("Erro ao criar servidor FTP após resolver conflito: {}", result);
+                        throw new ClusterException("Falha ao criar servidor FTP após resolver conflito: " + result);
+                    }
+                } else {
+                    logger.error("Erro ao criar servidor FTP: {}", result);
+                    throw new ClusterException("Falha ao criar servidor FTP: " + result);
+                }
             }
+        } catch (ClusterException e) {
+            // Re-lança ClusterException sem modificar
+            throw e;
         } catch (Exception e) {
+            String errorMsg = e.getMessage();
+            if (errorMsg != null && (errorMsg.contains("Conflict") || errorMsg.contains("already in use") || 
+                                    errorMsg.contains("container name"))) {
+                logger.warn("Conflito detectado na exceção. Tentando resolver: {}", containerName);
+                try {
+                    removeFtpContainerIfExists(containerName);
+                    waitWithTimeout(removeWaitTimeout * 2);
+                    
+                    // Tenta criar novamente
+                    String retryCommand = buildDockerRunCommand(
+                        dockerCmd,
+                        containerName,
+                        cluster.getFtpPort(),
+                        pasvPorts[0],
+                        pasvPorts[1],
+                        pasvAddress,
+                        cluster.getFtpUsername(),
+                        cluster.getFtpPassword(),
+                        clusterSrcPath
+                    );
+                    String result = dockerService.runCommand(retryCommand);
+                    if (result.contains("Process exited with code: 0")) {
+                        logger.info("Servidor FTP criado com sucesso após resolver conflito na exceção: {}", 
+                                   containerName);
+                        waitWithTimeout(createWaitTimeout);
+                        return;
+                    }
+                } catch (Exception retryEx) {
+                    logger.error("Falha ao resolver conflito: {}", retryEx.getMessage());
+                }
+            }
             logger.error("Erro inesperado ao criar servidor FTP: {}", e.getMessage(), e);
             throw new ClusterException("Erro inesperado ao criar servidor FTP: " + e.getMessage(), e);
         }
@@ -344,6 +459,9 @@ public class FtpService {
                 // Remove o container (força remoção)
                 try {
                     dockerService.removeContainer(containerName);
+                    // Limpa o cache do DockerService após remover
+                    dockerService.clearContainerCache(containerName);
+                    dockerService.clearContainerCache(containerId);
                     // Aguarda um pouco para garantir que foi removido
                     waitWithTimeout(removeVerifyTimeout);
                     logger.debug("Container FTP removido: {}", containerName);
@@ -354,6 +472,9 @@ public class FtpService {
                         String dockerCmd = getDockerCommand();
                         String command = dockerCmd + " rm -f " + containerName;
                         dockerService.runCommand(command);
+                        // Limpa o cache após remoção forçada
+                        dockerService.clearContainerCache(containerName);
+                        dockerService.clearContainerCache(containerId);
                         waitWithTimeout(removeVerifyTimeout);
                         logger.info("Container FTP removido forçadamente: {}", containerName);
                     } catch (Exception forceEx) {
@@ -726,6 +847,69 @@ public class FtpService {
             }
         } catch (Exception e) {
             logger.error("Erro no monitoramento periódico de servidores FTP: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Limpa containers FTP órfãos que não correspondem a nenhum cluster ativo
+     * Executa periodicamente para manter o sistema limpo
+     * 
+     * Um container FTP é considerado órfão se:
+     * - Seu nome começa com "ftp_" mas não corresponde a nenhum cluster no banco
+     * - O cluster correspondente foi deletado mas o container FTP não foi removido
+     */
+    @Scheduled(fixedDelayString = "${clusterforge.ftp.cleanup.interval:300000}") // A cada 5 minutos
+    public void cleanupOrphanedFtpContainers() {
+        try {
+            // Busca todos os clusters ativos com FTP configurado
+            List<Cluster> activeClusters = clusterRepository.findAll();
+            Set<String> validFtpContainerNames = activeClusters.stream()
+                .filter(cluster -> cluster.getFtpPort() != null 
+                    && cluster.getFtpUsername() != null 
+                    && cluster.getFtpPassword() != null)
+                .map(this::getFtpContainerName)
+                .collect(Collectors.toSet());
+            
+            // Lista todos os containers FTP no Docker
+            String dockerCmd = getDockerCommand();
+            String listCommand = dockerCmd + " ps -a --filter \"name=ftp_\" --format \"{{.Names}}\"";
+            String result = dockerService.runCommand(listCommand);
+            
+            if (result != null && !result.isEmpty() && result.contains("Process exited with code: 0")) {
+                // Remove a linha "Process exited with code: 0" e processa a lista de containers
+                String cleanResult = result.replace("Process exited with code: 0", "").trim();
+                if (cleanResult.isEmpty()) {
+                    return; // Nenhum container FTP encontrado
+                }
+                
+                String[] containerNames = cleanResult.split("\n");
+                int orphanedCount = 0;
+                
+                for (String containerName : containerNames) {
+                    containerName = containerName.trim();
+                    if (containerName.isEmpty()) {
+                        continue;
+                    }
+                    
+                    // Verifica se o container não está na lista de válidos
+                    if (!validFtpContainerNames.contains(containerName)) {
+                        logger.info("Container FTP órfão detectado: {}. Removendo...", containerName);
+                        try {
+                            removeFtpContainerIfExists(containerName);
+                            orphanedCount++;
+                            logger.info("Container FTP órfão removido: {}", containerName);
+                        } catch (Exception e) {
+                            logger.warn("Erro ao remover container FTP órfão {}: {}", containerName, e.getMessage());
+                        }
+                    }
+                }
+                
+                if (orphanedCount > 0) {
+                    logger.info("Limpeza de containers FTP órfãos concluída: {} container(s) removido(s)", orphanedCount);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Erro na limpeza de containers FTP órfãos: {}", e.getMessage(), e);
         }
     }
 }

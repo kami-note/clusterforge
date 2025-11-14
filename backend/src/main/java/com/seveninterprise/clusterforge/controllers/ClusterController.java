@@ -3,6 +3,7 @@ package com.seveninterprise.clusterforge.controllers;
 import com.seveninterprise.clusterforge.dto.ClusterListItemDto;
 import com.seveninterprise.clusterforge.dto.CreateClusterRequest;
 import com.seveninterprise.clusterforge.dto.CreateClusterResponse;
+import com.seveninterprise.clusterforge.dto.ErrorResponse;
 import com.seveninterprise.clusterforge.dto.FtpCredentialsResponse;
 import com.seveninterprise.clusterforge.dto.UpdateClusterLimitsRequest;
 import com.seveninterprise.clusterforge.model.Cluster;
@@ -119,16 +120,27 @@ public class ClusterController {
     }
     
     /**
-     * Trata exceções e retorna a resposta HTTP apropriada
+     * Trata exceções e retorna a resposta HTTP apropriada em formato JSON
      */
-    private ResponseEntity<?> handleException(RuntimeException e) {
+    private ResponseEntity<ErrorResponse> handleException(RuntimeException e) {
         String message = e.getMessage();
-        if (message.contains("não encontrado")) {
-            return ResponseEntity.notFound().build();
-        } else if (message.contains("não autorizado")) {
-            return ResponseEntity.status(403).body("Não autorizado");
+        ErrorResponse errorResponse = new ErrorResponse(message);
+        
+        if (message != null && message.contains("não encontrado")) {
+            errorResponse.setStatus(404);
+            return ResponseEntity.status(404).body(errorResponse);
+        } else if (message != null && message.contains("não autorizado")) {
+            errorResponse.setStatus(403);
+            return ResponseEntity.status(403).body(errorResponse);
         } else {
-            return ResponseEntity.status(500).body("Erro interno: " + message);
+            errorResponse.setStatus(500);
+            // Verifica se é erro de foreign key constraint
+            if (message != null && (message.contains("foreign key") || message.contains("FK") || 
+                message.contains("Cannot delete or update a parent row"))) {
+                errorResponse.setMessage("Não é possível deletar o cluster: existem registros relacionados que precisam ser removidos primeiro. " + 
+                    "Tente novamente em alguns instantes ou contate o administrador.");
+            }
+            return ResponseEntity.status(500).body(errorResponse);
         }
     }
     
@@ -199,12 +211,14 @@ public class ClusterController {
             
             // Verifica permissão: admin pode ver qualquer cluster, usuário só os próprios
             if (!isAdmin() && !cluster.isOwnedBy(authenticatedUser.getId())) {
-                return ResponseEntity.status(403).body("Não autorizado a ver credenciais deste cluster");
+                ErrorResponse errorResponse = new ErrorResponse("Não autorizado a ver credenciais deste cluster", 403);
+                return ResponseEntity.status(403).body(errorResponse);
             }
             
             // Verifica se cluster tem FTP configurado
             if (cluster.getFtpPort() == null || cluster.getFtpUsername() == null || cluster.getFtpPassword() == null) {
-                return ResponseEntity.status(404).body("FTP não configurado para este cluster");
+                ErrorResponse errorResponse = new ErrorResponse("FTP não configurado para este cluster", 404);
+                return ResponseEntity.status(404).body(errorResponse);
             }
             
             // Obtém host configurável ou usa localhost como padrão

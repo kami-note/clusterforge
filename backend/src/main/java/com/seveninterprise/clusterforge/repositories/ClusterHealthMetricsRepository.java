@@ -108,7 +108,12 @@ public interface ClusterHealthMetricsRepository extends JpaRepository<ClusterHea
      * Remove métricas antigas (para limpeza de dados)
      */
     void deleteByTimestampBefore(LocalDateTime cutoffTime);
-    
+
+    /**
+     * Remove todas as métricas de um cluster específico
+     */
+    void deleteByClusterId(Long clusterId);
+
     /**
      * Conta métricas por cluster
      */
