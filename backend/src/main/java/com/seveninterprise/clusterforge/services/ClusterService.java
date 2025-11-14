@@ -72,6 +72,9 @@ public class ClusterService implements IClusterService {
     // Serviço de credenciais FTP
     private final FtpCredentialsService ftpCredentialsService;
     
+    // Serviço de gerenciamento FTP independente
+    private final FtpService ftpService;
+    
     public ClusterService(ClusterRepository clusterRepository,
                          ClusterNamingService clusterNamingService,
                          PortManagementService portManagementService,
@@ -86,7 +89,8 @@ public class ClusterService implements IClusterService {
                          IResourceLimitService resourceLimitService,
                          ClusterHealthService clusterHealthService,
                          ClusterBackupService clusterBackupService,
-                         FtpCredentialsService ftpCredentialsService) {
+                         FtpCredentialsService ftpCredentialsService,
+                         FtpService ftpService) {
         this.clusterRepository = clusterRepository;
         this.clusterNamingService = clusterNamingService;
         this.portManagementService = portManagementService;
@@ -102,6 +106,7 @@ public class ClusterService implements IClusterService {
         this.clusterHealthService = clusterHealthService;
         this.clusterBackupService = clusterBackupService;
         this.ftpCredentialsService = ftpCredentialsService;
+        this.ftpService = ftpService;
     }
     
     @Override
@@ -196,6 +201,21 @@ public class ClusterService implements IClusterService {
             
             // Salva o cluster com status e container ID
             Cluster savedCluster = clusterRepository.save(cluster);
+            
+            // Cria e inicia servidor FTP independente (não depende do docker-compose)
+            if (savedCluster.getFtpPort() != null && savedCluster.getFtpUsername() != null && savedCluster.getFtpPassword() != null) {
+                try {
+                    System.out.println("🚀 Criando servidor FTP independente para cluster: " + savedCluster.getName());
+                    ftpService.createAndStartFtpServer(savedCluster);
+                    System.out.println("✅ Servidor FTP criado e iniciado com sucesso");
+                } catch (Exception e) {
+                    System.err.println("❌ ERRO ao criar servidor FTP: " + e.getMessage());
+                    e.printStackTrace();
+                    // Não falha a criação do cluster se FTP falhar - apenas loga o erro
+                    System.err.println("⚠️ Continuando criação do cluster sem servidor FTP devido ao erro acima");
+                }
+            }
+            
             if (dockerSuccess) {
                 message = "Cluster criado e iniciado com sucesso";
                 
@@ -731,6 +751,17 @@ public class ClusterService implements IClusterService {
             System.err.println("Warning: Failed to remove backups for cluster " + clusterId + ": " + e.getMessage());
         }
         
+        // Remove o servidor FTP independente (apenas quando o cluster é deletado)
+        try {
+            if (cluster.getFtpPort() != null && cluster.getFtpUsername() != null) {
+                System.out.println("🗑️ Removendo servidor FTP para cluster: " + cluster.getName());
+                ftpService.removeFtpServer(cluster);
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: Failed to remove FTP server: " + e.getMessage());
+            // Não falha a deleção do cluster se FTP falhar
+        }
+        
         // Para e remove o container Docker
         try {
             // Usa containerId se disponível, senão usa o nome sanitizado
@@ -837,6 +868,14 @@ public class ClusterService implements IClusterService {
                     cluster.setStatus("RUNNING");
                     clusterRepository.save(cluster);
                     
+                    // Garante que o servidor FTP está rodando (independente do cluster)
+                    try {
+                        ftpService.ensureFtpServerRunning(cluster);
+                    } catch (Exception e) {
+                        System.err.println("⚠️ AVISO: Não foi possível garantir que servidor FTP está rodando: " + e.getMessage());
+                        // Não falha o start do cluster se FTP falhar
+                    }
+                    
                     // Limites de recursos já estão aplicados no docker-compose.yml
                     // O docker-compose up -d irá aplicar automaticamente
                     System.out.println("Cluster iniciado e verificado. Limites de recursos aplicados via docker-compose.yml");
@@ -915,6 +954,10 @@ public class ClusterService implements IClusterService {
         Cluster cluster = findClusterById(clusterId);
         
         try {
+            // NOTA: O servidor FTP NÃO é parado quando o cluster é parado
+            // O FTP continua rodando independentemente do estado do cluster
+            // Isso garante acesso FTP mesmo quando o cluster está parado
+            
             // Verifica se o diretório do cluster existe
             String clusterPath = cluster.getRootPath();
             if (clusterPath == null || clusterPath.isEmpty()) {

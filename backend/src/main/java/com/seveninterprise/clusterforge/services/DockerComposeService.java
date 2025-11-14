@@ -50,23 +50,14 @@ public class DockerComposeService implements IDockerComposeService {
             // Adiciona limites de recursos
             content = addResourceLimitsToDockerCompose(content, cluster);
             
-            // Adiciona serviço FTP se porta FTP estiver configurada
-            if (cluster.getFtpPort() != null && cluster.getFtpUsername() != null && cluster.getFtpPassword() != null) {
-                System.out.println("📁 Adicionando serviço FTP ao docker-compose - Porta: " + cluster.getFtpPort() + ", User: " + cluster.getFtpUsername());
-                try {
-                    content = addFtpServiceToDockerCompose(content, cluster);
-                    System.out.println("✅ Serviço FTP adicionado com sucesso");
-                } catch (Exception e) {
-                    System.err.println("❌ ERRO ao adicionar serviço FTP: " + e.getMessage());
-                    e.printStackTrace();
-                    // Não falha a criação do cluster se FTP falhar - apenas loga o erro
-                    // O cluster será criado sem FTP, mas o usuário será notificado
-                    System.err.println("⚠️ Continuando criação do cluster sem serviço FTP devido ao erro acima");
-                }
-            } else {
-                System.out.println("⚠️ FTP não configurado para cluster (porta: " + cluster.getFtpPort() + 
-                    ", user: " + cluster.getFtpUsername() + ", pass: " + (cluster.getFtpPassword() != null ? "***" : "null") + ")");
-            }
+            // Remove serviços FTP existentes do docker-compose (se houver)
+            // Servidores FTP agora são gerenciados independentemente pelo FtpService
+            content = removeExistingFtpServiceIfPresent(content);
+            
+            // NOTA: Servidores FTP não são mais adicionados ao docker-compose
+            // Eles são gerenciados independentemente pelo FtpService
+            // Isso garante que os servidores FTP sempre estejam rodando,
+            // independentemente do estado do cluster
             
             return content;
         } catch (ClusterException e) {
