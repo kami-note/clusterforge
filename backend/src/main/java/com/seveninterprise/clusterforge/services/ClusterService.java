@@ -976,32 +976,11 @@ public class ClusterService implements IClusterService {
                 return buildResponse(cluster, "STOPPED", "Cluster já está parado (sem container identificado)");
             }
             
-            // Método 1: Tenta parar o container diretamente usando docker stop
-            // Isso é mais confiável que docker-compose down porque:
-            // 1. Para o container sem removê-lo
-            // 2. Respeita a política restart: unless-stopped (não reinicia após stop explícito)
-            // 3. É mais rápido e direto
-            try {
-                System.out.println("🛑 Parando container diretamente: " + containerIdentifier);
-                dockerService.stopContainer(containerIdentifier);
-                
-                // Aguardar um pouco para o Docker processar a parada
-                Thread.sleep(2000);
-                
-                // Verificar se o container realmente parou
-                if (verifyContainerStopped(containerIdentifier)) {
-                    cluster.setStatus("STOPPED");
-                    clusterRepository.save(cluster);
-                    return buildResponse(cluster, "STOPPED", "Cluster parado e verificado com sucesso");
-                } else {
-                    System.out.println("⚠️ Container ainda está rodando após docker stop. Tentando docker-compose stop...");
-                }
-            } catch (Exception e) {
-                System.out.println("⚠️ Erro ao parar container diretamente: " + e.getMessage() + ". Tentando método alternativo...");
-            }
-            
-            // Método 2: Se docker stop falhou, tenta docker-compose stop
-            // Isso para os containers sem removê-los (diferente de docker-compose down)
+            // Método 1: Tenta parar usando docker-compose stop PRIMEIRO
+            // Isso é crítico para containers gerenciados por docker-compose porque:
+            // 1. O docker-compose gerencia a política de restart
+            // 2. Usar docker stop diretamente pode ser ignorado pelo docker-compose
+            // 3. docker-compose stop respeita a política unless-stopped corretamente
             try {
                 String dockerCmd = getDockerCommand();
                 String composeCmd;
@@ -1012,36 +991,78 @@ public class ClusterService implements IClusterService {
                     composeCmd = "bash -c 'cd " + clusterPath + " && docker-compose stop'";
                 }
                 
-                System.out.println("🛑 Tentando docker-compose stop...");
+                System.out.println("🛑 Parando cluster via docker-compose stop...");
                 String result = dockerService.runCommand(composeCmd);
                 boolean commandSuccess = isDockerCommandSuccessful(result);
                 
                 if (commandSuccess) {
                     // Aguardar um pouco para o Docker processar a parada
-                    Thread.sleep(2000);
+                    Thread.sleep(1000); // Reduzido de 2000 para 1000ms
                     
-                    // Verificar se o container realmente parou
+                    // Verificar se o container realmente parou (com menos tentativas)
                     if (verifyContainerStopped(containerIdentifier)) {
-                        cluster.setStatus("STOPPED");
-                        clusterRepository.save(cluster);
-                        return buildResponse(cluster, "STOPPED", "Cluster parado com sucesso (docker-compose stop)");
+                        // Desabilitar política de restart após parar com docker-compose
+                        // Isso garante que o container não será reiniciado mesmo se o docker-compose for executado novamente
+                        try {
+                            System.out.println("🔧 Desabilitando política de restart após docker-compose stop...");
+                            dockerService.disableRestartPolicy(containerIdentifier);
+                        } catch (Exception e) {
+                            System.out.println("⚠️ Aviso: Não foi possível desabilitar restart policy: " + e.getMessage());
+                        }
+                        
+                        // Atualizar status para STOPPED e salvar imediatamente
+                        // Buscar cluster atualizado do banco para evitar problemas de concorrência
+                        Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(cluster);
+                        clusterToUpdate.setStatus("STOPPED");
+                        clusterRepository.save(clusterToUpdate);
+                        System.out.println("✅ Status do cluster atualizado para STOPPED no banco de dados");
+                        return buildResponse(clusterToUpdate, "STOPPED", "Cluster parado com sucesso (docker-compose stop)");
                     } else {
-                        System.out.println("⚠️ Container ainda está rodando após docker-compose stop.");
+                        System.out.println("⚠️ Container ainda está rodando após docker-compose stop. Tentando docker stop...");
                     }
                 } else {
-                    System.out.println("⚠️ docker-compose stop falhou: " + result);
+                    System.out.println("⚠️ docker-compose stop falhou: " + result + ". Tentando docker stop...");
                 }
             } catch (Exception e) {
-                System.err.println("⚠️ Erro ao executar docker-compose stop: " + e.getMessage());
+                System.out.println("⚠️ Erro ao executar docker-compose stop: " + e.getMessage() + ". Tentando docker stop...");
             }
             
-            // Se ambos os métodos falharam, verifica uma última vez o status
+            // Método 2: Se docker-compose stop falhou, tenta docker stop diretamente
+            // Isso é um fallback caso o docker-compose não esteja disponível ou tenha falhado
+            try {
+                System.out.println("🛑 Parando container diretamente via docker stop: " + containerIdentifier);
+                dockerService.stopContainer(containerIdentifier);
+                
+                // Aguardar um pouco para o Docker processar a parada
+                Thread.sleep(1000); // Reduzido de 2000 para 1000ms
+                
+                // Verificar se o container realmente parou (com menos tentativas)
+                if (verifyContainerStopped(containerIdentifier)) {
+                    // Atualizar status para STOPPED e salvar imediatamente
+                    // Buscar cluster atualizado do banco para evitar problemas de concorrência
+                    Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(cluster);
+                    clusterToUpdate.setStatus("STOPPED");
+                    clusterRepository.save(clusterToUpdate);
+                    System.out.println("✅ Status do cluster atualizado para STOPPED no banco de dados");
+                    return buildResponse(clusterToUpdate, "STOPPED", "Cluster parado e verificado com sucesso (docker stop)");
+                } else {
+                    System.out.println("⚠️ Container ainda está rodando após docker stop.");
+                }
+            } catch (Exception e) {
+                System.out.println("⚠️ Erro ao parar container diretamente: " + e.getMessage());
+            }
+            
+            // Se ambos os métodos falharam, verifica uma última vez o status rapidamente
             // Pode ser que o container já tenha parado mas a verificação anterior falhou
-            Thread.sleep(1000);
+            Thread.sleep(500); // Reduzido de 1000 para 500ms
             if (verifyContainerStopped(containerIdentifier)) {
-                cluster.setStatus("STOPPED");
-                clusterRepository.save(cluster);
-                return buildResponse(cluster, "STOPPED", "Cluster parado (verificação final confirmou)");
+                // Atualizar status para STOPPED e salvar imediatamente
+                // Buscar cluster atualizado do banco para evitar problemas de concorrência
+                Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(cluster);
+                clusterToUpdate.setStatus("STOPPED");
+                clusterRepository.save(clusterToUpdate);
+                System.out.println("✅ Status do cluster atualizado para STOPPED no banco de dados (verificação final)");
+                return buildResponse(clusterToUpdate, "STOPPED", "Cluster parado (verificação final confirmou)");
             }
             
             // Se chegou aqui, não conseguiu parar o container
@@ -1077,9 +1098,10 @@ public class ClusterService implements IClusterService {
             return true;
         }
         
-        int maxAttempts = 5;
+        // Reduzir tentativas e intervalo para retornar mais rápido
+        int maxAttempts = 3;
         int attempts = 0;
-        long pollInterval = 1000; // 1 segundo
+        long pollInterval = 500; // 500ms (mais rápido)
         
         while (attempts < maxAttempts) {
             try {
@@ -1090,29 +1112,27 @@ public class ClusterService implements IClusterService {
                     return true;
                 }
                 
-                if (result.contains("Process exited with code: 0")) {
-                    // Extrair o status do resultado
-                    String status = extractContainerStatusFromResult(result);
-                    System.out.println("📊 Status do container " + containerIdentifier + ": " + status);
-                    
-                    // Container está parado se status é: stopped, exited, ou not found
-                    if ("stopped".equalsIgnoreCase(status) || 
-                        "exited".equalsIgnoreCase(status) ||
-                        "not_found".equalsIgnoreCase(status)) {
-                        return true;
-                    }
-                    
-                    // Se ainda está running, aguarda e tenta novamente
-                    if ("running".equalsIgnoreCase(status)) {
-                        attempts++;
-                        if (attempts < maxAttempts) {
-                            Thread.sleep(pollInterval);
-                        }
-                        continue;
-                    }
+                // Extrair o status do resultado (mesmo que não tenha "Process exited with code: 0")
+                String status = extractContainerStatusFromResult(result);
+                System.out.println("📊 Status do container " + containerIdentifier + ": " + status + " (resultado bruto: " + result + ")");
+                
+                // Container está parado se status é: stopped, exited, ou not found
+                if ("stopped".equalsIgnoreCase(status) || 
+                    "exited".equalsIgnoreCase(status) ||
+                    "not_found".equalsIgnoreCase(status)) {
+                    return true;
                 }
                 
-                // Se não conseguiu verificar, tenta novamente
+                // Se ainda está running, aguarda e tenta novamente
+                if ("running".equalsIgnoreCase(status)) {
+                    attempts++;
+                    if (attempts < maxAttempts) {
+                        Thread.sleep(pollInterval);
+                    }
+                    continue;
+                }
+                
+                // Se não conseguiu determinar o status, tenta novamente
                 attempts++;
                 if (attempts < maxAttempts) {
                     Thread.sleep(pollInterval);
@@ -1134,16 +1154,30 @@ public class ClusterService implements IClusterService {
         // Após todas as tentativas, verifica uma última vez
         try {
             String finalCheck = dockerService.inspectContainer(containerIdentifier, "{{.State.Status}}");
-            if (finalCheck == null || finalCheck.isEmpty() || !finalCheck.contains("Process exited with code: 0")) {
-                // Container não encontrado ou erro = assumir parado
+            if (finalCheck == null || finalCheck.isEmpty()) {
+                // Container não encontrado = assumir parado
+                System.out.println("📊 Verificação final: Container não encontrado - assumindo parado");
                 return true;
             }
+            
+            // Extrair status independente de ter "Process exited with code: 0"
             String status = extractContainerStatusFromResult(finalCheck);
-            return "stopped".equalsIgnoreCase(status) || 
-                   "exited".equalsIgnoreCase(status) ||
-                   "not_found".equalsIgnoreCase(status);
+            System.out.println("📊 Verificação final do container " + containerIdentifier + ": status = " + status);
+            
+            boolean isStopped = "stopped".equalsIgnoreCase(status) || 
+                               "exited".equalsIgnoreCase(status) ||
+                               "not_found".equalsIgnoreCase(status);
+            
+            if (isStopped) {
+                System.out.println("✅ Container confirmado como parado na verificação final");
+            } else {
+                System.out.println("⚠️ Container ainda não está parado na verificação final (status: " + status + ")");
+            }
+            
+            return isStopped;
         } catch (Exception e) {
             // Em caso de erro, assumir que não conseguiu verificar
+            System.err.println("⚠️ Erro na verificação final: " + e.getMessage());
             return false;
         }
     }

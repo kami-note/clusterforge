@@ -211,10 +211,43 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
 
       // Após ação na API, recarregar dados da API para ter status atualizado
       // Isso garante que o status sempre vem da fonte primária (API)
-      await loadClusters();
-    } catch (error) {
+      // Usar timeout menor para evitar esperar muito se a operação já foi iniciada
+      try {
+        await Promise.race([
+          loadClusters(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout ao recarregar clusters')), 10000)
+          )
+        ]);
+      } catch (reloadError) {
+        // Se falhar ao recarregar, não quebrar - a operação principal pode ter sido bem-sucedida
+        console.warn('Aviso: Não foi possível recarregar clusters após atualização:', reloadError);
+        // Atualizar status localmente se possível
+        setClusters(prev => prev.map(c => 
+          c.id === id ? { ...c, ...updates } : c
+        ));
+      }
+    } catch (error: any) {
       const message = handleError(error);
       console.error('Error updating cluster:', message, error);
+      
+      // Se for timeout ou erro de rede, não quebrar completamente
+      // A operação pode ter sido iniciada no backend mesmo que a resposta não tenha chegado
+      if (error.name === 'TimeoutError' || error.name === 'NetworkError' || error.status === 408) {
+        // Atualizar status localmente como otimista
+        setClusters(prev => prev.map(c => 
+          c.id === id ? { ...c, ...updates } : c
+        ));
+        
+        // Tentar recarregar em background
+        loadClusters().catch(err => 
+          console.warn('Falha ao recarregar clusters em background:', err)
+        );
+        
+        // Lançar erro com mensagem mais amigável para leigos
+        throw new Error('A operação pode estar em andamento. Aguarde alguns segundos e verifique se o status mudou. Se não mudar, tente novamente.');
+      }
+      
       throw error;
     } finally {
       setLoading(false);

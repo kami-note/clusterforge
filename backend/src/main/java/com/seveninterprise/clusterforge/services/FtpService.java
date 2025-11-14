@@ -3,11 +3,15 @@ package com.seveninterprise.clusterforge.services;
 import com.seveninterprise.clusterforge.exceptions.ClusterException;
 import com.seveninterprise.clusterforge.model.Cluster;
 import com.seveninterprise.clusterforge.repository.ClusterRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -22,6 +26,8 @@ import java.util.stream.Collectors;
 @Service
 public class FtpService {
     
+    private static final Logger logger = LoggerFactory.getLogger(FtpService.class);
+    
     // Constantes para cálculo de portas PASV
     private static final int BASE_PASV_PORT = 21100;
     private static final int MAX_PASV_PORT = 22000;
@@ -30,15 +36,49 @@ public class FtpService {
     @Value("${system.directory.cluster}")
     private String clustersBasePath;
     
+    @Value("${clusterforge.ftp.remove.wait.timeout:1000}")
+    private long removeWaitTimeout;
+    
+    @Value("${clusterforge.ftp.create.wait.timeout:2000}")
+    private long createWaitTimeout;
+    
+    @Value("${clusterforge.ftp.port.release.check.interval:500}")
+    private long portReleaseCheckInterval;
+    
+    @Value("${clusterforge.ftp.port.release.max.attempts:10}")
+    private int portReleaseMaxAttempts;
+    
+    @Value("${clusterforge.ftp.stop.wait.timeout:1000}")
+    private long stopWaitTimeout;
+    
+    @Value("${clusterforge.ftp.remove.verify.timeout:500}")
+    private long removeVerifyTimeout;
+    
+    @Value("${clusterforge.ftp.monitor.cache.ttl:30000}")
+    private long monitorCacheTtl;
+    
     private final DockerService dockerService;
-    private final PortManagementService portManagementService;
     private final ClusterRepository clusterRepository;
     
+    // Cache de monitoramento: armazena último status verificado por cluster
+    private final Map<Long, MonitorCacheEntry> monitorCache = new ConcurrentHashMap<>();
+    
+    /**
+     * Entrada do cache de monitoramento
+     */
+    private static class MonitorCacheEntry {
+        final long lastCheck;
+        final boolean wasRunning;
+        
+        MonitorCacheEntry(long lastCheck, boolean wasRunning) {
+            this.lastCheck = lastCheck;
+            this.wasRunning = wasRunning;
+        }
+    }
+    
     public FtpService(DockerService dockerService, 
-                     PortManagementService portManagementService,
                      ClusterRepository clusterRepository) {
         this.dockerService = dockerService;
-        this.portManagementService = portManagementService;
         this.clusterRepository = clusterRepository;
     }
     
@@ -58,7 +98,7 @@ public class FtpService {
         
         // Verifica se o container já existe
         if (isFtpContainerRunning(containerName)) {
-            System.out.println("✅ Servidor FTP já está rodando: " + containerName);
+            logger.info("Servidor FTP já está rodando: {}", containerName);
             return;
         }
         
@@ -67,11 +107,7 @@ public class FtpService {
         removeFtpContainerIfExists(containerName);
         
         // Aguarda um pouco para garantir que portas foram liberadas
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        waitWithTimeout(removeWaitTimeout);
         
         // Calcula range de portas PASV
         int[] pasvPorts = calculatePasvPortRange(cluster.getFtpPort());
@@ -101,33 +137,28 @@ public class FtpService {
             clusterSrcPath
         );
         
-        System.out.println("🚀 Criando servidor FTP independente: " + containerName);
-        System.out.println("📁 Volume: " + clusterSrcPath);
-        System.out.println("🔌 Porta: " + cluster.getFtpPort());
+        logger.info("Criando servidor FTP independente: {} | Volume: {} | Porta: {}", 
+                    containerName, clusterSrcPath, cluster.getFtpPort());
         
         try {
             String result = dockerService.runCommand(command);
             
             if (result.contains("Process exited with code: 0")) {
-                System.out.println("✅ Servidor FTP criado e iniciado com sucesso: " + containerName);
+                logger.info("Servidor FTP criado e iniciado com sucesso: {}", containerName);
                 
                 // Aguarda um pouco para garantir que o container iniciou
-                Thread.sleep(2000);
+                waitWithTimeout(createWaitTimeout);
                 
                 // Verifica se está realmente rodando
                 if (!isFtpContainerRunning(containerName)) {
-                    System.err.println("⚠️ AVISO: Container FTP criado mas não está rodando. Verifique os logs.");
+                    logger.warn("Container FTP criado mas não está rodando: {}", containerName);
                 }
             } else {
-                System.err.println("❌ ERRO ao criar servidor FTP: " + result);
+                logger.error("Erro ao criar servidor FTP: {}", result);
                 throw new ClusterException("Falha ao criar servidor FTP: " + result);
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ClusterException("Operação interrompida ao criar servidor FTP", e);
         } catch (Exception e) {
-            System.err.println("❌ ERRO inesperado ao criar servidor FTP: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Erro inesperado ao criar servidor FTP: {}", e.getMessage(), e);
             throw new ClusterException("Erro inesperado ao criar servidor FTP: " + e.getMessage(), e);
         }
     }
@@ -141,7 +172,7 @@ public class FtpService {
         String containerName = getFtpContainerName(cluster);
         
         if (isFtpContainerRunning(containerName)) {
-            System.out.println("✅ Servidor FTP já está rodando: " + containerName);
+            logger.info("Servidor FTP já está rodando: {}", containerName);
             return;
         }
         
@@ -149,38 +180,33 @@ public class FtpService {
         String containerId = dockerService.getContainerId(containerName);
         if (containerId == null) {
             // Container não existe, cria um novo
-            System.out.println("📦 Container FTP não existe, criando novo...");
+            logger.info("Container FTP não existe, criando novo: {}", containerName);
             createAndStartFtpServer(cluster);
             return;
         }
         
         // Inicia o container existente
-        System.out.println("▶️ Iniciando servidor FTP: " + containerName);
+        logger.info("Iniciando servidor FTP: {}", containerName);
         try {
             dockerService.startContainer(containerName);
-            System.out.println("✅ Servidor FTP iniciado com sucesso: " + containerName);
+            logger.info("Servidor FTP iniciado com sucesso: {}", containerName);
         } catch (Exception e) {
             // Se falhou por conflito de porta ou nome, remove e recria
             String errorMsg = e.getMessage();
             if (errorMsg != null && (errorMsg.contains("port is already allocated") || 
                                      errorMsg.contains("Conflict") ||
                                      errorMsg.contains("already in use"))) {
-                System.err.println("⚠️ Conflito detectado ao iniciar container FTP. Removendo e recriando...");
+                logger.warn("Conflito detectado ao iniciar container FTP. Removendo e recriando: {}", containerName);
                 removeFtpContainerIfExists(containerName);
                 
                 // Aguarda um pouco para portas serem liberadas
-                try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
+                waitWithTimeout(removeWaitTimeout * 2); // Dobra o timeout para recriação
                 
                 // Recria o container
-                System.out.println("🔄 Recriando servidor FTP após resolver conflito...");
+                logger.info("Recriando servidor FTP após resolver conflito: {}", containerName);
                 createAndStartFtpServer(cluster);
             } else {
-                System.err.println("❌ ERRO ao iniciar servidor FTP: " + errorMsg);
-                e.printStackTrace();
+                logger.error("Erro ao iniciar servidor FTP: {}", errorMsg, e);
                 throw new ClusterException("Erro ao iniciar servidor FTP: " + errorMsg, e);
             }
         }
@@ -195,17 +221,16 @@ public class FtpService {
         String containerName = getFtpContainerName(cluster);
         
         if (!isFtpContainerRunning(containerName)) {
-            System.out.println("ℹ️ Servidor FTP já está parado: " + containerName);
+            logger.debug("Servidor FTP já está parado: {}", containerName);
             return;
         }
         
-        System.out.println("⏸️ Parando servidor FTP: " + containerName);
+        logger.info("Parando servidor FTP: {}", containerName);
         try {
             dockerService.stopContainer(containerName);
-            System.out.println("✅ Servidor FTP parado com sucesso: " + containerName);
+            logger.info("Servidor FTP parado com sucesso: {}", containerName);
         } catch (Exception e) {
-            System.err.println("❌ ERRO ao parar servidor FTP: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Erro ao parar servidor FTP: {}", e.getMessage(), e);
             // Não lança exceção - apenas loga o erro
         }
     }
@@ -218,13 +243,14 @@ public class FtpService {
     public void removeFtpServer(Cluster cluster) {
         String containerName = getFtpContainerName(cluster);
         
-        System.out.println("🗑️ Removendo servidor FTP: " + containerName);
+        logger.info("Removendo servidor FTP: {}", containerName);
         try {
             dockerService.removeContainer(containerName);
-            System.out.println("✅ Servidor FTP removido com sucesso: " + containerName);
+            logger.info("Servidor FTP removido com sucesso: {}", containerName);
+            // Limpa cache de monitoramento para este cluster
+            monitorCache.remove(cluster.getId());
         } catch (Exception e) {
-            System.err.println("❌ ERRO ao remover servidor FTP: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Erro ao remover servidor FTP: {}", e.getMessage(), e);
             // Não lança exceção - apenas loga o erro
         }
     }
@@ -253,11 +279,11 @@ public class FtpService {
         }
         
         if (!isFtpServerRunning(cluster)) {
-            System.out.println("⚠️ Servidor FTP não está rodando, tentando iniciar: " + cluster.getName());
+            logger.warn("Servidor FTP não está rodando, tentando iniciar: {}", cluster.getName());
             try {
                 startFtpServer(cluster);
             } catch (Exception e) {
-                System.err.println("❌ Não foi possível iniciar servidor FTP automaticamente: " + e.getMessage());
+                logger.error("Não foi possível iniciar servidor FTP automaticamente: {}", e.getMessage(), e);
             }
         }
     }
@@ -294,51 +320,70 @@ public class FtpService {
         try {
             String containerId = dockerService.getContainerId(containerName);
             if (containerId != null) {
-                System.out.println("🗑️ Removendo container FTP existente: " + containerName + " (ID: " + containerId + ")");
+                logger.debug("Removendo container FTP existente: {} (ID: {})", containerName, containerId);
                 
                 // Tenta parar primeiro se estiver rodando
                 try {
                     String status = dockerService.inspectContainer(containerName, "{{.State.Status}}");
                     if (status != null && status.contains("running")) {
-                        System.out.println("⏸️ Parando container FTP antes de remover...");
+                        logger.debug("Parando container FTP antes de remover: {}", containerName);
                         try {
                             dockerService.stopContainer(containerName);
-                            Thread.sleep(1000); // Aguarda um pouco
+                            waitWithTimeout(stopWaitTimeout);
                         } catch (Exception stopEx) {
                             // Ignora erro ao parar - continua com remoção forçada
-                            System.err.println("⚠️ Não foi possível parar container, tentando remover forçadamente...");
+                            logger.warn("Não foi possível parar container, tentando remover forçadamente: {}", 
+                                       containerName);
                         }
                     }
                 } catch (Exception e) {
                     // Ignora erro ao verificar status - continua com remoção
+                    logger.debug("Erro ao verificar status do container: {}", e.getMessage());
                 }
                 
                 // Remove o container (força remoção)
                 try {
                     dockerService.removeContainer(containerName);
                     // Aguarda um pouco para garantir que foi removido
-                    Thread.sleep(500);
-                    System.out.println("✅ Container FTP removido: " + containerName);
+                    waitWithTimeout(removeVerifyTimeout);
+                    logger.debug("Container FTP removido: {}", containerName);
                 } catch (Exception removeEx) {
                     // Tenta remover forçadamente usando docker rm -f diretamente
-                    System.err.println("⚠️ Erro ao remover via DockerService, tentando comando direto...");
+                    logger.warn("Erro ao remover via DockerService, tentando comando direto: {}", containerName);
                     try {
                         String dockerCmd = getDockerCommand();
                         String command = dockerCmd + " rm -f " + containerName;
                         dockerService.runCommand(command);
-                        Thread.sleep(500);
-                        System.out.println("✅ Container FTP removido forçadamente: " + containerName);
+                        waitWithTimeout(removeVerifyTimeout);
+                        logger.info("Container FTP removido forçadamente: {}", containerName);
                     } catch (Exception forceEx) {
-                        System.err.println("⚠️ AVISO: Não foi possível remover container FTP " + containerName + 
-                                        " mesmo com força. Erro: " + forceEx.getMessage());
+                        logger.warn("Não foi possível remover container FTP {} mesmo com força. Erro: {}", 
+                                   containerName, forceEx.getMessage());
                     }
                 }
             } else {
                 // Container não existe - isso é OK, não precisa fazer nada
+                logger.trace("Container FTP não existe: {}", containerName);
             }
         } catch (Exception e) {
             // Nunca lança exceção - apenas loga o erro
-            System.err.println("⚠️ AVISO: Erro ao verificar/remover container FTP " + containerName + ": " + e.getMessage());
+            logger.warn("Erro ao verificar/remover container FTP {}: {}", containerName, e.getMessage());
+        }
+    }
+    
+    /**
+     * Aguarda um tempo configurável sem bloquear permanentemente a thread
+     * Interrompe a thread se necessário
+     */
+    private void waitWithTimeout(long timeoutMs) {
+        if (timeoutMs <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(timeoutMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.debug("Operação de espera interrompida");
         }
     }
     
@@ -393,7 +438,7 @@ public class FtpService {
         }
         
         // Se não encontrou, retorna a inicial mesmo (pode dar conflito, mas é melhor que falhar)
-        System.err.println("⚠️ AVISO: Não foi possível encontrar range PASV disponível, usando: " + startPort);
+        logger.warn("Não foi possível encontrar range PASV disponível, usando: {}", startPort);
         return startPort;
     }
     
@@ -411,13 +456,48 @@ public class FtpService {
     
     /**
      * Verifica se uma porta está disponível no sistema
+     * Usa PortManagementService para verificação consistente, mas para portas PASV
+     * não verifica no banco (apenas no sistema) pois portas PASV não são registradas
      */
+    @SuppressWarnings("resource")
     private boolean isPortAvailable(int port) {
+        // Para portas PASV (range 21100-22000), verifica apenas no sistema
+        // pois não são registradas no banco de dados
+        // Poderia usar portManagementService se houvesse método público, mas
+        // mantemos verificação direta para consistência com a lógica de PASV
         try (java.net.ServerSocket serverSocket = new java.net.ServerSocket(port)) {
             return true;
         } catch (Exception e) {
             return false;
         }
+    }
+    
+    /**
+     * Verifica se deve verificar o cluster baseado no cache
+     * Retorna true se deve verificar, false se ainda está no período de cache
+     */
+    private boolean shouldCheckCluster(Cluster cluster) {
+        long clusterId = cluster.getId();
+        MonitorCacheEntry cached = monitorCache.get(clusterId);
+        
+        if (cached == null) {
+            return true; // Nunca verificado, deve verificar
+        }
+        
+        long timeSinceLastCheck = System.currentTimeMillis() - cached.lastCheck;
+        if (timeSinceLastCheck >= monitorCacheTtl) {
+            return true; // Cache expirado, deve verificar
+        }
+        
+        // Se estava rodando na última verificação e ainda não passou o TTL, não precisa verificar
+        return !cached.wasRunning;
+    }
+    
+    /**
+     * Atualiza o cache de monitoramento para um cluster
+     */
+    private void updateMonitorCache(Cluster cluster, boolean isRunning) {
+        monitorCache.put(cluster.getId(), new MonitorCacheEntry(System.currentTimeMillis(), isRunning));
     }
     
     /**
@@ -436,8 +516,7 @@ public class FtpService {
             return localHost.getHostAddress();
         } catch (Exception e) {
             // Fallback para localhost
-            System.err.println("Warning: Não foi possível detectar IP do host para FTP PASV. " +
-                             "Usando 127.0.0.1. Configure FTP_PASV_ADDRESS.");
+            logger.warn("Não foi possível detectar IP do host para FTP PASV. Usando 127.0.0.1. Configure FTP_PASV_ADDRESS.");
             return "127.0.0.1";
         }
     }
@@ -513,6 +592,7 @@ public class FtpService {
      * 
      * Este método garante que os servidores FTP sempre estejam disponíveis,
      * independentemente do estado dos clusters
+     * Usa cache para evitar verificações desnecessárias
      */
     @Scheduled(fixedDelayString = "${clusterforge.ftp.monitor.interval:60000}")
     public void monitorAndEnsureFtpServersRunning() {
@@ -530,9 +610,20 @@ public class FtpService {
             
             int restartedCount = 0;
             int checkedCount = 0;
+            int skippedCount = 0;
             
             for (Cluster cluster : clustersWithFtp) {
                 try {
+                    // NOTA: O servidor FTP roda independentemente do status do cluster
+                    // Isso permite acesso FTP mesmo quando o cluster está parado (STOPPED)
+                    // O FTP é um serviço independente e deve sempre estar disponível
+                    
+                    // Verifica cache antes de fazer verificação completa
+                    if (!shouldCheckCluster(cluster)) {
+                        skippedCount++;
+                        continue; // Pula se ainda está no período de cache e estava rodando
+                    }
+                    
                     checkedCount++;
                     
                     // Verifica se o servidor FTP está rodando
@@ -540,23 +631,28 @@ public class FtpService {
                     String containerId = dockerService.getContainerId(containerName);
                     boolean isRunning = isFtpServerRunning(cluster);
                     
+                    // Atualiza cache
+                    updateMonitorCache(cluster, isRunning);
+                    
                     // Se não está rodando, mas existe um container (pode estar parado ou com problema)
                     if (!isRunning) {
                         if (containerId != null) {
                             // Container existe mas não está rodando - pode ter problema
-                            System.out.println("⚠️ Servidor FTP parado/criado detectado para cluster: " + cluster.getName() + 
-                                             " (ID: " + cluster.getId() + ", Container: " + containerId + ")");
+                            logger.warn("Servidor FTP parado detectado para cluster: {} (ID: {}, Container: {})", 
+                                       cluster.getName(), cluster.getId(), containerId);
                         } else {
                             // Container não existe - precisa criar
-                            System.out.println("⚠️ Servidor FTP não existe para cluster: " + cluster.getName() + 
-                                             " (ID: " + cluster.getId() + ")");
+                            logger.warn("Servidor FTP não existe para cluster: {} (ID: {})", 
+                                       cluster.getName(), cluster.getId());
                         }
                         
                         // Tenta reiniciar/criar o servidor FTP
                         try {
                             startFtpServer(cluster);
                             restartedCount++;
-                            System.out.println("✅ Servidor FTP reiniciado/criado com sucesso para cluster: " + cluster.getName());
+                            // Atualiza cache após reiniciar
+                            updateMonitorCache(cluster, true);
+                            logger.info("Servidor FTP reiniciado/criado com sucesso para cluster: {}", cluster.getName());
                         } catch (Exception e) {
                             // Se falhou, tenta resolver removendo e recriando
                             String errorMsg = e.getMessage();
@@ -564,18 +660,18 @@ public class FtpService {
                                                      errorMsg.contains("Conflict") ||
                                                      errorMsg.contains("already in use") ||
                                                      errorMsg.contains("Cannot create container"))) {
-                                System.err.println("⚠️ Conflito detectado. Tentando resolver removendo container e recriando...");
+                                logger.warn("Conflito detectado. Tentando resolver removendo container e recriando: {}", 
+                                           cluster.getName());
                                 try {
-                                    // Remove o container problemático (containerName já foi declarado acima)
+                                    // Remove o container problemático
                                     removeFtpContainerIfExists(containerName);
                                     
                                     // Aguarda liberação de portas e verifica se foram liberadas
                                     int waitAttempts = 0;
-                                    int maxWaitAttempts = 10; // 10 tentativas = 5 segundos
                                     boolean portsReleased = false;
                                     
-                                    while (waitAttempts < maxWaitAttempts && !portsReleased) {
-                                        Thread.sleep(500);
+                                    while (waitAttempts < portReleaseMaxAttempts && !portsReleased) {
+                                        waitWithTimeout(portReleaseCheckInterval);
                                         waitAttempts++;
                                         
                                         // Verifica se as portas PASV foram liberadas
@@ -583,44 +679,53 @@ public class FtpService {
                                         portsReleased = isPasvPortRangeAvailable(pasvPorts[0], PASV_RANGE_SIZE);
                                         
                                         if (portsReleased) {
-                                            System.out.println("✅ Portas PASV liberadas após " + (waitAttempts * 500) + "ms");
+                                            logger.debug("Portas PASV liberadas após {}ms", waitAttempts * portReleaseCheckInterval);
                                             break;
                                         }
                                     }
                                     
                                     if (!portsReleased) {
-                                        System.err.println("⚠️ AVISO: Portas ainda não foram liberadas após 5 segundos. Tentando criar mesmo assim...");
+                                        logger.warn("Portas ainda não foram liberadas após {} tentativas. Tentando criar mesmo assim...", 
+                                                   portReleaseMaxAttempts);
                                     }
                                     
                                     // Recria o servidor FTP
                                     createAndStartFtpServer(cluster);
                                     restartedCount++;
-                                    System.out.println("✅ Servidor FTP recriado com sucesso após resolver conflito: " + cluster.getName());
+                                    // Atualiza cache após recriar
+                                    updateMonitorCache(cluster, true);
+                                    logger.info("Servidor FTP recriado com sucesso após resolver conflito: {}", cluster.getName());
                                 } catch (Exception retryException) {
-                                    System.err.println("❌ Falha ao resolver conflito e recriar servidor FTP para cluster " + cluster.getName() + 
-                                                    ": " + retryException.getMessage());
+                                    logger.error("Falha ao resolver conflito e recriar servidor FTP para cluster {}: {}", 
+                                                cluster.getName(), retryException.getMessage(), retryException);
+                                    // Atualiza cache indicando que não está rodando
+                                    updateMonitorCache(cluster, false);
                                 }
                             } else {
-                                System.err.println("❌ Falha ao reiniciar servidor FTP para cluster " + cluster.getName() + 
-                                                ": " + errorMsg);
+                                logger.error("Falha ao reiniciar servidor FTP para cluster {}: {}", 
+                                            cluster.getName(), errorMsg, e);
+                                // Atualiza cache indicando que não está rodando
+                                updateMonitorCache(cluster, false);
                             }
                         }
                     }
                 } catch (Exception e) {
                     // Não quebrar o monitoramento de outros clusters se um falhar
-                    System.err.println("⚠️ Erro ao verificar servidor FTP do cluster " + cluster.getId() + 
-                                    ": " + e.getMessage());
+                    logger.error("Erro ao verificar servidor FTP do cluster {}: {}", 
+                                cluster.getId(), e.getMessage(), e);
                 }
             }
             
-            // Log apenas se houver atividade
+            // Log apenas se houver atividade ou para debug
             if (restartedCount > 0) {
-                System.out.println("🔄 Monitoramento FTP: " + restartedCount + " servidor(es) reiniciado(s) de " + 
-                                 checkedCount + " verificado(s)");
+                logger.info("Monitoramento FTP: {} servidor(es) reiniciado(s) de {} verificado(s), {} pulado(s) (cache)", 
+                           restartedCount, checkedCount, skippedCount);
+            } else if (logger.isDebugEnabled() && checkedCount > 0) {
+                logger.debug("Monitoramento FTP: {} verificado(s), {} pulado(s) (cache), nenhum reinício necessário", 
+                            checkedCount, skippedCount);
             }
         } catch (Exception e) {
-            System.err.println("❌ Erro no monitoramento periódico de servidores FTP: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Erro no monitoramento periódico de servidores FTP: {}", e.getMessage(), e);
         }
     }
 }

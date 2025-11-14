@@ -30,12 +30,12 @@ public interface IClusterHealthService {
      * 
      * Executa verificações:
      * 1. Status do container Docker
-     * 2. Conectividade da aplicação (HTTP health check)
-     * 3. Uso de recursos (CPU, memória, disco)
-     * 4. Logs de erro recentes
+     * 
+     * NOTA: Não temos verificação de saúde implementada (HTTP health check, etc)
+     * Os clusters nunca devem estar UNHEALTHY, apenas HEALTHY (rodando) ou FAILED (parado)
      * 
      * @param cluster Cluster a verificar
-     * @return Status de saúde detalhado
+     * @return Status de saúde detalhado (HEALTHY se container rodando, FAILED se parado)
      */
     ClusterHealthStatus checkClusterHealth(Cluster cluster);
     
@@ -73,9 +73,11 @@ public interface IClusterHealthService {
      * Recupera automaticamente clusters com falha
      * 
      * Executa recuperação em clusters que:
-     * - Estão com status FAILED ou UNHEALTHY
+     * - Estão com status FAILED (container parado/erro)
      * - Não excederam limite máximo de tentativas
      * - Não estão em período de cooldown
+     * 
+     * NOTA: Não recupera UNHEALTHY pois não temos verificação de saúde implementada
      * 
      * @return Número de clusters recuperados
      */

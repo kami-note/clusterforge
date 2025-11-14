@@ -44,7 +44,7 @@ public class ClusterHealthService implements IClusterHealthService {
     private final ClusterHealthStatusRepository healthStatusRepository;
     private final ClusterHealthMetricsRepository metricsRepository;
     private final DockerService dockerService;
-    private final MetricsWebSocketService metricsWebSocketService;
+    // NOTA: metricsWebSocketService removido - não estava sendo usado
     private ExecutorService executorService;
     
     @Value("${clusterforge.health.check.interval:60}")
@@ -62,13 +62,12 @@ public class ClusterHealthService implements IClusterHealthService {
     public ClusterHealthService(ClusterRepository clusterRepository,
                               ClusterHealthStatusRepository healthStatusRepository,
                               ClusterHealthMetricsRepository metricsRepository,
-                              DockerService dockerService,
-                              MetricsWebSocketService metricsWebSocketService) {
+                              DockerService dockerService) {
         this.clusterRepository = clusterRepository;
         this.healthStatusRepository = healthStatusRepository;
         this.metricsRepository = metricsRepository;
         this.dockerService = dockerService;
-        this.metricsWebSocketService = metricsWebSocketService;
+        // NOTA: metricsWebSocketService removido - não estava sendo usado
         // Inicializar executorService no @PostConstruct para garantir que @Value seja injetado
     }
     
@@ -91,8 +90,10 @@ public class ClusterHealthService implements IClusterHealthService {
             healthStatus.setContainerStatus(containerStatus);
             
             // 2. Verificar conectividade da aplicação
-            Long responseTime = checkApplicationHealth(cluster);
-            healthStatus.setApplicationResponseTimeMs(responseTime);
+            // NOTA: Desabilitado - não temos verificação de saúde implementada
+            // Os clusters nunca devem estar UNHEALTHY, apenas HEALTHY (rodando) ou FAILED (parado)
+            Long responseTime = null; // Não verificar aplicação
+            healthStatus.setApplicationResponseTimeMs(null);
             
             // 3. Coletar métricas de recursos
             // Verificar se o container está rodando antes de coletar métricas
@@ -254,6 +255,15 @@ public class ClusterHealthService implements IClusterHealthService {
         Cluster cluster = clusterRepository.findById(clusterId)
             .orElseThrow(() -> new RuntimeException("Cluster não encontrado: " + clusterId));
         
+        // CRÍTICO: Não tenta recuperar clusters que foram parados intencionalmente pelo usuário
+        // Verifica status atualizado do banco para garantir consistência
+        String clusterStatus = cluster.getStatus();
+        if ("STOPPED".equals(clusterStatus) || "ERROR".equals(clusterStatus) || "DELETED".equals(clusterStatus)) {
+            System.out.println("Recuperação não permitida para cluster " + clusterId + 
+                             " - cluster está com status " + clusterStatus + " (parado intencionalmente)");
+            return false;
+        }
+        
         ClusterHealthStatus healthStatus = getOrCreateHealthStatus(cluster);
         
         // Verificar se pode tentar recuperação
@@ -311,15 +321,31 @@ public class ClusterHealthService implements IClusterHealthService {
     @Override
     @Transactional(timeout = 60) // Timeout maior para múltiplos clusters
     public int recoverFailedClusters() {
+        // NOTA: Apenas recupera clusters FAILED (container parado/erro)
+        // Não recupera UNHEALTHY pois não temos verificação de saúde implementada
+        // Os clusters nunca devem estar UNHEALTHY, apenas HEALTHY (rodando) ou FAILED (parado)
         List<ClusterHealthStatus> failedClusters = healthStatusRepository
             .findByCurrentStateInAndMonitoringEnabledTrue(
-                Arrays.asList(ClusterHealthStatus.HealthState.FAILED, 
-                             ClusterHealthStatus.HealthState.UNHEALTHY)
+                Arrays.asList(ClusterHealthStatus.HealthState.FAILED)
             );
         
         int recoveredCount = 0;
         
         for (ClusterHealthStatus healthStatus : failedClusters) {
+            // CRÍTICO: Não tenta recuperar clusters que foram parados intencionalmente pelo usuário
+            // Verifica status atualizado do banco para garantir consistência
+            Cluster cluster = healthStatus.getCluster();
+            Cluster currentCluster = clusterRepository.findById(cluster.getId()).orElse(cluster);
+            String clusterStatus = currentCluster.getStatus();
+            
+            // Se o cluster está STOPPED, ERROR ou DELETED, não tenta recuperar automaticamente
+            // Isso evita reiniciar containers quando o usuário explicitamente os parou
+            if ("STOPPED".equals(clusterStatus) || "ERROR".equals(clusterStatus) || "DELETED".equals(clusterStatus)) {
+                System.out.println("⏸️ Cluster " + cluster.getName() + " está com status " + clusterStatus + 
+                                 " - pulando recuperação automática (parado intencionalmente)");
+                continue; // Pula recuperação automática se cluster foi parado intencionalmente
+            }
+            
             if (canAttemptRecovery(healthStatus)) {
                 boolean success = recoverCluster(healthStatus.getCluster().getId());
                 if (success) {
@@ -442,7 +468,9 @@ public class ClusterHealthService implements IClusterHealthService {
     
     /**
      * Limpa o cache de health status (útil quando status é atualizado)
+     * NOTA: Método não usado - mantido para uso futuro se necessário
      */
+    @SuppressWarnings("unused")
     private void invalidateHealthStatusCache(Long clusterId) {
         healthStatusCache.remove(clusterId);
     }
@@ -560,6 +588,12 @@ public class ClusterHealthService implements IClusterHealthService {
         }
     }
     
+    /**
+     * Verifica conectividade da aplicação via HTTP health check
+     * NOTA: Método não usado - verificação de saúde foi desabilitada
+     * Mantido para uso futuro se necessário implementar health check HTTP
+     */
+    @SuppressWarnings("unused")
     private Long checkApplicationHealth(Cluster cluster) {
         try {
             String healthUrl = cluster.getHealthUrl(healthEndpoint);
@@ -1052,6 +1086,9 @@ public class ClusterHealthService implements IClusterHealthService {
     private ClusterHealthStatus.HealthState determineHealthState(ClusterHealthStatus healthStatus, 
                                                                String containerStatus, 
                                                                Long responseTime) {
+        // NOTA: Simplificado - não temos verificação de saúde implementada
+        // Os clusters nunca devem estar UNHEALTHY, apenas HEALTHY (rodando) ou FAILED (parado)
+        
         // Container não encontrado ou com erro
         if ("NOT_FOUND".equals(containerStatus) || containerStatus.startsWith("ERROR")) {
             return ClusterHealthStatus.HealthState.FAILED;
@@ -1062,24 +1099,18 @@ public class ClusterHealthService implements IClusterHealthService {
             return ClusterHealthStatus.HealthState.FAILED;
         }
         
-        // Aplicação não responde ou com erro
-        if (responseTime == null || responseTime < 0) {
-            return ClusterHealthStatus.HealthState.UNHEALTHY;
-        }
-        
-        // Tempo de resposta muito alto (> 5 segundos)
-        if (responseTime > 5000) {
-            return ClusterHealthStatus.HealthState.UNHEALTHY;
-        }
-        
-        // Verificar limites de recursos
-        if (isResourceLimitExceeded(healthStatus)) {
-            return ClusterHealthStatus.HealthState.UNHEALTHY;
-        }
-        
+        // Se o container está rodando, está HEALTHY
+        // Não verificamos aplicação, tempo de resposta ou limites de recursos
+        // Pois não temos verificação de saúde implementada
         return ClusterHealthStatus.HealthState.HEALTHY;
     }
     
+    /**
+     * Verifica se limites de recursos foram excedidos
+     * NOTA: Método não usado - verificação de limites de recursos foi desabilitada
+     * Mantido para uso futuro se necessário implementar alertas de recursos
+     */
+    @SuppressWarnings("unused")
     private boolean isResourceLimitExceeded(ClusterHealthStatus healthStatus) {
         // CPU > 90% (já está em percentual relativo ao limite do container)
         if (healthStatus.getCpuUsagePercent() != null && healthStatus.getCpuUsagePercent() > 90) {
@@ -1148,6 +1179,12 @@ public class ClusterHealthService implements IClusterHealthService {
                          ": " + eventType);
     }
     
+    /**
+     * Trata erros durante health check
+     * NOTA: Método não usado - tratamento de erros está inline
+     * Mantido para uso futuro se necessário centralizar tratamento de erros
+     */
+    @SuppressWarnings("unused")
     private void handleHealthCheckError(ClusterHealthStatus healthStatus, Exception e) {
         healthStatus.setCurrentState(ClusterHealthStatus.HealthState.UNKNOWN);
         // Limitar tamanho da mensagem de erro para evitar truncamento
@@ -1243,10 +1280,28 @@ public class ClusterHealthService implements IClusterHealthService {
         // Remove o texto "Process exited with code: 0" se presente
         String cleaned = result.replace("Process exited with code: 0", "").trim();
         
-        // Procura por status conhecidos (case-insensitive)
-        String[] statuses = {"running", "stopped", "exited", "created", "paused"};
+        // Verifica status de forma mais precisa - verifica palavras completas
+        // Prioriza status mais específicos primeiro
+        String lowerCleaned = cleaned.toLowerCase();
+        
+        // Verifica status em ordem de prioridade (mais específicos primeiro)
+        if (lowerCleaned.equals("running") || lowerCleaned.startsWith("running")) {
+            return "running";
+        } else if (lowerCleaned.equals("exited") || lowerCleaned.startsWith("exited")) {
+            return "exited";
+        } else if (lowerCleaned.equals("stopped") || lowerCleaned.startsWith("stopped")) {
+            return "stopped";
+        } else if (lowerCleaned.equals("created") || lowerCleaned.startsWith("created")) {
+            return "created";
+        } else if (lowerCleaned.equals("paused") || lowerCleaned.startsWith("paused")) {
+            return "paused";
+        }
+        
+        // Se não encontrou status exato, procura por palavras conhecidas
+        String[] statuses = {"running", "exited", "stopped", "created", "paused"};
         for (String status : statuses) {
-            if (cleaned.toLowerCase().contains(status)) {
+            // Verifica se o status aparece como palavra completa (não apenas substring)
+            if (lowerCleaned.matches(".*\\b" + status + "\\b.*") || lowerCleaned.equals(status)) {
                 return status;
             }
         }
@@ -1320,17 +1375,28 @@ public class ClusterHealthService implements IClusterHealthService {
             
             if (containerNotFound || containerStopped) {
                 // Container não existe ou está parado - atualizar para STOPPED
+                // CRÍTICO: Sempre atualizar para STOPPED se o container está parado,
+                // mesmo que o status atual seja RUNNING (container pode ter sido parado externamente)
                 if (!"STOPPED".equals(clusterToUpdate.getStatus())) {
                     clusterToUpdate.setStatus("STOPPED");
                     statusChanged = true;
-                    System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para STOPPED (containerStatus: " + containerStatus + ")");
+                    System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para STOPPED (containerStatus: " + containerStatus + ", status anterior: " + clusterToUpdate.getStatus() + ")");
                 }
             } else if (containerRunning) {
                 // Container está rodando - atualizar para RUNNING
-                if (!"RUNNING".equals(clusterToUpdate.getStatus())) {
+                // CRÍTICO: Não atualizar de STOPPED para RUNNING automaticamente
+                // Se o cluster foi parado intencionalmente pelo usuário (STOPPED), 
+                // só deve voltar para RUNNING quando o usuário explicitamente iniciar
+                // Isso evita que containers reiniciados automaticamente mudem o status
+                if ("STOPPED".equals(clusterToUpdate.getStatus())) {
+                    // Container está rodando mas status é STOPPED - não atualizar automaticamente
+                    // O usuário deve iniciar explicitamente para mudar de STOPPED para RUNNING
+                    System.out.println("⏸️ Container do cluster " + cluster.getId() + " está rodando, mas status é STOPPED (parado intencionalmente) - mantendo STOPPED");
+                } else if (!"RUNNING".equals(clusterToUpdate.getStatus())) {
+                    // Só atualiza se não estiver STOPPED (pode estar ERROR, DELETED, etc)
                     clusterToUpdate.setStatus("RUNNING");
                     statusChanged = true;
-                    System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para RUNNING");
+                    System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para RUNNING (status anterior: " + clusterToUpdate.getStatus() + ")");
                     
                     // Atualizar containerId se necessário (pode ter mudado após restart)
                     String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
@@ -1345,6 +1411,22 @@ public class ClusterHealthService implements IClusterHealthService {
                     if (actualContainerId != null && !actualContainerId.isEmpty() && 
                         !actualContainerId.equals(clusterToUpdate.getContainerId())) {
                         clusterToUpdate.setContainerId(actualContainerId);
+                        System.out.println("🔄 ContainerId do cluster " + cluster.getId() + " atualizado: " + actualContainerId);
+                    }
+                } else if ("RUNNING".equals(clusterToUpdate.getStatus())) {
+                    // Já está RUNNING, apenas atualizar containerId se necessário
+                    String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                        ? cluster.getContainerId() 
+                        : cluster.getSanitizedContainerName();
+                    
+                    if (containerIdentifier != null && !containerIdentifier.isEmpty()) {
+                        dockerService.clearContainerCache(containerIdentifier);
+                    }
+                    String actualContainerId = dockerService.getContainerId(cluster.getSanitizedContainerName());
+                    if (actualContainerId != null && !actualContainerId.isEmpty() && 
+                        !actualContainerId.equals(clusterToUpdate.getContainerId())) {
+                        clusterToUpdate.setContainerId(actualContainerId);
+                        clusterRepository.save(clusterToUpdate);
                         System.out.println("🔄 ContainerId do cluster " + cluster.getId() + " atualizado: " + actualContainerId);
                     }
                 }

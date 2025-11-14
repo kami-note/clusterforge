@@ -108,16 +108,18 @@ class ClusterService {
 
   /**
    * Inicia um cluster
+   * Usa timeout maior (60s) pois operações de start podem demorar
    */
   async startCluster(clusterId: number): Promise<CreateClusterResponse> {
-    return httpClient.post<CreateClusterResponse>(`/clusters/${clusterId}/start`);
+    return httpClient.post<CreateClusterResponse>(`/clusters/${clusterId}/start`, undefined, 60000);
   }
 
   /**
    * Para um cluster
+   * Usa timeout maior (60s) pois operações de stop podem demorar
    */
   async stopCluster(clusterId: number): Promise<CreateClusterResponse> {
-    return httpClient.post<CreateClusterResponse>(`/clusters/${clusterId}/stop`);
+    return httpClient.post<CreateClusterResponse>(`/clusters/${clusterId}/stop`, undefined, 60000);
   }
 
   /**

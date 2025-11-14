@@ -279,7 +279,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         }
       } catch (error) {
         console.error('Error fetching templates:', error);
-        toast.error('Erro ao carregar templates do servidor');
+        toast.error('Não foi possível carregar os tipos de serviço. Tente atualizar a página.');
         
         // Fallback para template padrão em caso de erro
         setServiceTemplates([{
@@ -319,12 +319,12 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
   const validateForm = () => {
     if (!clusterName.trim()) {
-      toast.error('Por favor, preencha o nome do cluster');
+      toast.error('Por favor, digite um nome para o cluster');
       return false;
     }
     
     if (!selectedService) {
-      toast.error('Por favor, selecione um tipo de serviço');
+      toast.error('Por favor, escolha um tipo de serviço');
       return false;
     }
     
@@ -381,7 +381,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       
       // Sucesso
       if (response.clusterId) {
-        toast.success(response.message || 'Cluster criado com sucesso!');
+        toast.success('Cluster criado com sucesso!');
         
         // Se admin criou e retornou credenciais, mostra
         if (response.ownerCredentials) {
@@ -419,7 +419,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       console.error('Error creating cluster:', error);
       
       // Tenta extrair mensagem de erro de forma mais robusta
-      let errorMessage = 'Erro ao criar cluster. Tente novamente.';
+      let errorMessage = 'Não foi possível criar o cluster. Tente novamente.';
       
       if (error instanceof Error) {
         errorMessage = error.message;

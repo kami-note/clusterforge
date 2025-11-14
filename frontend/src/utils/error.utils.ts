@@ -37,27 +37,42 @@ export function isApiError(error: unknown): error is ApiError {
 
 /**
  * Obtém mensagem de erro amigável baseada no status HTTP
+ * Mensagens simplificadas para usuários leigos
  */
 export function getHttpErrorMessage(status: number): string {
   const messages: Record<number, string> = {
-    400: 'Requisição inválida. Verifique os dados enviados.',
-    401: 'Não autenticado. Faça login novamente.',
-    403: 'Acesso negado. Você não tem permissão para esta ação.',
-    404: 'Recurso não encontrado.',
-    409: 'Conflito. O recurso já existe ou está em uso.',
-    500: 'Erro interno do servidor. Tente novamente mais tarde.',
-    503: 'Serviço indisponível. Tente novamente mais tarde.',
+    0: 'Sem conexão com a internet. Verifique se você está online e tente novamente.',
+    400: 'Os dados informados estão incorretos. Verifique e tente novamente.',
+    401: 'Você precisa fazer login novamente. Por favor, entre com sua senha.',
+    403: 'Você não tem permissão para fazer isso. Entre em contato com o administrador.',
+    404: 'Não encontramos o que você está procurando. Tente atualizar a página.',
+    408: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou.',
+    409: 'Já existe algo com esse nome. Escolha outro nome e tente novamente.',
+    500: 'Ocorreu um problema no servidor. Aguarde alguns minutos e tente novamente.',
+    503: 'O serviço está temporariamente indisponível. Tente novamente em alguns minutos.',
   };
   
-  return messages[status] || 'Erro ao processar requisição. Tente novamente.';
+  return messages[status] || 'Algo deu errado. Tente novamente em alguns instantes.';
 }
 
 /**
- * Trata erro e retorna mensagem amigável
+ * Trata erro e retorna mensagem amigável para usuários leigos
  */
 export function handleError(error: unknown): string {
+  // Verificar se é erro de timeout ou rede primeiro
+  if (error && typeof error === 'object') {
+    const err = error as any;
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.';
+    }
+    if (err.name === 'NetworkError' || (err.name === 'TypeError' && err.message?.includes('fetch'))) {
+      return 'Sem conexão com a internet. Verifique se você está online e tente novamente.';
+    }
+  }
+  
   if (isApiError(error)) {
-    if (error.message) {
+    // Se a mensagem já for amigável, usar ela
+    if (error.message && !error.message.includes('Error') && !error.message.includes('Exception')) {
       return error.message;
     }
     if (error.status) {
@@ -65,7 +80,13 @@ export function handleError(error: unknown): string {
     }
   }
   
-  return getErrorMessage(error);
+  // Mensagem genérica amigável
+  const genericMessage = getErrorMessage(error);
+  if (genericMessage.includes('Error') || genericMessage.includes('Exception') || genericMessage.includes('timeout')) {
+    return 'Algo deu errado. Tente novamente em alguns instantes. Se o problema continuar, entre em contato com o suporte.';
+  }
+  
+  return genericMessage;
 }
 
 

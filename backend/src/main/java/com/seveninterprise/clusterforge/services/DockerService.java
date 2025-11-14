@@ -84,13 +84,69 @@ public class DockerService implements IDockerService {
         }
         
         String dockerCmd = getDockerCommand();
+        
+        // CRÍTICO: Desabilita a política de restart ANTES de parar
+        // Isso garante que o container não será reiniciado automaticamente
+        // mesmo se tiver --restart=always ou --restart=unless-stopped
+        try {
+            System.out.println("🔧 Desabilitando política de restart para container: " + containerId);
+            String updateCommand = dockerCmd + " update --restart=no " + containerId;
+            String updateResult = runCommand(updateCommand);
+            if (!updateResult.contains("Process exited with code: 0")) {
+                System.out.println("⚠️ Aviso: Não foi possível desabilitar restart policy, mas continuando com stop: " + updateResult);
+            }
+        } catch (Exception e) {
+            System.out.println("⚠️ Aviso: Erro ao desabilitar restart policy (continuando): " + e.getMessage());
+        }
+        
+        // Para o container com timeout de 30 segundos
         // Usa ID do container ao invés de nome
-        String command = dockerCmd + " stop " + containerId;
+        // Usa -t 30 para dar tempo suficiente para o container parar graciosamente
+        // Se não parar em 30s, força com SIGKILL
+        String command = dockerCmd + " stop -t 30 " + containerId;
         String result = runCommand(command);
         
+        // Aguarda um pouco para garantir que o Docker processou o stop
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        // Verifica se o container realmente parou
+        String finalStatus = inspectContainer(containerId, "{{.State.Status}}");
+        boolean isStopped = false;
+        if (finalStatus != null) {
+            String cleanStatus = finalStatus.replace("Process exited with code: 0", "").trim().toLowerCase();
+            isStopped = cleanStatus.contains("exited") || cleanStatus.contains("stopped");
+        }
+        
+        // Se ainda não parou após o timeout, força com kill
+        if (!isStopped) {
+            System.out.println("⚠️ Container não parou com stop normal, forçando com kill...");
+            String killCommand = dockerCmd + " kill " + containerId;
+            String killResult = runCommand(killCommand);
+            System.out.println("🔪 Kill result: " + killResult);
+            
+            // Aguarda novamente
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            
+            // Verifica novamente
+            finalStatus = inspectContainer(containerId, "{{.State.Status}}");
+            if (finalStatus != null) {
+                String cleanStatus = finalStatus.replace("Process exited with code: 0", "").trim().toLowerCase();
+                isStopped = cleanStatus.contains("exited") || cleanStatus.contains("stopped");
+            }
+        }
+        
         // Verifica se o comando foi bem-sucedido ou se o container já estava parado
-        if (result.contains("Process exited with code: 0")) {
+        if (result.contains("Process exited with code: 0") || isStopped) {
             // Sucesso
+            System.out.println("✅ Container " + containerId + " parado com sucesso (status: " + (finalStatus != null ? finalStatus.trim() : "unknown") + ")");
             return;
         } else if (result.contains("is not running") || result.contains("already stopped")) {
             // Container já estava parado - isso é considerado sucesso
@@ -98,7 +154,39 @@ public class DockerService implements IDockerService {
             return;
         } else {
             // Erro real ao parar
-            throw new RuntimeException("Failed to stop container (ID: " + containerId + "): " + result);
+            throw new RuntimeException("Failed to stop container (ID: " + containerId + "): " + result + " (final status: " + finalStatus + ")");
+        }
+    }
+    
+    /**
+     * Desabilita a política de restart de um container
+     * Isso garante que o container não será reiniciado automaticamente
+     * mesmo se tiver --restart=always ou --restart=unless-stopped
+     * 
+     * @param containerNameOrId Nome ou ID do container
+     */
+    public void disableRestartPolicy(String containerNameOrId) {
+        // Encontra o ID do container (mais preciso que nome)
+        String containerId = findContainerIdByNameOrId(containerNameOrId);
+        
+        if (containerId == null) {
+            System.out.println("⚠️ Container contendo '" + containerNameOrId + "' não existe. Pulando desabilitação de restart policy.");
+            return;
+        }
+        
+        String dockerCmd = getDockerCommand();
+        
+        try {
+            System.out.println("🔧 Desabilitando política de restart para container: " + containerId);
+            String updateCommand = dockerCmd + " update --restart=no " + containerId;
+            String updateResult = runCommand(updateCommand);
+            if (updateResult.contains("Process exited with code: 0")) {
+                System.out.println("✅ Política de restart desabilitada com sucesso para container: " + containerId);
+            } else {
+                System.out.println("⚠️ Aviso: Não foi possível desabilitar restart policy: " + updateResult);
+            }
+        } catch (Exception e) {
+            System.out.println("⚠️ Aviso: Erro ao desabilitar restart policy: " + e.getMessage());
         }
     }
 

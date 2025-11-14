@@ -51,39 +51,77 @@ export class HttpClient {
       ...options.headers,
     });
 
-    let response = await fetch(fullUrl, {
-      ...options,
-      headers,
-      signal: AbortSignal.timeout(config.api.timeout),
-    });
+    // Usar timeout customizado se fornecido, senão usar o padrão
+    const timeout = (options as any).timeout || config.api.timeout;
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), timeout);
 
-    // Se 401, tenta refresh automático uma vez
-    if (response.status === 401) {
-      const refreshed = await this.tryRefreshToken();
-      if (refreshed) {
-        const retryHeaders = new Headers({
-          'Content-Type': 'application/json',
-          ...(this.getToken() && { Authorization: `Bearer ${this.getToken()}` }),
-          ...options.headers,
-        });
-        response = await fetch(fullUrl, {
-          ...options,
-          headers: retryHeaders,
-          signal: AbortSignal.timeout(config.api.timeout),
-        });
+    try {
+      let response = await fetch(fullUrl, {
+        ...options,
+        headers,
+        signal: options.signal || abortController.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      // Se 401, tenta refresh automático uma vez
+      if (response.status === 401) {
+        const refreshed = await this.tryRefreshToken();
+        if (refreshed) {
+          const retryHeaders = new Headers({
+            'Content-Type': 'application/json',
+            ...(this.getToken() && { Authorization: `Bearer ${this.getToken()}` }),
+            ...options.headers,
+          });
+          const retryAbortController = new AbortController();
+          const retryTimeoutId = setTimeout(() => retryAbortController.abort(), timeout);
+          try {
+            response = await fetch(fullUrl, {
+              ...options,
+              headers: retryHeaders,
+              signal: options.signal || retryAbortController.signal,
+            });
+            clearTimeout(retryTimeoutId);
+          } catch (retryError) {
+            clearTimeout(retryTimeoutId);
+            throw retryError;
+          }
+        }
       }
-    }
 
-    if (!response.ok) {
-      await this.handleError(response);
-    }
+      if (!response.ok) {
+        await this.handleError(response);
+      }
 
-    // Se a resposta não tem conteúdo, retorna void
-    if (response.status === 204 || response.headers.get('content-length') === '0') {
-      return undefined as T;
-    }
+      // Se a resposta não tem conteúdo, retorna void
+      if (response.status === 204 || response.headers.get('content-length') === '0') {
+        return undefined as T;
+      }
 
-    return response.json();
+      return response.json();
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      
+      // Tratar erros de timeout e rede com mensagens amigáveis
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+        throw {
+          message: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.',
+          status: 408,
+          name: 'TimeoutError',
+        } as ApiError;
+      }
+      
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw {
+          message: 'Sem conexão com a internet. Verifique se você está online e tente novamente.',
+          status: 0,
+          name: 'NetworkError',
+        } as ApiError;
+      }
+      
+      throw error;
+    }
   }
 
   /**
@@ -96,11 +134,12 @@ export class HttpClient {
   /**
    * POST request
    */
-  async post<T>(endpoint: string, body?: unknown): Promise<T> {
+  async post<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
-    });
+      timeout,
+    } as RequestInit & { timeout?: number });
   }
 
   /**

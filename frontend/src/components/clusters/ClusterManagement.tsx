@@ -210,7 +210,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     if (wsError && !wsErrorShown && !connected) {
       setWsErrorShown(true);
       const timeout = setTimeout(() => {
-        toast.warning('Conexão WebSocket perdida. Métricas podem estar desatualizadas.', {
+        toast.warning('Conexão perdida. As informações podem estar desatualizadas.', {
           duration: 5000,
         });
       }, 1000);
@@ -551,7 +551,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
               next.delete(clusterId);
               return next;
             });
-            toast.success('Cluster iniciado e verificado com sucesso', { id: `action-${clusterId}` });
+            toast.success('Cluster iniciado com sucesso!', { id: `action-${clusterId}` });
           } else if (clusterDetails.status === 'ERROR') {
             // Parsear mensagem de erro da resposta
             const errorDetails = parseDockerError(startResponse?.message || 'Cluster entrou em estado de erro');
@@ -580,13 +580,13 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           if (finalCheck.status === 'RUNNING') {
             // Recarregar da API para ter status atualizado
             await updateCluster(clusterId, { status: 'running' });
-            toast.success('Cluster iniciado com sucesso', { id: `action-${clusterId}` });
+            toast.success('Cluster iniciado com sucesso!', { id: `action-${clusterId}` });
             return;
           }
         } catch {}
         
         // Se ainda não está rodando após todas tentativas
-        toast.warning('Cluster iniciado, mas não foi possível confirmar o status. Verifique manualmente.', { 
+        toast.warning('Cluster iniciado, mas não conseguimos confirmar. Aguarde alguns segundos e verifique se está funcionando.', { 
           id: `action-${clusterId}`,
           duration: 8000
         });
@@ -606,7 +606,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         });
         
         // Mostrar toast com link para ver detalhes
-        toast.error('Erro ao iniciar cluster. Clique para ver detalhes.', { 
+        toast.error('Não foi possível iniciar o cluster. Tente novamente em alguns instantes.', { 
           id: `action-${clusterId}`,
           duration: 10000,
           action: {
@@ -670,7 +670,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             isStopped = true;
             // Recarregar da API para ter status atualizado
             await updateCluster(clusterId, { status: 'stopped' });
-            toast.success('Cluster parado e verificado com sucesso', { id: `action-${clusterId}` });
+            toast.success('Cluster parado com sucesso!', { id: `action-${clusterId}` });
           } else if (clusterDetails.status === 'ERROR') {
             throw new Error('Cluster entrou em estado de erro');
           }
@@ -686,7 +686,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       if (!isStopped) {
         // Timeout - mesmo assim atualiza o status local
         // updateCluster já recarrega da API automaticamente
-        toast.warning('Cluster parado, mas não foi possível confirmar o status. Verifique manualmente.', { 
+        toast.warning('Cluster parado, mas não conseguimos confirmar. Aguarde alguns segundos e verifique se parou.', { 
           id: `action-${clusterId}`,
           duration: 8000
         });
@@ -695,7 +695,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       console.error('Erro ao parar cluster:', error);
-      toast.error('Erro ao parar cluster: ' + errorMessage, { id: `action-${clusterId}` });
+      toast.error('Não foi possível parar o cluster. Tente novamente em alguns instantes.', { id: `action-${clusterId}` });
       throw error;
     } finally {
       // Remover do estado de processamento
@@ -732,10 +732,10 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             // Depois iniciar o cluster com verificação (já marca como processando internamente)
             await startClusterWithVerification(clusterId);
             
-            toast.success('Cluster reiniciado com sucesso', { id: `action-${clusterId}` });
+            toast.success('Cluster reiniciado com sucesso!', { id: `action-${clusterId}` });
           } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-            toast.error('Erro ao reiniciar cluster: ' + errorMessage, { id: `action-${clusterId}` });
+            toast.error('Não foi possível reiniciar o cluster. Tente novamente em alguns instantes.', { id: `action-${clusterId}` });
             // Garantir que remove do processamento se houver erro
             setProcessingClusters(prev => {
               const next = new Set(prev);
