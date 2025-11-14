@@ -113,10 +113,39 @@ export class HttpClient {
       }
       
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        // Verificar se é backend offline ou erro de internet real
+        // Quando o fetch falha completamente (sem resposta HTTP), geralmente é:
+        // 1. Backend offline (ERR_CONNECTION_REFUSED, Failed to fetch em localhost)
+        // 2. Sem internet (ERR_NAME_NOT_RESOLVED, ERR_INTERNET_DISCONNECTED)
+        const errorMessage = error.message.toLowerCase();
+        const isLocalhost = this.baseUrl.includes('localhost') || 
+                           this.baseUrl.includes('127.0.0.1') ||
+                           this.baseUrl.includes('0.0.0.0');
+        
+        // Se for localhost e o fetch falhou, é muito provável que seja backend offline
+        // (não faz sentido ter internet mas não conseguir conectar ao localhost)
+        const isBackendOffline = 
+          isLocalhost || // Se for localhost, assume backend offline
+          errorMessage.includes('connection refused') ||
+          errorMessage.includes('err_connection_refused') ||
+          errorMessage.includes('failed to fetch');
+        
+        const isInternetError = 
+          !isLocalhost && ( // Só considerar erro de internet se não for localhost
+            errorMessage.includes('err_name_not_resolved') ||
+            errorMessage.includes('err_internet_disconnected') ||
+            errorMessage.includes('networkerror when attempting to fetch resource')
+          );
+        
+        // Priorizar detecção de backend offline
+        const finalIsBackendOffline = isBackendOffline && !isInternetError;
+        
         throw {
-          message: 'Sem conexão com a internet. Verifique se você está online e tente novamente.',
+          message: finalIsBackendOffline
+            ? 'O servidor está temporariamente indisponível. Verifique se o backend está em execução.'
+            : 'Sem conexão com a internet. Verifique se você está online e tente novamente.',
           status: 0,
-          name: 'NetworkError',
+          name: finalIsBackendOffline ? 'BackendOffline' : 'NetworkError',
         } as ApiError;
       }
       

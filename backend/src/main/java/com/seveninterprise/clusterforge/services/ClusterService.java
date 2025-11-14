@@ -1068,6 +1068,15 @@ public class ClusterService implements IClusterService {
                 
                 // Verificar se o container realmente parou (com menos tentativas)
                 if (verifyContainerStopped(containerIdentifier)) {
+                    // Desabilitar política de restart após parar com docker stop
+                    // Isso garante que o container não será reiniciado automaticamente
+                    try {
+                        System.out.println("🔧 Desabilitando política de restart após docker stop...");
+                        dockerService.disableRestartPolicy(containerIdentifier);
+                    } catch (Exception e) {
+                        System.out.println("⚠️ Aviso: Não foi possível desabilitar restart policy: " + e.getMessage());
+                    }
+                    
                     // Atualizar status para STOPPED e salvar imediatamente
                     // Buscar cluster atualizado do banco para evitar problemas de concorrência
                     Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(cluster);
@@ -1086,6 +1095,14 @@ public class ClusterService implements IClusterService {
             // Pode ser que o container já tenha parado mas a verificação anterior falhou
             Thread.sleep(500); // Reduzido de 1000 para 500ms
             if (verifyContainerStopped(containerIdentifier)) {
+                // Desabilitar política de restart na verificação final também
+                try {
+                    System.out.println("🔧 Desabilitando política de restart (verificação final)...");
+                    dockerService.disableRestartPolicy(containerIdentifier);
+                } catch (Exception e) {
+                    System.out.println("⚠️ Aviso: Não foi possível desabilitar restart policy: " + e.getMessage());
+                }
+                
                 // Atualizar status para STOPPED e salvar imediatamente
                 // Buscar cluster atualizado do banco para evitar problemas de concorrência
                 Cluster clusterToUpdate = clusterRepository.findById(cluster.getId()).orElse(cluster);

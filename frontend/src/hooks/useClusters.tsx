@@ -231,6 +231,12 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       const message = handleError(error);
       console.error('Error updating cluster:', message, error);
       
+      // Se for backend offline, não atualizar status localmente
+      // O usuário precisa saber que o servidor está offline
+      if (error.name === 'BackendOffline' || (error.status === 0 && error.message?.includes('servidor'))) {
+        throw new Error('O servidor está temporariamente indisponível. Verifique se o backend está em execução.');
+      }
+      
       // Se for timeout ou erro de rede, não quebrar completamente
       // A operação pode ter sido iniciada no backend mesmo que a resposta não tenha chegado
       if (error.name === 'TimeoutError' || error.name === 'NetworkError' || error.status === 408) {

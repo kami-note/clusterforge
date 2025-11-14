@@ -159,7 +159,16 @@ public class ClusterHealthService implements IClusterHealthService {
                         }
                     } else if ("running".equalsIgnoreCase(containerStatus)) {
                         // Container está rodando - atualizar para RUNNING
-                        if (!"RUNNING".equals(clusterToUpdate.getStatus())) {
+                        // CRÍTICO: Não atualizar de STOPPED para RUNNING automaticamente
+                        // Se o cluster foi parado intencionalmente pelo usuário (STOPPED), 
+                        // só deve voltar para RUNNING quando o usuário explicitamente iniciar
+                        // Isso evita que containers reiniciados automaticamente mudem o status
+                        if ("STOPPED".equals(clusterToUpdate.getStatus())) {
+                            // Container está rodando mas status é STOPPED - não atualizar automaticamente
+                            // O usuário deve iniciar explicitamente para mudar de STOPPED para RUNNING
+                            System.out.println("⏸️ Container do cluster " + cluster.getId() + " está rodando, mas status é STOPPED (parado intencionalmente) - mantendo STOPPED");
+                        } else if (!"RUNNING".equals(clusterToUpdate.getStatus())) {
+                            // Só atualiza se não estiver STOPPED (pode estar ERROR, DELETED, etc)
                             clusterToUpdate.setStatus("RUNNING");
                             statusChanged = true;
                             System.out.println("🔄 Status do cluster " + cluster.getId() + " atualizado para RUNNING (container está rodando)");
@@ -173,6 +182,19 @@ public class ClusterHealthService implements IClusterHealthService {
                             String actualContainerId = dockerService.getContainerId(containerIdentifier);
                             if (actualContainerId != null && !actualContainerId.equals(clusterToUpdate.getContainerId())) {
                                 clusterToUpdate.setContainerId(actualContainerId);
+                                System.out.println("🔄 ContainerId do cluster " + cluster.getId() + " atualizado: " + actualContainerId);
+                            }
+                        } else if ("RUNNING".equals(clusterToUpdate.getStatus())) {
+                            // Já está RUNNING, apenas atualizar containerId se necessário
+                            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
+                                ? cluster.getContainerId() 
+                                : cluster.getSanitizedContainerName();
+                            
+                            String actualContainerId = dockerService.getContainerId(containerIdentifier);
+                            if (actualContainerId != null && !actualContainerId.isEmpty() && 
+                                !actualContainerId.equals(clusterToUpdate.getContainerId())) {
+                                clusterToUpdate.setContainerId(actualContainerId);
+                                clusterRepository.save(clusterToUpdate);
                                 System.out.println("🔄 ContainerId do cluster " + cluster.getId() + " atualizado: " + actualContainerId);
                             }
                         }

@@ -65,6 +65,10 @@ export function handleError(error: unknown): string {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       return 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.';
     }
+    // Distinguir entre backend offline e erro de internet
+    if (err.name === 'BackendOffline') {
+      return 'O servidor está temporariamente indisponível. Verifique se o backend está em execução.';
+    }
     if (err.name === 'NetworkError' || (err.name === 'TypeError' && err.message?.includes('fetch'))) {
       return 'Sem conexão com a internet. Verifique se você está online e tente novamente.';
     }
