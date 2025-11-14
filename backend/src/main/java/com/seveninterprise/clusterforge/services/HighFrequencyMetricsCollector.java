@@ -182,14 +182,20 @@ public class HighFrequencyMetricsCollector {
             ClusterHealthMetrics metrics = clusterHealthService.collectResourceMetrics(cluster, true, true);
             
             if (metrics != null) {
+                // Verificar novamente se cluster ainda não está sendo deletado (double-check)
+                if (clustersBeingDeleted.contains(cluster.getId())) {
+                    return; // Não adicionar ao buffer se está sendo deletado
+                }
+                
                 // Enviar diretamente via WebSocket (sem salvar no banco imediatamente)
                 metricsWebSocketService.sendMetricsDirectly(cluster, metrics);
                 
                 // Armazenar no POOL de métricas para salvar no banco a cada 10 segundos
                 // Verificar limite do buffer para evitar memory leaks
-                if (metricsBuffer.size() < MAX_BUFFER_SIZE) {
-                metricsBuffer.put(cluster.getId(), metrics);
-                } else {
+                // Verificar novamente antes de adicionar ao buffer (triple-check)
+                if (!clustersBeingDeleted.contains(cluster.getId()) && metricsBuffer.size() < MAX_BUFFER_SIZE) {
+                    metricsBuffer.put(cluster.getId(), metrics);
+                } else if (metricsBuffer.size() >= MAX_BUFFER_SIZE) {
                     log.warn("⚠️ [METRICS POOL] Buffer de métricas atingiu limite máximo ({}). Ignorando métrica do cluster {}", 
                         MAX_BUFFER_SIZE, cluster.getId());
                 }
@@ -309,7 +315,24 @@ public class HighFrequencyMetricsCollector {
                         savedMetrics, totalMetrics, skippedMetrics, failedMetrics);
                 } catch (DataIntegrityViolationException e) {
                     // Erro de constraint - pode ser foreign key ou unique
-                    log.error("❌ [METRICS POOL] Erro de integridade ao salvar métricas: {}", e.getMessage());
+                    String errorMsg = e.getMessage() != null ? e.getMessage() : "";
+                    log.error("❌ [METRICS POOL] Erro de integridade ao salvar métricas: {}", errorMsg);
+                    
+                    // Se for erro de foreign key, remover clusters deletados do buffer imediatamente
+                    if (errorMsg.contains("foreign key") && errorMsg.contains("cluster_id")) {
+                        log.warn("⚠️ [METRICS POOL] Erro de foreign key detectado - removendo clusters deletados do buffer");
+                        // Tentar identificar qual cluster causou o erro e removê-lo
+                        for (ClusterHealthMetrics metric : validatedMetrics) {
+                            Long clusterId = metric.getCluster().getId();
+                            if (!isValidCluster(clusterId)) {
+                                metricsBuffer.remove(clusterId);
+                                lastSavedTime.remove(clusterId);
+                                validClusterIds.remove(clusterId);
+                                clustersBeingDeleted.add(clusterId); // Marcar como deletando para evitar novas coletas
+                            }
+                        }
+                    }
+                    
                     // Tentar salvar individualmente para identificar qual falhou
                     saveMetricsIndividually(validatedMetrics, now);
                 } catch (Exception e) {
@@ -342,10 +365,23 @@ public class HighFrequencyMetricsCollector {
         for (ClusterHealthMetrics metric : metrics) {
             Long clusterId = metric.getCluster().getId();
             try {
-                // Verificar novamente se cluster ainda existe antes de salvar
+                // 1. Verificar se cluster está sendo deletado (prioridade máxima)
+                if (clustersBeingDeleted.contains(clusterId)) {
+                    failed++;
+                    metricsBuffer.remove(clusterId);
+                    lastSavedTime.remove(clusterId);
+                    log.debug("⏭️ [METRICS POOL] Pulando métrica do cluster {} (sendo deletado) - save individual", clusterId);
+                    continue;
+                }
+                
+                // 2. Verificar novamente se cluster ainda existe antes de salvar
                 if (!isValidCluster(clusterId)) {
                     failed++;
+                    metricsBuffer.remove(clusterId);
                     lastSavedTime.remove(clusterId);
+                    // Remover do cache de IDs válidos também
+                    validClusterIds.remove(clusterId);
+                    log.debug("⏭️ [METRICS POOL] Pulando métrica do cluster {} (não existe mais) - save individual", clusterId);
                     continue;
                 }
                 
@@ -354,10 +390,15 @@ public class HighFrequencyMetricsCollector {
                 // Atualizar timestamp de última salvamento
                 lastSavedTime.put(clusterId, now);
             } catch (DataIntegrityViolationException e) {
-                // Cluster foi deletado ou constraint violada - adicionar ao buffer de falhas
+                // Cluster foi deletado ou constraint violada - remover imediatamente
                 failed++;
+                metricsBuffer.remove(clusterId);
                 lastSavedTime.remove(clusterId);
-                if (failedMetricsBuffer.size() < MAX_FAILED_BUFFER_SIZE) {
+                validClusterIds.remove(clusterId);
+                // Não adicionar ao buffer de falhas se foi erro de foreign key (cluster deletado)
+                if (e.getMessage() != null && e.getMessage().contains("foreign key")) {
+                    log.debug("⏭️ [METRICS POOL] Cluster {} foi deletado - removendo métrica do buffer", clusterId);
+                } else if (failedMetricsBuffer.size() < MAX_FAILED_BUFFER_SIZE) {
                     failedMetricsBuffer.put(clusterId, metric);
                 }
                 log.debug("⚠️ [METRICS POOL] Falha ao salvar métrica do cluster {}: {}", 
@@ -614,6 +655,13 @@ public class HighFrequencyMetricsCollector {
         metricsBuffer.remove(clusterId);
         // Remover do cache de última coleta
         lastCollectionTime.remove(clusterId);
+        // Remover do cache de IDs válidos imediatamente
+        validClusterIds.remove(clusterId);
+        // Remover do buffer de métricas que falharam
+        failedMetricsBuffer.remove(clusterId);
+        // Remover timestamp de última salvamento
+        lastSavedTime.remove(clusterId);
+        log.debug("🚫 [METRICS POOL] Cluster {} marcado como deletando - removido de todos os caches", clusterId);
     }
     
     /**

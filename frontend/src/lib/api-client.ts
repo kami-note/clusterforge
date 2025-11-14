@@ -103,8 +103,15 @@ export class HttpClient {
     } catch (error: any) {
       clearTimeout(timeoutId);
       
+      // Verificar se o erro foi causado por timeout (AbortController)
+      // Quando o AbortController cancela, pode gerar AbortError ou TypeError
+      const isAborted = abortController.signal.aborted;
+      const isTimeoutError = error.name === 'AbortError' || 
+                             error.name === 'TimeoutError' ||
+                             (isAborted && error.message?.includes('aborted'));
+      
       // Tratar erros de timeout e rede com mensagens amigáveis
-      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+      if (isTimeoutError) {
         throw {
           message: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.',
           status: 408,
@@ -117,10 +124,20 @@ export class HttpClient {
         // Quando o fetch falha completamente (sem resposta HTTP), geralmente é:
         // 1. Backend offline (ERR_CONNECTION_REFUSED, Failed to fetch em localhost)
         // 2. Sem internet (ERR_NAME_NOT_RESOLVED, ERR_INTERNET_DISCONNECTED)
+        // IMPORTANTE: Se o signal foi abortado, não é backend offline, é timeout
         const errorMessage = error.message.toLowerCase();
         const isLocalhost = this.baseUrl.includes('localhost') || 
                            this.baseUrl.includes('127.0.0.1') ||
                            this.baseUrl.includes('0.0.0.0');
+        
+        // Se o signal foi abortado, é timeout, não backend offline
+        if (isAborted) {
+          throw {
+            message: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.',
+            status: 408,
+            name: 'TimeoutError',
+          } as ApiError;
+        }
         
         // Se for localhost e o fetch falhou, é muito provável que seja backend offline
         // (não faz sentido ter internet mas não conseguir conectar ao localhost)
@@ -174,28 +191,33 @@ export class HttpClient {
   /**
    * PATCH request
    */
-  async patch<T>(endpoint: string, body?: unknown): Promise<T> {
+  async patch<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PATCH',
       body: body ? JSON.stringify(body) : undefined,
-    });
+      timeout,
+    } as RequestInit & { timeout?: number });
   }
 
   /**
    * PUT request
    */
-  async put<T>(endpoint: string, body?: unknown): Promise<T> {
+  async put<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: body ? JSON.stringify(body) : undefined,
-    });
+      timeout,
+    } as RequestInit & { timeout?: number });
   }
 
   /**
    * DELETE request
    */
-  async delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: 'DELETE' });
+  async delete<T>(endpoint: string, timeout?: number): Promise<T> {
+    return this.request<T>(endpoint, { 
+      method: 'DELETE',
+      timeout,
+    } as RequestInit & { timeout?: number });
   }
 
   /**

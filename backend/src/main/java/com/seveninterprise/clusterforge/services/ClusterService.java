@@ -705,6 +705,17 @@ public class ClusterService implements IClusterService {
             .orElseThrow(() -> new ClusterException("Cluster não encontrado com ID: " + clusterId));
     }
     
+    /**
+     * Deleta um cluster e todos os seus recursos associados.
+     * 
+     * IMPORTANTE SOBRE TRANSACTION:
+     * Este método usa @Transactional para garantir atomicidade das operações no banco,
+     * mas também executa operações externas (Docker, sistema de arquivos) que NÃO são
+     * revertidas em caso de rollback. Se a deleção do banco falhar após limpar recursos
+     * físicos, o cluster ficará em estado inconsistente (recursos deletados, mas registro
+     * ainda existe). Nesse caso, a marcação de deleção será mantida para evitar coleta
+     * de métricas até que a situação seja resolvida manualmente.
+     */
     @Override
     @Transactional
     public void deleteCluster(Long clusterId, User authenticatedUser, boolean isAdmin) {
@@ -735,6 +746,7 @@ public class ClusterService implements IClusterService {
         System.out.println("🚫 [DELETE CLUSTER] Marcando cluster " + clusterId + " como sendo deletado (bloqueando coleta de métricas)");
         highFrequencyMetricsCollector.markClusterAsDeleting(clusterId);
         
+        boolean deletionSuccessful = false;
         try {
             log.info("🧹 [DELETE CLUSTER] Iniciando limpeza de recursos para cluster {}", clusterId);
             System.out.println("🧹 [DELETE CLUSTER] Iniciando limpeza de recursos para cluster " + clusterId);
@@ -749,6 +761,7 @@ public class ClusterService implements IClusterService {
                 clusterRepository.delete(cluster);
                 log.info("✅ [DELETE CLUSTER] Cluster {} deletado com sucesso do banco de dados", clusterId);
                 System.out.println("✅ [DELETE CLUSTER] Cluster " + clusterId + " deletado com sucesso do banco de dados");
+                deletionSuccessful = true;
             } catch (DataIntegrityViolationException e) {
                 // Se ainda houver constraint de foreign key, tenta limpar novamente
                 String errorMsg = e.getMessage() != null ? e.getMessage() : "";
@@ -761,7 +774,8 @@ public class ClusterService implements IClusterService {
                     log.warn("🔄 [DELETE CLUSTER] Erro de foreign key detectado. Tentando limpar recursos novamente para cluster {}", clusterId);
                     System.err.println("🔄 [DELETE CLUSTER] Erro de foreign key ao deletar cluster " + clusterId + ". Tentando limpar recursos novamente...");
                     
-                    // Tenta limpar novamente
+                    // IMPORTANTE: Durante o retry, a marcação ainda está ativa, mas pode haver uma janela
+                    // pequena onde novas métricas são inseridas. O retry tenta limpar tudo novamente.
                     try {
                         log.info("🔄 [DELETE CLUSTER] Retry: Deletando health metrics para cluster {}", clusterId);
                         System.out.println("🔄 [DELETE CLUSTER] Retry: Deletando health metrics para cluster " + clusterId);
@@ -775,11 +789,19 @@ public class ClusterService implements IClusterService {
                         System.out.println("🔄 [DELETE CLUSTER] Retry: Deletando backups para cluster " + clusterId);
                         clusterBackupRepository.deleteByClusterId(clusterId);
                         
+                        // Aguardar um pouco para garantir que operações assíncronas sejam concluídas
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                        }
+                        
                         log.info("🔄 [DELETE CLUSTER] Retry: Tentando deletar cluster {} novamente", clusterId);
                         System.out.println("🔄 [DELETE CLUSTER] Retry: Tentando deletar cluster " + clusterId + " novamente");
                         clusterRepository.delete(cluster);
                         log.info("✅ [DELETE CLUSTER] Cluster {} deletado com sucesso após retry", clusterId);
                         System.out.println("✅ [DELETE CLUSTER] Cluster " + clusterId + " deletado com sucesso após retry");
+                        deletionSuccessful = true;
                     } catch (Exception retryException) {
                         log.error("❌ [DELETE CLUSTER] Falha no retry para cluster {}: {}", clusterId, retryException.getMessage(), retryException);
                         System.err.println("❌ [DELETE CLUSTER] Falha no retry para cluster " + clusterId + ": " + retryException.getMessage());
@@ -798,10 +820,16 @@ public class ClusterService implements IClusterService {
             e.printStackTrace();
             throw new ClusterException("Erro ao deletar cluster: " + e.getMessage());
         } finally {
-            // Sempre remover marcação, mesmo em caso de erro
-            log.info("🔓 [DELETE CLUSTER] Removendo marcação de deleção para cluster {}", clusterId);
-            System.out.println("🔓 [DELETE CLUSTER] Removendo marcação de deleção para cluster " + clusterId);
-            highFrequencyMetricsCollector.unmarkClusterAsDeleting(clusterId);
+            // CRÍTICO: Só remove marcação se deleção foi bem-sucedida
+            // Se falhou, mantém marcado para evitar coleta de métricas em cluster inconsistente
+            if (deletionSuccessful) {
+                log.info("🔓 [DELETE CLUSTER] Removendo marcação de deleção para cluster {} (deleção concluída)", clusterId);
+                System.out.println("🔓 [DELETE CLUSTER] Removendo marcação de deleção para cluster " + clusterId + " (deleção concluída)");
+                highFrequencyMetricsCollector.unmarkClusterAsDeleting(clusterId);
+            } else {
+                log.warn("⚠️ [DELETE CLUSTER] Mantendo marcação de deleção para cluster {} (deleção falhou - cluster pode estar inconsistente)", clusterId);
+                System.err.println("⚠️ [DELETE CLUSTER] Mantendo marcação de deleção para cluster " + clusterId + " (deleção falhou)");
+            }
         }
     }
     
@@ -890,31 +918,165 @@ public class ClusterService implements IClusterService {
         
         // Para e remove o container Docker
         try {
-            // Usa containerId se disponível, senão usa o nome sanitizado
-            String containerIdentifier = (cluster.getContainerId() != null && !cluster.getContainerId().isEmpty()) 
-                ? cluster.getContainerId() 
-                : cluster.getSanitizedContainerName();
+            // Limpa cache antes de tentar encontrar o container
+            String containerId = cluster.getContainerId();
+            String containerName = cluster.getSanitizedContainerName();
             
-            log.info("🐳 [CLEANUP] Removendo container Docker para cluster {}. ID/Nome: {}", clusterId, containerIdentifier);
-            System.out.println("🐳 [CLEANUP] Removendo container para cluster " + clusterId + ". ID/Nome: " + containerIdentifier);
-            dockerService.removeContainer(containerIdentifier);
-            // Cache já é limpo dentro do removeContainer, mas garantimos aqui também
-            dockerService.clearContainerCache(containerIdentifier);
-            log.info("✅ [CLEANUP] Container {} removido com sucesso para cluster {}", containerIdentifier, clusterId);
-            System.out.println("✅ [CLEANUP] Container " + containerIdentifier + " removido com sucesso.");
-        } catch (RuntimeException e) {
-            // Silenciosamente ignora se o container não existe
-            // O dockerService já imprime mensagem informativa neste caso
-            if (e.getMessage() != null && !e.getMessage().contains("não existe")) {
-                log.warn("⚠️ [CLEANUP] Falha ao remover container Docker para cluster {}: {}", clusterId, e.getMessage());
+            // Limpa cache para ambos os identificadores
+            if (containerId != null && !containerId.isEmpty()) {
+                dockerService.clearContainerCache(containerId);
+            }
+            if (containerName != null && !containerName.isEmpty()) {
+                dockerService.clearContainerCache(containerName);
+            }
+            
+            // Usa containerId se disponível, senão usa o nome sanitizado
+            String containerIdentifier = (containerId != null && !containerId.isEmpty()) 
+                ? containerId 
+                : containerName;
+            
+            // PRIMEIRO: Para o container explicitamente antes de remover
+            try {
+                log.info("🛑 [CLEANUP] Parando container Docker para cluster {}. ID/Nome: {}", clusterId, containerIdentifier);
+                System.out.println("🛑 [CLEANUP] Parando container para cluster " + clusterId + ". ID/Nome: " + containerIdentifier);
+                dockerService.stopContainer(containerIdentifier);
+                log.info("✅ [CLEANUP] Container {} parado com sucesso para cluster {}", containerIdentifier, clusterId);
+                System.out.println("✅ [CLEANUP] Container " + containerIdentifier + " parado com sucesso.");
+            } catch (RuntimeException e) {
+                // Se o container não existe ou já está parado, continua para remoção
+                if (e.getMessage() != null && (e.getMessage().contains("não existe") || 
+                    e.getMessage().contains("já está parado") || 
+                    e.getMessage().contains("already stopped") ||
+                    e.getMessage().contains("No such container"))) {
+                    log.info("ℹ️ [CLEANUP] Container {} não existe ou já está parado. Continuando com remoção.", containerIdentifier);
+                    System.out.println("ℹ️ [CLEANUP] Container não existe ou já está parado. Continuando com remoção.");
+                } else {
+                    log.warn("⚠️ [CLEANUP] Falha ao parar container Docker para cluster {}: {}. Tentando remover mesmo assim.", clusterId, e.getMessage());
+                    System.err.println("⚠️ [CLEANUP] Warning: Failed to stop Docker container: " + e.getMessage() + ". Tentando remover mesmo assim.");
+                }
+            } catch (Exception e) {
+                log.warn("⚠️ [CLEANUP] Erro inesperado ao parar container Docker para cluster {}: {}. Tentando remover mesmo assim.", clusterId, e.getMessage());
+                System.err.println("⚠️ [CLEANUP] Warning: Unexpected error stopping Docker container: " + e.getMessage() + ". Tentando remover mesmo assim.");
+            }
+            
+            // SEGUNDO: Remove o container após parar (método agressivo com kill + rm -f)
+            boolean containerRemoved = false;
+            try {
+                log.info("🔪 [CLEANUP] Forçando remoção agressiva do container Docker para cluster {}. ID/Nome: {}", clusterId, containerIdentifier);
+                System.out.println("🔪 [CLEANUP] Forçando remoção agressiva do container para cluster " + clusterId + ". ID/Nome: " + containerIdentifier);
+                dockerService.removeContainer(containerIdentifier);
+                containerRemoved = true;
+                log.info("✅ [CLEANUP] Container {} removido com sucesso para cluster {}", containerIdentifier, clusterId);
+                System.out.println("✅ [CLEANUP] Container " + containerIdentifier + " removido com sucesso.");
+            } catch (RuntimeException e) {
+                // Se não encontrou pelo primeiro identificador, tenta pelo outro
+                if (e.getMessage() != null && e.getMessage().contains("não existe")) {
+                    String alternativeIdentifier = containerId != null && !containerId.isEmpty() && !containerId.equals(containerIdentifier)
+                        ? containerId 
+                        : (containerName != null && !containerName.isEmpty() && !containerName.equals(containerIdentifier) ? containerName : null);
+                    
+                    if (alternativeIdentifier != null) {
+                        log.info("🔄 [CLEANUP] Tentando remover container com identificador alternativo: {}", alternativeIdentifier);
+                        System.out.println("🔄 [CLEANUP] Tentando remover container com identificador alternativo: " + alternativeIdentifier);
+                        try {
+                            dockerService.removeContainer(alternativeIdentifier);
+                            containerRemoved = true;
+                            log.info("✅ [CLEANUP] Container {} removido com sucesso usando identificador alternativo", alternativeIdentifier);
+                            System.out.println("✅ [CLEANUP] Container removido com sucesso usando identificador alternativo.");
+                        } catch (Exception e2) {
+                            log.warn("⚠️ [CLEANUP] Também falhou com identificador alternativo: {}", e2.getMessage());
+                            System.err.println("⚠️ [CLEANUP] Também falhou com identificador alternativo: " + e2.getMessage());
+                        }
+                    } else {
+                        log.info("ℹ️ [CLEANUP] Container não existe ou já foi removido para cluster {}", clusterId);
+                        System.out.println("ℹ️ [CLEANUP] Container não existe ou já foi removido. Ignorando erro.");
+                    }
+                } else {
+                    log.warn("⚠️ [CLEANUP] Falha ao remover container Docker para cluster {}: {}", clusterId, e.getMessage());
+                    System.err.println("⚠️ [CLEANUP] Warning: Failed to remove Docker container: " + e.getMessage());
+                }
+            } catch (Exception e) {
+                log.warn("⚠️ [CLEANUP] Falha inesperada ao remover container Docker para cluster {}: {}", clusterId, e.getMessage());
                 System.err.println("⚠️ [CLEANUP] Warning: Failed to remove Docker container: " + e.getMessage());
-            } else {
-                log.info("ℹ️ [CLEANUP] Container não existe ou já foi removido para cluster {}", clusterId);
-                System.out.println("ℹ️ [CLEANUP] Container não existe ou já foi removido. Ignorando erro.");
+            }
+            
+            // Limpa cache após tentativa de remoção
+            if (containerId != null && !containerId.isEmpty()) {
+                dockerService.clearContainerCache(containerId);
+            }
+            if (containerName != null && !containerName.isEmpty()) {
+                dockerService.clearContainerCache(containerName);
+            }
+            
+            // ÚLTIMA TENTATIVA AGRESSIVA: Se não foi removido, tenta kill + rm diretamente
+            if (!containerRemoved) {
+                log.warn("⚠️ [CLEANUP] Container não foi removido na primeira tentativa. Tentando remoção forçada direta...");
+                System.err.println("⚠️ [CLEANUP] Container não foi removido. Tentando remoção forçada direta...");
+                
+                // Tenta com ambos os identificadores
+                String[] identifiersToTry = {containerIdentifier};
+                if (containerId != null && !containerId.isEmpty() && !containerId.equals(containerIdentifier)) {
+                    identifiersToTry = new String[]{containerIdentifier, containerId};
+                } else if (containerName != null && !containerName.isEmpty() && !containerName.equals(containerIdentifier)) {
+                    identifiersToTry = new String[]{containerIdentifier, containerName};
+                }
+                
+                for (String id : identifiersToTry) {
+                    try {
+                        log.info("🔪 [CLEANUP] Tentativa final agressiva: kill + rm -f para {}", id);
+                        System.out.println("🔪 [CLEANUP] Tentativa final agressiva: kill + rm -f para " + id);
+                        
+                        // Kill direto (tenta com docker e sudo docker)
+                        String[] dockerCmds = {"docker", "sudo docker"};
+                        for (String dockerCmd : dockerCmds) {
+                            try {
+                                String killResult = dockerService.runCommand(dockerCmd + " kill " + id);
+                                if (killResult.contains("Process exited with code: 0") || 
+                                    killResult.contains("No such container") ||
+                                    killResult.contains("is not running")) {
+                                    break; // Funcionou ou container não existe
+                                }
+                            } catch (Exception e) {
+                                // Tenta próximo comando
+                            }
+                        }
+                        
+                        Thread.sleep(200);
+                        
+                        // Rm -f direto (tenta com docker e sudo docker)
+                        for (String dockerCmd : dockerCmds) {
+                            try {
+                                String rmResult = dockerService.runCommand(dockerCmd + " rm -f " + id);
+                                if (rmResult.contains("Process exited with code: 0") || 
+                                    rmResult.contains("No such container") || 
+                                    rmResult.contains("no such container")) {
+                                    containerRemoved = true;
+                                    log.info("✅ [CLEANUP] Container {} removido com sucesso na tentativa final", id);
+                                    System.out.println("✅ [CLEANUP] Container removido com sucesso na tentativa final.");
+                                    break;
+                                }
+                            } catch (Exception e) {
+                                // Tenta próximo comando
+                            }
+                        }
+                        
+                        if (containerRemoved) {
+                            break; // Sai do loop de identificadores
+                        }
+                    } catch (Exception e) {
+                        log.warn("⚠️ [CLEANUP] Falha na tentativa final agressiva para {}: {}", id, e.getMessage());
+                        System.err.println("⚠️ [CLEANUP] Falha na tentativa final: " + e.getMessage());
+                    }
+                }
+                
+                if (!containerRemoved) {
+                    log.error("❌ [CLEANUP] Container NÃO foi removido após todas as tentativas para cluster {}. Verifique manualmente.", clusterId);
+                    System.err.println("❌ [CLEANUP] ERRO: Container NÃO foi removido após todas as tentativas. Verifique manualmente.");
+                }
             }
         } catch (Exception e) {
-            log.warn("⚠️ [CLEANUP] Falha inesperada ao remover container Docker para cluster {}: {}", clusterId, e.getMessage());
-            System.err.println("⚠️ [CLEANUP] Warning: Failed to remove Docker container: " + e.getMessage());
+            log.error("❌ [CLEANUP] Erro crítico ao processar remoção de container para cluster {}: {}", clusterId, e.getMessage(), e);
+            System.err.println("❌ [CLEANUP] Critical error processing container removal: " + e.getMessage());
         }
         
         // Remoção de diretório desabilitada conforme solicitado

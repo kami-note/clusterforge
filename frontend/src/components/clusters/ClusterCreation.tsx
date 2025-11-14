@@ -37,6 +37,7 @@ import { toast } from 'sonner';
 import { templateService } from '@/services/template.service';
 import { clusterService, type CreateClusterRequest } from '@/services/cluster.service';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
+import { TIMEOUTS } from '@/constants';
 
 // Types
 export interface ClusterData {
@@ -278,7 +279,10 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           setServiceTemplates(formattedTemplates);
         }
       } catch (error) {
-        console.error('Error fetching templates:', error);
+        // Erro já tratado - não logar se for BackendOffline
+        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+          console.error('Error fetching templates:', error);
+        }
         toast.error('Não foi possível carregar os tipos de serviço. Tente atualizar a página.');
         
         // Fallback para template padrão em caso de erro
@@ -359,29 +363,53 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       return;
     }
     
-    console.log('Iniciando criação do cluster...');
+    console.log('Iniciando criação do cluster em background...');
     setLoading(true);
     setErrorDetails(null); // Limpar erros anteriores
     
-    try {
-      // Monta a requisição para o backend
-      const request: CreateClusterRequest = {
-        templateName: selectedService?.name || '',
-        baseName: clusterName,
-        cpuLimit: cpuAllocation[0] / 100, // Converte % para cores (ex: 30% = 0.30 cores)
-        memoryLimit: ramAllocation[0] * 1024, // Converte GB para MB
-        diskLimit: diskAllocation[0]
-      };
-      
-      console.log('Request:', request);
-      
-      // Envia para o backend
-      const response = await clusterService.createCluster(request);
-      console.log('Response:', response);
-      
-      // Sucesso
-      if (response.clusterId) {
-        toast.success('Cluster criado com sucesso!');
+    // Monta a requisição para o backend
+    const request: CreateClusterRequest = {
+      templateName: selectedService?.name || '',
+      baseName: clusterName,
+      cpuLimit: cpuAllocation[0] / 100, // Converte % para cores (ex: 30% = 0.30 cores)
+      memoryLimit: ramAllocation[0] * 1024, // Converte GB para MB
+      diskLimit: diskAllocation[0]
+    };
+    
+    console.log('Request:', request);
+    
+    // Mostrar toast de progresso
+    const progressToastId = toast.loading('Criando cluster em segundo plano... Isso pode levar alguns minutos.');
+    
+    // Executar criação em background (não bloquear UI)
+    clusterService.createCluster(request)
+      .then(async (response) => {
+        console.log('Response:', response);
+        
+        if (!response.clusterId) {
+          // Parsear erro da resposta
+          const parsedError = parseDockerError(response.message || 'Erro ao criar cluster');
+          if (parsedError) {
+            setErrorDetails(parsedError);
+            toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { 
+              id: progressToastId,
+              duration: 10000 
+            });
+          } else {
+            toast.error(response.message || 'Erro ao criar cluster', { id: progressToastId });
+          }
+          setLoading(false);
+          return;
+        }
+        
+        // Cluster criado com sucesso - verificar status periodicamente
+        toast.success('Solicitação de criação enviada! Verificando status...', { 
+          id: progressToastId,
+          duration: 3000 
+        });
+        
+        // Polling para verificar quando o cluster estiver pronto
+        await pollClusterStatus(response.clusterId);
         
         // Se admin criou e retornou credenciais, mostra
         if (response.ownerCredentials) {
@@ -405,48 +433,147 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         };
         
         onSubmit(clusterData);
-      } else {
-        // Parsear erro da resposta
-        const parsedError = parseDockerError(response.message || 'Erro ao criar cluster');
+        setLoading(false);
+      })
+      .catch((error: unknown) => {
+        // Erro já tratado - não logar se for BackendOffline
+      if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+        console.error('Error creating cluster:', error);
+      }
+        
+        // Tenta extrair mensagem de erro de forma mais robusta
+        let errorMessage = 'Não foi possível criar o cluster. Tente novamente.';
+        
+        if (error instanceof Error) {
+          errorMessage = error.message;
+        } else if (typeof error === 'object' && error !== null) {
+          // Tenta extrair mensagem de objeto de erro da API
+          const apiError = error as any;
+          if (apiError.message) {
+            errorMessage = apiError.message;
+          } else if (apiError.error) {
+            errorMessage = apiError.error;
+          } else {
+            // Se for objeto vazio ou sem mensagem, usa string do objeto
+            errorMessage = JSON.stringify(error) || errorMessage;
+          }
+        }
+        
+        console.error('Mensagem de erro extraída:', errorMessage);
+        
+        // Se for timeout, informar que está em processamento
+        const apiError = error as any;
+        if (apiError.name === 'TimeoutError') {
+          toast.warning(
+            'A criação do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
+            { 
+              id: progressToastId,
+              duration: 5000 
+            }
+          );
+          
+          // Tentar encontrar o cluster pelo nome após alguns segundos
+          setTimeout(() => {
+            pollClusterByName(clusterName);
+          }, 5000);
+          
+          // Permitir que usuário continue navegando
+          const clusterData = {
+            name: clusterName,
+            service: selectedService,
+            resources: {
+              cpu: cpuAllocation[0],
+              ram: ramAllocation[0],
+              disk: diskAllocation[0]
+            },
+            startupCommand,
+            port: customPort || undefined
+          };
+          
+          onSubmit(clusterData);
+          setLoading(false);
+          return;
+        }
+        
+        const parsedError = parseDockerError(errorMessage);
         if (parsedError) {
           setErrorDetails(parsedError);
-          toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { duration: 10000 });
+          toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { 
+            id: progressToastId,
+            duration: 10000 
+          });
         } else {
-          toast.error(response.message || 'Erro ao criar cluster');
+          toast.error(errorMessage, { id: progressToastId });
         }
-      }
-    } catch (error: unknown) {
-      console.error('Error creating cluster:', error);
+        setLoading(false);
+      });
+  };
+  
+  // Função para fazer polling do status do cluster após criação
+  const pollClusterStatus = async (clusterId: number) => {
+    const pollInterval = TIMEOUTS.CLUSTER_CREATE_POLL;
+    const maxAttempts = TIMEOUTS.CLUSTER_CREATE_MAX_ATTEMPTS;
+    let attempts = 0;
+    let isReady = false;
+    
+    const statusToastId = toast.loading('Aguardando cluster ficar pronto...');
+    
+    while (attempts < maxAttempts && !isReady) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
       
-      // Tenta extrair mensagem de erro de forma mais robusta
-      let errorMessage = 'Não foi possível criar o cluster. Tente novamente.';
-      
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'object' && error !== null) {
-        // Tenta extrair mensagem de objeto de erro da API
-        const apiError = error as any;
-        if (apiError.message) {
-          errorMessage = apiError.message;
-        } else if (apiError.error) {
-          errorMessage = apiError.error;
+      try {
+        const clusterDetails = await clusterService.getCluster(clusterId);
+        
+        // Verificar se cluster está em estado final (RUNNING, STOPPED, ou ERROR)
+        if (clusterDetails.status === 'RUNNING' || clusterDetails.status === 'STOPPED') {
+          isReady = true;
+          toast.success(`Cluster criado com sucesso! Status: ${clusterDetails.status === 'RUNNING' ? 'Em execução' : 'Parado'}`, {
+            id: statusToastId,
+            duration: 5000
+          });
+        } else if (clusterDetails.status === 'FAILED' || clusterDetails.status === 'ERROR') {
+          toast.error('Cluster entrou em estado de erro durante a criação.', {
+            id: statusToastId,
+            duration: 10000
+          });
+          setErrorDetails(parseDockerError('Cluster entrou em estado de erro'));
+          break;
         } else {
-          // Se for objeto vazio ou sem mensagem, usa string do objeto
-          errorMessage = JSON.stringify(error) || errorMessage;
+          // Cluster ainda está sendo criado (CREATED, STARTING, etc)
+          toast.loading(`Cluster está sendo configurado... (Status: ${clusterDetails.status})`, {
+            id: statusToastId
+          });
         }
+        
+        attempts++;
+      } catch (pollError: unknown) {
+        // Se erro ao buscar status, continua tentando (pode ser temporário)
+        console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
+        attempts++;
       }
+    }
+    
+    if (!isReady && attempts >= maxAttempts) {
+      toast.warning('A criação do cluster está demorando mais que o esperado. Verifique o status manualmente.', {
+        id: statusToastId,
+        duration: 8000
+      });
+    }
+  };
+  
+  // Função para buscar cluster pelo nome caso a criação tenha sido iniciada mas demorou
+  const pollClusterByName = async (name: string) => {
+    try {
+      const clusters = await clusterService.listClusters();
+      const foundCluster = clusters.find(c => c.name === name || c.name.startsWith(name));
       
-      console.error('Mensagem de erro extraída:', errorMessage);
-      
-      const parsedError = parseDockerError(errorMessage);
-      if (parsedError) {
-        setErrorDetails(parsedError);
-        toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { duration: 10000 });
-      } else {
-        toast.error(errorMessage);
+      if (foundCluster) {
+        toast.success(`Cluster "${foundCluster.name}" encontrado! A criação foi concluída em segundo plano.`, {
+          duration: 5000
+        });
       }
-    } finally {
-      setLoading(false);
+    } catch (error) {
+      console.warn('Erro ao buscar cluster pelo nome:', error);
     }
   };
 

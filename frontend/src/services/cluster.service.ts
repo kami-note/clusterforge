@@ -84,26 +84,29 @@ class ClusterService {
 
   /**
    * Cria um novo cluster
+   * Usa timeout maior (60s) pois criação de cluster pode demorar
    */
   async createCluster(request: CreateClusterRequest): Promise<CreateClusterResponse> {
-    return httpClient.post<CreateClusterResponse>('/clusters', request);
+    return httpClient.post<CreateClusterResponse>('/clusters', request, 60000);
   }
 
   /**
    * Atualiza limites de recursos de um cluster
+   * Usa timeout maior (60s) pois operações de atualização podem demorar
    */
   async updateClusterLimits(
     clusterId: number,
     request: UpdateClusterLimitsRequest
   ): Promise<CreateClusterResponse> {
-    return httpClient.patch<CreateClusterResponse>(`/clusters/${clusterId}`, request);
+    return httpClient.patch<CreateClusterResponse>(`/clusters/${clusterId}`, request, 60000);
   }
 
   /**
    * Deleta um cluster
+   * Usa timeout maior (60s) pois deleção de cluster pode demorar
    */
   async deleteCluster(clusterId: number): Promise<void> {
-    return httpClient.delete(`/clusters/${clusterId}`);
+    return httpClient.delete(`/clusters/${clusterId}`, 60000);
   }
 
   /**

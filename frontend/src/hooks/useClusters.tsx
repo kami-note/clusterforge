@@ -6,7 +6,7 @@ import { clusterService } from '@/services/cluster.service';
 import { Cluster } from '@/types';
 import { mapClusterStatus, formatTemplateName } from '@/utils/cluster.utils';
 import { memoryMbToGb, cpuCoresToPercent } from '@/utils/cluster.utils';
-import { handleError } from '@/utils/error.utils';
+import { handleError, safeConsoleError } from '@/utils/error.utils';
 
 interface ClustersContextType {
   clusters: Cluster[];
@@ -99,7 +99,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
             };
           } catch (error) {
             const message = handleError(error);
-            console.error(`Error loading cluster ${cluster.id}:`, message, error);
+            safeConsoleError(`Error loading cluster ${cluster.id}:`, message, error);
             // Retorna dados básicos se falhar ao buscar detalhes
             return {
               id: cluster.id.toString(),
@@ -123,7 +123,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       setClusters(convertedClusters);
     } catch (error) {
       const message = handleError(error);
-      console.error('Error loading clusters:', message, error);
+      safeConsoleError('Error loading clusters:', message, error);
       // Fallback para dados mockados em caso de erro
       setClusters(initialClusters);
     } finally {
@@ -155,7 +155,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       await loadClusters();
     } catch (error) {
       const message = handleError(error);
-      console.error('Error adding cluster:', message, error);
+      safeConsoleError('Error adding cluster:', message, error);
       throw error;
     } finally {
       setLoading(false);
@@ -191,7 +191,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
       return cluster;
     } catch (error) {
       const message = handleError(error);
-      console.error('Error finding cluster:', message, error);
+      safeConsoleError('Error finding cluster:', message, error);
       return null;
     } finally {
       setLoading(false);
@@ -199,83 +199,80 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateCluster = async (id: string, updates: Partial<Cluster>) => {
-    try {
-      setLoading(true);
-      
-      // Se o status foi atualizado, chama a API correspondente
-      if (updates.status === 'running') {
-        await clusterService.startCluster(parseInt(id));
-      } else if (updates.status === 'stopped') {
-        await clusterService.stopCluster(parseInt(id));
-      }
-
-      // Após ação na API, recarregar dados da API para ter status atualizado
-      // Isso garante que o status sempre vem da fonte primária (API)
-      // Usar timeout menor para evitar esperar muito se a operação já foi iniciada
-      try {
-        await Promise.race([
-          loadClusters(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout ao recarregar clusters')), 10000)
-          )
-        ]);
-      } catch (reloadError) {
-        // Se falhar ao recarregar, não quebrar - a operação principal pode ter sido bem-sucedida
-        console.warn('Aviso: Não foi possível recarregar clusters após atualização:', reloadError);
-        // Atualizar status localmente se possível
-        setClusters(prev => prev.map(c => 
-          c.id === id ? { ...c, ...updates } : c
-        ));
-      }
-    } catch (error: any) {
-      const message = handleError(error);
-      console.error('Error updating cluster:', message, error);
-      
-      // Se for backend offline, não atualizar status localmente
-      // O usuário precisa saber que o servidor está offline
-      if (error.name === 'BackendOffline' || (error.status === 0 && error.message?.includes('servidor'))) {
-        throw new Error('O servidor está temporariamente indisponível. Verifique se o backend está em execução.');
-      }
-      
-      // Se for timeout ou erro de rede, não quebrar completamente
-      // A operação pode ter sido iniciada no backend mesmo que a resposta não tenha chegado
-      if (error.name === 'TimeoutError' || error.name === 'NetworkError' || error.status === 408) {
-        // Atualizar status localmente como otimista
-        setClusters(prev => prev.map(c => 
-          c.id === id ? { ...c, ...updates } : c
-        ));
-        
-        // Tentar recarregar em background
-        loadClusters().catch(err => 
-          console.warn('Falha ao recarregar clusters em background:', err)
-        );
-        
-        // Lançar erro com mensagem mais amigável para leigos
-        throw new Error('A operação pode estar em andamento. Aguarde alguns segundos e verifique se o status mudou. Se não mudar, tente novamente.');
-      }
-      
-      throw error;
-    } finally {
-      setLoading(false);
+    // Atualização otimista imediata (não esperar API)
+    setClusters(prev => prev.map(c => 
+      c.id === id ? { ...c, ...updates } : c
+    ));
+    
+    // Executar ação da API em background (não bloquear UI)
+    if (updates.status === 'running') {
+      clusterService.startCluster(parseInt(id))
+        .then(() => {
+          // Recarregar lista em background após sucesso
+          loadClusters().catch(err => 
+            console.warn('Falha ao recarregar clusters em background:', err)
+          );
+        })
+        .catch((error: any) => {
+          // Se erro, reverter atualização otimista
+          setClusters(prev => prev.map(c => 
+            c.id === id ? { ...c, status: 'stopped' } : c
+          ));
+          
+          // Se for timeout, não reverter - operação pode estar em andamento
+          if (error.name !== 'TimeoutError') {
+            safeConsoleError('Error starting cluster:', error);
+          }
+        });
+    } else if (updates.status === 'stopped') {
+      clusterService.stopCluster(parseInt(id))
+        .then(() => {
+          // Recarregar lista em background após sucesso
+          loadClusters().catch(err => 
+            console.warn('Falha ao recarregar clusters em background:', err)
+          );
+        })
+        .catch((error: any) => {
+          // Se erro, reverter atualização otimista
+          setClusters(prev => prev.map(c => 
+            c.id === id ? { ...c, status: 'running' } : c
+          ));
+          
+          // Se for timeout, não reverter - operação pode estar em andamento
+          if (error.name !== 'TimeoutError') {
+            safeConsoleError('Error stopping cluster:', error);
+          }
+        });
     }
   };
 
   const deleteCluster = async (id: string) => {
-    try {
-      setLoading(true);
-      
-      // Chama a API para deletar o cluster
-      await clusterService.deleteCluster(parseInt(id));
-      
-      // Recarregar lista da API para garantir consistência
-      await loadClusters();
-    } catch (error) {
-      const message = handleError(error);
-      console.error('Error deleting cluster:', message, error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
+    // Atualização otimista - remover da lista imediatamente
+    const clusterToDelete = clusters.find(c => c.id === id);
+    setClusters(prev => prev.filter(c => c.id !== id));
+    
+    // Executar deleção em background (não bloquear UI)
+    clusterService.deleteCluster(parseInt(id))
+      .then(() => {
+        // Recarregar lista em background após sucesso para garantir consistência
+        loadClusters().catch(err => 
+          console.warn('Falha ao recarregar clusters em background após deleção:', err)
+        );
+      })
+      .catch((error: any) => {
+        // Se erro, reverter atualização otimista (reinserir o cluster)
+        if (clusterToDelete) {
+          setClusters(prev => [...prev, clusterToDelete].sort((a, b) => 
+            a.name.localeCompare(b.name)
+          ));
+        }
+        
+        // Se for timeout, não reverter - operação pode estar em andamento
+        if (error.name !== 'TimeoutError') {
+          safeConsoleError('Error deleting cluster:', error);
+          throw error;
+        }
+      });
   };
 
   return (

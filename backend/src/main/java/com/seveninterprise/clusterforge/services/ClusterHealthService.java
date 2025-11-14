@@ -677,6 +677,13 @@ public class ClusterHealthService implements IClusterHealthService {
             // Extrair apenas a linha de dados (antes de "Process exited")
             String statsData = result.split("Process exited")[0].trim();
             
+            // DEBUG: Log do resultado completo para diagnóstico
+            if (!quietMode) {
+                System.out.println("🔍 [DEBUG] Resultado completo do docker stats para cluster " + cluster.getId() + ":");
+                System.out.println("   Resultado bruto: '" + result + "'");
+                System.out.println("   StatsData extraído: '" + statsData + "'");
+            }
+            
             if (statsData.isEmpty()) {
                 if (!quietMode) {
                     System.err.println("⚠️ Nenhum dado extraído do docker stats para cluster " + cluster.getId());
@@ -698,7 +705,18 @@ public class ClusterHealthService implements IClusterHealthService {
                 System.out.println("   Dados brutos: " + statsData);
             }
             
-            return parseDockerStats(statsData, cluster, skipContainerMetrics, quietMode);
+            ClusterHealthMetrics metrics = parseDockerStats(statsData, cluster, skipContainerMetrics, quietMode);
+            
+            // DEBUG: Log das métricas parseadas
+            if (!quietMode && metrics != null) {
+                System.out.println("🔍 [DEBUG] Métricas parseadas para cluster " + cluster.getId() + ":");
+                System.out.println("   CPU: " + metrics.getCpuUsagePercent() + "%");
+                System.out.println("   Memória: " + metrics.getMemoryUsageMb() + " MB / " + metrics.getMemoryLimitMb() + " MB (" + metrics.getMemoryUsagePercent() + "%)");
+                System.out.println("   Rede RX: " + metrics.getNetworkRxBytes() + " bytes, TX: " + metrics.getNetworkTxBytes() + " bytes");
+                System.out.println("   Disco Read: " + metrics.getDiskReadBytes() + " bytes, Write: " + metrics.getDiskWriteBytes() + " bytes");
+            }
+            
+            return metrics;
             
         } catch (Exception e) {
             if (!quietMode) {
@@ -726,12 +744,31 @@ public class ClusterHealthService implements IClusterHealthService {
                 System.out.println("📊 Parsing docker stats: " + statsResult);
             }
             
+            // DEBUG: Verificar se há quebras de linha ou caracteres especiais
+            if (!quietMode) {
+                System.out.println("🔍 [DEBUG] StatsResult length: " + statsResult.length());
+                System.out.println("🔍 [DEBUG] StatsResult contains newline: " + statsResult.contains("\n"));
+                System.out.println("🔍 [DEBUG] StatsResult contains return: " + statsResult.contains("\r"));
+            }
+            
             String[] parts = statsResult.split(",");
+            
+            // DEBUG: Log das partes splitadas
+            if (!quietMode) {
+                System.out.println("🔍 [DEBUG] Split resultou em " + parts.length + " partes:");
+                for (int i = 0; i < parts.length; i++) {
+                    System.out.println("   Parte " + i + ": '" + parts[i] + "'");
+                }
+            }
             
             // Formato padrão: CPUPerc,MemUsage,NetIO,BlockIO (4 campos)
             if (parts.length < 4) {
                 System.err.println("⚠️ Formato inválido - esperado 4 partes, obtido: " + parts.length);
                 System.err.println("   Dados: " + statsResult);
+                System.err.println("   Partes encontradas:");
+                for (int i = 0; i < parts.length; i++) {
+                    System.err.println("     [" + i + "] = '" + parts[i] + "'");
+                }
                 return null;
             }
             
@@ -781,10 +818,18 @@ public class ClusterHealthService implements IClusterHealthService {
                                 cpuPercent = (cpuPercentFromDocker / cpuLimitPercent) * 100.0;
                                 // Limitar a 100% para exibição (não pode usar mais que 100% do limite)
                                 cpuPercent = Math.min(cpuPercent, 100.0);
+                                // IMPORTANTE: Se CPU é 0.00%, manter como 0.0% (não zerar incorretamente)
+                                if (cpuPercentFromDocker == 0.0) {
+                                    cpuPercent = 0.0; // Garantir que 0.00% do Docker vira 0.0%
+                                }
                             }
                         } else {
                             // Sem limite ou limite >= 1.0 core, usar valor diretamente
                             cpuPercent = Math.min(cpuPercentFromDocker, 100.0);
+                            // IMPORTANTE: Se CPU é 0.00%, manter como 0.0%
+                            if (cpuPercentFromDocker == 0.0) {
+                                cpuPercent = 0.0;
+                            }
                         }
                         
                         if (!quietMode) {
@@ -819,10 +864,28 @@ public class ClusterHealthService implements IClusterHealthService {
                     
                     metrics.setMemoryUsageMb(memoryUsage);
                     
-                    // Prioriza limite do cluster se configurado, senão usa do Docker Stats
-                    Long memoryLimit = (cluster.getMemoryLimit() != null) 
-                        ? cluster.getMemoryLimit() 
-                        : memoryLimitFromDocker;
+                    // IMPORTANTE: Sempre usar limite do cluster se configurado (é o limite real aplicado)
+                    // O Docker pode retornar o limite do host (30.3GiB) que não reflete o limite do container
+                    // O limite do cluster é o que realmente importa para cálculo de percentual
+                    Long memoryLimit;
+                    if (cluster.getMemoryLimit() != null && cluster.getMemoryLimit() > 0) {
+                        // Usar limite do cluster (limite real aplicado ao container)
+                        memoryLimit = cluster.getMemoryLimit();
+                        if (!quietMode) {
+                            System.out.println("   ℹ️ Usando limite do cluster: " + memoryLimit + " MB (Docker reportou: " + memoryLimitFromDocker + " MB)");
+                        }
+                    } else if (memoryLimitFromDocker != null && memoryLimitFromDocker > 0) {
+                        // Fallback: usar limite do Docker se cluster não tem limite configurado
+                        memoryLimit = memoryLimitFromDocker;
+                        if (!quietMode) {
+                            System.out.println("   ℹ️ Usando limite do Docker: " + memoryLimit + " MB (cluster não tem limite configurado)");
+                        }
+                    } else {
+                        memoryLimit = null;
+                        if (!quietMode) {
+                            System.err.println("   ⚠️ Nenhum limite de memória disponível (nem cluster nem Docker)");
+                        }
+                    }
                     metrics.setMemoryLimitMb(memoryLimit);
                     
                     // Calcular percentual de uso de memória relativo ao limite configurado
@@ -831,6 +894,17 @@ public class ClusterHealthService implements IClusterHealthService {
                         metrics.setMemoryUsagePercent(memoryPercent);
                         if (!quietMode) {
                             System.out.println("   ✅ Memória: " + memoryUsage + " MB / " + memoryLimit + " MB = " + String.format("%.2f", memoryPercent) + "%");
+                        }
+                    } else {
+                        // DEBUG: Log quando não consegue calcular percentual
+                        if (!quietMode) {
+                            System.err.println("⚠️ [DEBUG] Não foi possível calcular percentual de memória:");
+                            System.err.println("   memoryUsage: " + memoryUsage);
+                            System.err.println("   memoryLimit: " + memoryLimit);
+                        }
+                        // Se tem uso mas não tem limite, usar 0% ou null?
+                        if (memoryUsage != null && memoryUsage > 0) {
+                            metrics.setMemoryUsagePercent(0.0); // Pelo menos não null
                         }
                     }
                 }
@@ -926,7 +1000,6 @@ public class ClusterHealthService implements IClusterHealthService {
                 try {
                     Integer restartCount = Integer.parseInt(countStr);
                     metrics.setContainerRestartCount(restartCount);
-                    System.out.println("   ✅ Container Restart Count: " + restartCount);
                 } catch (NumberFormatException e) {
                     // Ignora
                 }
@@ -937,7 +1010,6 @@ public class ClusterHealthService implements IClusterHealthService {
             if (statusStr != null && !statusStr.isEmpty() && statusStr.contains("Process exited with code: 0")) {
                 String status = statusStr.split("Process exited")[0].trim();
                 metrics.setContainerStatus(status);
-                System.out.println("   ✅ Container Status: " + status);
             }
             
             // Coletar exit code (se container não está rodando)
@@ -963,7 +1035,6 @@ public class ClusterHealthService implements IClusterHealthService {
                         Duration uptime = Duration.between(started.toInstant(), Instant.now());
                         long uptimeSeconds = uptime.getSeconds();
                         metrics.setContainerUptimeSeconds(uptimeSeconds);
-                        System.out.println("   ✅ Container Uptime: " + uptimeSeconds + " segundos");
                     } catch (Exception e) {
                         // Ignora erro de parsing
                     }
@@ -991,23 +1062,33 @@ public class ClusterHealthService implements IClusterHealthService {
             
             double number = Double.parseDouble(numberStr);
             
-            // Converter baseado na unidade
+            // Converter baseado na unidade (manter precisão decimal)
+            // IMPORTANTE: Usar Math.round apenas no final para manter precisão
+            double resultInMb;
             if (value.endsWith("KIB") || value.endsWith("KB")) {
-                return Math.round(number / 1024.0); // KiB ou KB para MB
+                resultInMb = number / 1024.0; // KiB ou KB para MB
             } else if (value.endsWith("MIB") || value.endsWith("MB")) {
-                return Math.round(number); // MiB ou MB - já está em MB
+                resultInMb = number; // MiB ou MB - já está em MB
             } else if (value.endsWith("GIB") || value.endsWith("GB")) {
-                return Math.round(number * 1024.0); // GiB ou GB para MB
+                resultInMb = number * 1024.0; // GiB ou GB para MB
             } else if (value.endsWith("TIB") || value.endsWith("TB")) {
-                return Math.round(number * 1024.0 * 1024.0); // TiB ou TB para MB
+                resultInMb = number * 1024.0 * 1024.0; // TiB ou TB para MB
             } else if (value.endsWith("B")) {
-                return Math.round(number / (1024.0 * 1024.0)); // Bytes para MB
+                resultInMb = number / (1024.0 * 1024.0); // Bytes para MB
             } else {
                 // Sem unidade, assume bytes
-                return Math.round(number / (1024.0 * 1024.0));
+                resultInMb = number / (1024.0 * 1024.0);
             }
+            
+            // Arredondar para long (MB inteiro)
+            // Mas manter pelo menos 1 MB se o valor for > 0
+            if (resultInMb > 0 && resultInMb < 1.0) {
+                return 1L; // Mínimo 1 MB para valores pequenos
+            }
+            return Math.round(resultInMb);
         } catch (Exception e) {
             System.err.println("⚠️ Erro ao fazer parse de memória: '" + value + "' - " + e.getMessage());
+            e.printStackTrace();
             return 0L;
         }
     }

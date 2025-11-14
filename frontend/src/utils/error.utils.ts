@@ -93,4 +93,53 @@ export function handleError(error: unknown): string {
   return genericMessage;
 }
 
+/**
+ * Verifica se um erro deve ser ocultado do console
+ * Erros BackendOffline são ocultados pois são tratados graciosamente
+ */
+function shouldSuppressError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const err = error as any;
+    
+    // Ocultar erros BackendOffline
+    if (err.name === 'BackendOffline') {
+      return true;
+    }
+    
+    // Ocultar mensagens relacionadas a backend offline
+    const message = String(err.message || '').toLowerCase();
+    if (message.includes('servidor está temporariamente indisponível') ||
+        message.includes('backend está em execução') ||
+        message.includes('backend offline')) {
+      return true;
+    }
+    
+    // Verificar também no primeiro argumento (caso seja string)
+    if (typeof err === 'string' && err.toLowerCase().includes('backend offline')) {
+      return true;
+    }
+  }
+  
+  // Verificar se algum argumento contém BackendOffline
+  if (typeof error === 'string' && error.toLowerCase().includes('backend offline')) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Console.error seguro que filtra erros BackendOffline
+ * Use esta função no lugar de console.error diretamente
+ */
+export function safeConsoleError(...args: unknown[]): void {
+  // Verificar se algum argumento é um erro BackendOffline
+  const shouldSuppress = args.some(arg => shouldSuppressError(arg));
+  
+  if (!shouldSuppress) {
+    console.error(...args);
+  }
+  // Se for BackendOffline, não loga nada (erro já é tratado graciosamente)
+}
+
 

@@ -32,6 +32,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { clusterService } from '@/services/cluster.service';
 import { toast } from 'sonner';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
+import { TIMEOUTS } from '@/constants';
 
 interface Cluster {
   id: string;
@@ -526,123 +527,168 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   };
 
   // Função assíncrona para iniciar cluster com verificação de status
-  const startClusterWithVerification = async (clusterId: string) => {
+  const startClusterWithVerification = (clusterId: string) => {
     const clusterIdNum = parseInt(clusterId);
+    const toastIdStr = `action-${clusterId}`;
     
     // Marcar como processando
     setProcessingClusters(prev => new Set(prev).add(clusterId));
-    toast.loading('Enviando ordem de inicialização...', { id: `action-${clusterId}` });
+    const toastId = toast.loading('Iniciando cluster em segundo plano...', { id: toastIdStr });
     
-    let startResponse: any = null;
-    try {
-      // 1. Enviar ordem de iniciar
-      startResponse = await clusterService.startCluster(clusterIdNum);
-      
-      if (startResponse.status !== 'RUNNING' && startResponse.status !== 'ERROR') {
-        throw new Error(startResponse.message || 'Resposta inesperada do servidor');
-      }
-      
-      toast.loading('Verificando inicialização do cluster...', { id: `action-${clusterId}` });
-      
-      // 2. Verificar se realmente iniciou (polling com timeout - inicialização pode demorar mais)
-      const maxAttempts = 15; // 15 tentativas (inicialização pode demorar)
-      const pollInterval = 1500; // 1.5 segundos
-      let attempts = 0;
-      let isRunning = false;
-      
-      while (attempts < maxAttempts && !isRunning) {
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
+    // Executar em background (não bloquear UI)
+    clusterService.startCluster(clusterIdNum)
+      .then((startResponse) => {
+        // Atualizar toast
+        toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
         
-        try {
-          // Buscar status atual do cluster
-          const clusterDetails = await clusterService.getCluster(clusterIdNum);
+        // Polling em background para verificar status
+        pollClusterStartStatus(clusterId, clusterIdNum, startResponse, String(toastId));
+      })
+      .catch((error: unknown) => {
+        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+        // Erro já tratado - não logar se for BackendOffline
+        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+          console.error('Erro ao iniciar cluster:', error);
+        }
+        
+        // Se for timeout, informar que está em processamento
+        const apiError = error as any;
+        if (apiError.name === 'TimeoutError') {
+          toast.warning(
+            'A inicialização do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
+            { 
+              id: String(toastId),
+              duration: 5000 
+            }
+          );
+          // Continuar verificando em background
+          pollClusterStartStatus(clusterId, clusterIdNum, null, String(toastId));
+          return;
+        }
+        
+        // Parsear erro para extrair informações do Docker
+        const errorDetails = parseDockerError(errorMessage);
+        if (errorDetails) {
+          setClusterErrors(prev => {
+            const next = new Map(prev);
+            next.set(clusterId, errorDetails);
+            return next;
+          });
           
-          if (clusterDetails.status === 'RUNNING') {
-            isRunning = true;
-            // Recarregar da API para ter status atualizado
-            await updateCluster(clusterId, { status: 'running' });
-            // Limpar erro se existir
+          // Mostrar toast com link para ver detalhes
+          toast.error('Não foi possível iniciar o cluster. Tente novamente em alguns instantes.', { 
+            id: toastId,
+            duration: 10000,
+            action: {
+              label: 'Ver Detalhes',
+              onClick: () => {
+                const errorElement = document.getElementById(`error-${clusterId}`);
+                if (errorElement) {
+                  errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }
+            }
+          });
+        } else {
+          toast.error('Erro ao iniciar cluster: ' + errorMessage, { id: toastId });
+        }
+        
+        // Remover do estado de processamento em caso de erro
+        setProcessingClusters(prev => {
+          const next = new Set(prev);
+          next.delete(clusterId);
+          return next;
+        });
+      });
+  };
+  
+  // Função de polling para verificar status de inicialização em background
+  const pollClusterStartStatus = async (
+    clusterId: string, 
+    clusterIdNum: number, 
+    startResponse: any,
+    toastId: string
+  ) => {
+    const maxAttempts = TIMEOUTS.CLUSTER_START_MAX_ATTEMPTS;
+    const pollInterval = TIMEOUTS.CLUSTER_START_POLL;
+    let attempts = 0;
+    let isRunning = false;
+    
+    while (attempts < maxAttempts && !isRunning) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      
+      try {
+        const clusterDetails = await clusterService.getCluster(clusterIdNum);
+        
+        if (clusterDetails.status === 'RUNNING') {
+          isRunning = true;
+          // Recarregar da API para ter status atualizado
+          await updateCluster(clusterId, { status: 'running' });
+          // Limpar erro se existir
+          setClusterErrors(prev => {
+            const next = new Map(prev);
+            next.delete(clusterId);
+            return next;
+          });
+          toast.success('Cluster iniciado com sucesso!', { id: toastId });
+          // Remover do estado de processamento
+          setProcessingClusters(prev => {
+            const next = new Set(prev);
+            next.delete(clusterId);
+            return next;
+          });
+          return;
+        } else if (clusterDetails.status === 'ERROR' || clusterDetails.status === 'FAILED') {
+          const errorDetails = parseDockerError(startResponse?.message || 'Cluster entrou em estado de erro');
+          if (errorDetails) {
             setClusterErrors(prev => {
               const next = new Map(prev);
-              next.delete(clusterId);
+              next.set(clusterId, errorDetails);
               return next;
             });
-            toast.success('Cluster iniciado com sucesso!', { id: `action-${clusterId}` });
-          } else if (clusterDetails.status === 'ERROR') {
-            // Parsear mensagem de erro da resposta
-            const errorDetails = parseDockerError(startResponse?.message || 'Cluster entrou em estado de erro');
-            if (errorDetails) {
-              setClusterErrors(prev => {
-                const next = new Map(prev);
-                next.set(clusterId, errorDetails);
-                return next;
-              });
-            }
-            throw new Error(startResponse?.message || 'Cluster entrou em estado de erro');
           }
-          
-          attempts++;
-        } catch (pollError: unknown) {
-          // Se erro ao buscar status, continua tentando (pode ser temporário)
-          console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
-          attempts++;
+          toast.error('Cluster entrou em estado de erro durante a inicialização.', {
+            id: toastId,
+            duration: 10000
+          });
+          setProcessingClusters(prev => {
+            const next = new Set(prev);
+            next.delete(clusterId);
+            return next;
+          });
+          return;
+        } else {
+          // Atualizar toast com status atual
+          toast.loading(`Iniciando cluster... (Status: ${clusterDetails.status})`, { id: toastId });
         }
-      }
-      
-      if (!isRunning) {
-        // Timeout - verifica status atual
-        try {
-          const finalCheck = await clusterService.getCluster(clusterIdNum);
-          if (finalCheck.status === 'RUNNING') {
-            // Recarregar da API para ter status atualizado
-            await updateCluster(clusterId, { status: 'running' });
-            toast.success('Cluster iniciado com sucesso!', { id: `action-${clusterId}` });
-            return;
-          }
-        } catch {}
         
-        // Se ainda não está rodando após todas tentativas
-        toast.warning('Cluster iniciado, mas não conseguimos confirmar. Aguarde alguns segundos e verifique se está funcionando.', { 
-          id: `action-${clusterId}`,
+        attempts++;
+      } catch (pollError: unknown) {
+        console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
+        attempts++;
+      }
+    }
+    
+    // Timeout - verifica status final
+    if (!isRunning) {
+      try {
+        const finalCheck = await clusterService.getCluster(clusterIdNum);
+        if (finalCheck.status === 'RUNNING') {
+          await updateCluster(clusterId, { status: 'running' });
+          toast.success('Cluster iniciado com sucesso!', { id: toastId });
+        } else {
+          toast.warning('A inicialização está demorando mais que o esperado. Verifique o status manualmente.', {
+            id: toastId,
+            duration: 8000
+          });
+        }
+      } catch {
+        toast.warning('A inicialização foi iniciada, mas não conseguimos confirmar. Verifique o status manualmente.', {
+          id: toastId,
           duration: 8000
         });
       }
       
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      console.error('Erro ao iniciar cluster:', error);
-      
-      // Parsear erro para extrair informações do Docker
-      const errorDetails = parseDockerError(errorMessage, startResponse?.message);
-      if (errorDetails) {
-        setClusterErrors(prev => {
-          const next = new Map(prev);
-          next.set(clusterId, errorDetails);
-          return next;
-        });
-        
-        // Mostrar toast com link para ver detalhes
-        toast.error('Não foi possível iniciar o cluster. Tente novamente em alguns instantes.', { 
-          id: `action-${clusterId}`,
-          duration: 10000,
-          action: {
-            label: 'Ver Detalhes',
-            onClick: () => {
-              // Scroll para o erro ou abrir modal
-              const errorElement = document.getElementById(`error-${clusterId}`);
-              if (errorElement) {
-                errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }
-            }
-          }
-        });
-      } else {
-        toast.error('Erro ao iniciar cluster: ' + errorMessage, { id: `action-${clusterId}` });
-      }
-      
-      throw error;
-    } finally {
-      // Remover do estado de processamento
       setProcessingClusters(prev => {
         const next = new Set(prev);
         next.delete(clusterId);
@@ -651,70 +697,129 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     }
   };
 
-  // Função assíncrona para parar cluster com verificação de status
-  const stopClusterWithVerification = async (clusterId: string) => {
+  // Função para parar cluster com verificação de status em background
+  const stopClusterWithVerification = (clusterId: string) => {
     const clusterIdNum = parseInt(clusterId);
+    const toastIdStr = `action-${clusterId}`;
     
     // Marcar como processando
     setProcessingClusters(prev => new Set(prev).add(clusterId));
-    toast.loading('Enviando ordem de parada...', { id: `action-${clusterId}` });
+    const toastId = toast.loading('Parando cluster em segundo plano...', { id: toastIdStr });
     
-    try {
-      // 1. Enviar ordem de parar
-      const stopResponse = await clusterService.stopCluster(clusterIdNum);
-      
-      if (stopResponse.status !== 'STOPPED' && stopResponse.status !== 'ERROR') {
-        throw new Error(stopResponse.message || 'Resposta inesperada do servidor');
-      }
-      
-      toast.loading('Verificando status do cluster...', { id: `action-${clusterId}` });
-      
-      // 2. Verificar se realmente parou (polling com timeout)
-      const maxAttempts = 20; // 20 tentativas
-      const pollInterval = 1000; // 1 segundo
-      let attempts = 0;
-      let isStopped = false;
-      
-      while (attempts < maxAttempts && !isStopped) {
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
+    // Executar em background (não bloquear UI)
+    clusterService.stopCluster(clusterIdNum)
+      .then((stopResponse) => {
+        // Atualizar toast
+        toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
         
-        try {
-          // Buscar status atual do cluster
-          const clusterDetails = await clusterService.getCluster(clusterIdNum);
-          
-          if (clusterDetails.status === 'STOPPED') {
-            isStopped = true;
-            // Recarregar da API para ter status atualizado
-            await updateCluster(clusterId, { status: 'stopped' });
-            toast.success('Cluster parado com sucesso!', { id: `action-${clusterId}` });
-          } else if (clusterDetails.status === 'ERROR') {
-            throw new Error('Cluster entrou em estado de erro');
-          }
-          
-          attempts++;
-        } catch (pollError: unknown) {
-          // Se erro ao buscar status, continua tentando (pode ser temporário)
-          console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
-          attempts++;
+        // Polling em background para verificar status
+        pollClusterStopStatus(clusterId, clusterIdNum, String(toastId));
+      })
+      .catch((error: unknown) => {
+        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+        // Erro já tratado - não logar se for BackendOffline
+        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+          console.error('Erro ao parar cluster:', error);
         }
-      }
+        
+        // Se for timeout, informar que está em processamento
+        const apiError = error as any;
+        if (apiError.name === 'TimeoutError') {
+          toast.warning(
+            'A parada do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
+            { 
+              id: String(toastId),
+              duration: 5000 
+            }
+          );
+          // Continuar verificando em background
+          pollClusterStopStatus(clusterId, clusterIdNum, String(toastId));
+          return;
+        }
+        
+        toast.error('Não foi possível parar o cluster. Tente novamente em alguns instantes.', { id: String(toastId) });
+        
+        // Remover do estado de processamento em caso de erro
+        setProcessingClusters(prev => {
+          const next = new Set(prev);
+          next.delete(clusterId);
+          return next;
+        });
+      });
+  };
+  
+  // Função de polling para verificar status de parada em background
+  const pollClusterStopStatus = async (
+    clusterId: string, 
+    clusterIdNum: number,
+    toastId: string
+  ) => {
+    const maxAttempts = TIMEOUTS.CLUSTER_STOP_MAX_ATTEMPTS;
+    const pollInterval = TIMEOUTS.CLUSTER_STOP_POLL;
+    let attempts = 0;
+    let isStopped = false;
+    
+    while (attempts < maxAttempts && !isStopped) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
       
-      if (!isStopped) {
-        // Timeout - mesmo assim atualiza o status local
-        // updateCluster já recarrega da API automaticamente
-        toast.warning('Cluster parado, mas não conseguimos confirmar. Aguarde alguns segundos e verifique se parou.', { 
-          id: `action-${clusterId}`,
+      try {
+        const clusterDetails = await clusterService.getCluster(clusterIdNum);
+        
+        if (clusterDetails.status === 'STOPPED') {
+          isStopped = true;
+          // Recarregar da API para ter status atualizado
+          await updateCluster(clusterId, { status: 'stopped' });
+          toast.success('Cluster parado com sucesso!', { id: toastId });
+          // Remover do estado de processamento
+          setProcessingClusters(prev => {
+            const next = new Set(prev);
+            next.delete(clusterId);
+            return next;
+          });
+          return;
+        } else if (clusterDetails.status === 'ERROR' || clusterDetails.status === 'FAILED') {
+          toast.error('Cluster entrou em estado de erro durante a parada.', {
+            id: toastId,
+            duration: 10000
+          });
+          setProcessingClusters(prev => {
+            const next = new Set(prev);
+            next.delete(clusterId);
+            return next;
+          });
+          return;
+        } else {
+          // Atualizar toast com status atual
+          toast.loading(`Parando cluster... (Status: ${clusterDetails.status})`, { id: toastId });
+        }
+        
+        attempts++;
+      } catch (pollError: unknown) {
+        console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
+        attempts++;
+      }
+    }
+    
+    // Timeout - verifica status final
+    if (!isStopped) {
+      try {
+        const finalCheck = await clusterService.getCluster(clusterIdNum);
+        if (finalCheck.status === 'STOPPED') {
+          await updateCluster(clusterId, { status: 'stopped' });
+          toast.success('Cluster parado com sucesso!', { id: toastId });
+        } else {
+          toast.warning('A parada está demorando mais que o esperado. Verifique o status manualmente.', {
+            id: toastId,
+            duration: 8000
+          });
+        }
+      } catch {
+        toast.warning('A parada foi iniciada, mas não conseguimos confirmar. Verifique o status manualmente.', {
+          id: toastId,
           duration: 8000
         });
       }
       
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      console.error('Erro ao parar cluster:', error);
-      toast.error('Não foi possível parar o cluster. Tente novamente em alguns instantes.', { id: `action-${clusterId}` });
-      throw error;
-    } finally {
-      // Remover do estado de processamento
       setProcessingClusters(prev => {
         const next = new Set(prev);
         next.delete(clusterId);
@@ -736,42 +841,95 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           break;
         }
         case 'restart': {
-          // Não precisa marcar como processando aqui pois stopClusterWithVerification já faz isso
-          toast.loading('Reiniciando cluster...', { id: `action-${clusterId}` });
-          try {
-            // Primeiro parar o cluster com verificação
-            await stopClusterWithVerification(clusterId);
+          const toastId = toast.loading('Reiniciando cluster em segundo plano...', { id: `action-${clusterId}` });
+          
+          // Primeiro parar o cluster em background
+          stopClusterWithVerification(clusterId);
+          
+          // Aguardar um tempo e depois iniciar (em background também)
+          setTimeout(() => {
+            toast.loading('Aguardando parada para reiniciar...', { id: toastId });
             
-            // Aguardar 2 segundos antes de iniciar novamente
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Verificar se parou antes de iniciar
+            const checkAndStart = async () => {
+              try {
+                const clusterDetails = await clusterService.getCluster(parseInt(clusterId));
+                if (clusterDetails.status === 'STOPPED') {
+                  toast.loading('Reiniciando cluster...', { id: toastId });
+                  startClusterWithVerification(clusterId);
+                  // O sucesso será mostrado pela função startClusterWithVerification
+                } else {
+                  // Tentar novamente após mais alguns segundos
+                  setTimeout(checkAndStart, 3000);
+                }
+              } catch {
+                // Se erro, tenta iniciar mesmo assim
+                toast.loading('Reiniciando cluster...', { id: toastId });
+                startClusterWithVerification(clusterId);
+              }
+            };
             
-            // Depois iniciar o cluster com verificação (já marca como processando internamente)
-            await startClusterWithVerification(clusterId);
-            
-            toast.success('Cluster reiniciado com sucesso!', { id: `action-${clusterId}` });
-          } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-            toast.error('Não foi possível reiniciar o cluster. Tente novamente em alguns instantes.', { id: `action-${clusterId}` });
-            // Garantir que remove do processamento se houver erro
-            setProcessingClusters(prev => {
-              const next = new Set(prev);
-              next.delete(clusterId);
-              return next;
-            });
-            throw error;
-          }
+            // Aguardar 3 segundos antes de verificar
+            setTimeout(checkAndStart, 3000);
+          }, 2000);
+          
           break;
         }
-        case 'delete':
-          await deleteCluster(clusterId);
-          toast.success('Cluster excluído com sucesso');
+        case 'delete': {
+          const toastId = toast.loading('Excluindo cluster em segundo plano...', { id: `delete-${clusterId}` });
+          
+          // Executar deleção em background (não bloquear UI)
+          deleteCluster(clusterId)
+            .then(() => {
+              toast.success('Cluster excluído com sucesso', { id: toastId });
+            })
+            .catch((error: unknown) => {
+              const apiError = error as any;
+              
+              // Se for timeout, informar que está em processamento
+              if (apiError.name === 'TimeoutError') {
+                toast.warning(
+                  'A exclusão do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
+                  { 
+                    id: toastId,
+                    duration: 5000 
+                  }
+                );
+                
+                // Verificar em background se o cluster foi deletado
+                setTimeout(async () => {
+                  try {
+                    const currentClusters = await clusterService.listClusters();
+                    const stillExists = currentClusters.some(c => c.id.toString() === clusterId);
+                    if (!stillExists) {
+                      toast.success('Cluster excluído com sucesso', { id: toastId });
+                    } else {
+                      toast.warning('A exclusão ainda está em processamento. Verifique o status manualmente.', {
+                        id: toastId,
+                        duration: 8000
+                      });
+                    }
+                  } catch {
+                    // Se erro ao verificar, não fazer nada (já foi removido otimisticamente)
+                  }
+                }, 10000);
+              } else {
+                const errorMessage = error instanceof Error ? error.message : 'Erro ao excluir cluster';
+                toast.error(errorMessage, { id: toastId });
+              }
+            });
+          
           break;
+        }
         default:
           break;
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro ao executar ação';
-      console.error('Error performing action:', error);
+      // Erro já tratado - não logar se for BackendOffline
+      if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+        console.error('Error performing action:', error);
+      }
       toast.error(errorMessage, { id: `action-${clusterId}` });
     }
   };

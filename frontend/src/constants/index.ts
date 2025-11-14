@@ -122,6 +122,8 @@ export const TIMEOUTS = {
   CLUSTER_START_MAX_ATTEMPTS: 15,
   CLUSTER_STOP_POLL: 1000, // 1 segundo
   CLUSTER_STOP_MAX_ATTEMPTS: 20,
+  CLUSTER_CREATE_POLL: 12000, // 2 segundos
+  CLUSTER_CREATE_MAX_ATTEMPTS: 60, // 2 minutos (60 * 2s)
 } as const;
 
 // ============================================

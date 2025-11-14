@@ -128,14 +128,17 @@ public class DockerComposeService implements IDockerComposeService {
         // Configura rede para usar bridge existente ao invés de criar nova
         String networkSection = "    network_mode: bridge\n";
         
-        // Seção de deploy resources (CPU e Memória via CGroups)
+        // Seção de recursos (CPU e Memória via CGroups)
+        // IMPORTANTE: deploy.resources só funciona com Docker Swarm
+        // Para docker-compose normal, usamos cpu_quota/cpu_period e mem_limit
+        // cpu_quota = cpu_limit * cpu_period (padrão: 100000)
+        // Exemplo: 0.3 cores = 30000 / 100000
+        long cpuQuota = (long)(cluster.getCpuLimit() * 100000.0);
         String resourcesSection = String.format(
-            "    deploy:\n" +
-            "      resources:\n" +
-            "        limits:\n" +
-            "          cpus: '%.2f'\n" +
-            "          memory: %s\n",
-            cluster.getCpuLimit(),
+            "    cpu_quota: %d\n" +
+            "    cpu_period: 100000\n" +
+            "    mem_limit: %s\n",
+            cpuQuota,
             memoryLimit
         );
         
@@ -237,6 +240,16 @@ public class DockerComposeService implements IDockerComposeService {
         }
         if (content.contains("deploy:")) {
             content = content.replaceAll("(?s)    deploy:.*?(?=\\n  [a-z]|\\z)", "");
+        }
+        // Remover cpu_quota, cpu_period e mem_limit se já existirem
+        if (content.contains("cpu_quota:")) {
+            content = content.replaceAll("(?m)^    cpu_quota:.*$", "");
+        }
+        if (content.contains("cpu_period:")) {
+            content = content.replaceAll("(?m)^    cpu_period:.*$", "");
+        }
+        if (content.contains("mem_limit:")) {
+            content = content.replaceAll("(?m)^    mem_limit:.*$", "");
         }
         if (content.contains("environment:")) {
             content = content.replaceAll("(?s)    environment:.*?(?=\\n    [a-z])", "");

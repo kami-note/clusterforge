@@ -333,17 +333,42 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             ? realtimeMetrics[clusterIdNum] 
             : null;
           
-          // Se houver métricas do WebSocket, usar apenas para inicializar gráfico
+          // Se houver métricas do WebSocket, usar TODOS os campos disponíveis
           if (wsMetrics && connected && !isCancelled) {
             const wsMetricsData: ClusterMetrics = {
-              cpuUsagePercent: wsMetrics.cpuUsagePercent,
-              memoryUsagePercent: wsMetrics.memoryUsagePercent,
-              diskUsagePercent: wsMetrics.diskUsagePercent,
-              containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
-              healthState: wsMetrics.healthState,
+              // CPU
+              cpuUsagePercent: wsMetrics.cpuUsagePercent ?? undefined,
+              cpuLimitCores: wsMetrics.cpuLimitCores ?? undefined,
+              
+              // Memory
+              memoryUsagePercent: wsMetrics.memoryUsagePercent ?? undefined,
+              memoryUsageMb: wsMetrics.memoryUsageMb ?? undefined,
+              memoryLimitMb: wsMetrics.memoryLimitMb ?? undefined,
+              
+              // Disk
+              diskUsagePercent: wsMetrics.diskUsagePercent !== null && wsMetrics.diskUsagePercent !== undefined 
+                ? wsMetrics.diskUsagePercent 
+                : undefined,
+              diskUsageMb: wsMetrics.diskUsageMb ?? undefined,
+              diskLimitMb: wsMetrics.diskLimitMb ?? undefined,
+              
+              // Network
+              networkRxBytes: wsMetrics.networkRxBytes ?? undefined,
+              networkTxBytes: wsMetrics.networkTxBytes ?? undefined,
               networkUsage: wsMetrics.networkRxBytes && wsMetrics.networkTxBytes 
                 ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
                 : undefined,
+              
+              // Container
+              containerUptimeSeconds: wsMetrics.containerUptimeSeconds ?? undefined,
+              containerRestartCount: wsMetrics.containerRestartCount ?? undefined,
+              containerStatus: wsMetrics.containerStatus ?? undefined,
+              
+              // Health
+              healthState: wsMetrics.healthState ?? undefined,
+              
+              // Cluster Info
+              clusterId: wsMetrics.clusterId ?? clusterIdNum,
             };
             setCurrentMetrics(wsMetricsData);
             
@@ -455,32 +480,87 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       setMetricsError(null);
     }
     
-    // Debug: verificar apenas métricas essenciais recebidas do WebSocket
+    // Debug: verificar TODOS os campos recebidos do WebSocket
     if (process.env.NODE_ENV === 'development') {
-      console.log('📊 Métricas recebidas do WebSocket para cluster', clusterIdNum, {
+      console.log('📊 Métricas COMPLETAS recebidas do WebSocket para cluster', clusterIdNum, {
+        // CPU
         cpuUsagePercent: wsMetrics.cpuUsagePercent,
-        memoryUsagePercent: wsMetrics.memoryUsagePercent,
-        diskUsagePercent: wsMetrics.diskUsagePercent,
         cpuLimitCores: wsMetrics.cpuLimitCores,
+        
+        // Memory
+        memoryUsagePercent: wsMetrics.memoryUsagePercent,
+        memoryUsageMb: wsMetrics.memoryUsageMb,
+        memoryLimitMb: wsMetrics.memoryLimitMb,
+        
+        // Disk
+        diskUsagePercent: wsMetrics.diskUsagePercent,
+        diskUsageMb: wsMetrics.diskUsageMb,
+        diskLimitMb: wsMetrics.diskLimitMb,
+        
+        // Network
+        networkRxBytes: wsMetrics.networkRxBytes,
+        networkTxBytes: wsMetrics.networkTxBytes,
         networkMB: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
           ? ((wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
-          : 'N/A'
+          : 'N/A',
+        
+        // Container
+        containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
+        containerStatus: wsMetrics.containerStatus,
+        
+        // Health
+        healthState: wsMetrics.healthState,
+        
+        // Objeto completo para debug
+        objetoCompleto: wsMetrics
       });
     }
     
+    // Usar TODOS os campos disponíveis do WebSocket (ClusterMetricsMessage)
     const metrics: ClusterMetrics = {
+      // CPU - usar diretamente do WebSocket
       cpuUsagePercent: wsMetrics.cpuUsagePercent ?? undefined,
+      cpuLimitCores: wsMetrics.cpuLimitCores ?? undefined,
+      
+      // Memory - usar diretamente do WebSocket
       memoryUsagePercent: wsMetrics.memoryUsagePercent ?? undefined,
-      // Converter null para undefined para que sanitizeValue funcione corretamente
+      memoryUsageMb: wsMetrics.memoryUsageMb ?? undefined,
+      memoryLimitMb: wsMetrics.memoryLimitMb ?? undefined,
+      
+      // Disk - usar diretamente do WebSocket
       diskUsagePercent: wsMetrics.diskUsagePercent !== null && wsMetrics.diskUsagePercent !== undefined 
         ? wsMetrics.diskUsagePercent 
         : undefined,
-      containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
-      healthState: wsMetrics.healthState,
+      diskUsageMb: wsMetrics.diskUsageMb ?? undefined,
+      diskLimitMb: wsMetrics.diskLimitMb ?? undefined,
+      diskReadBytes: wsMetrics.diskReadBytes ?? undefined,
+      diskWriteBytes: wsMetrics.diskWriteBytes ?? undefined,
+      
+      // Network - calcular de networkRxBytes e networkTxBytes
+      networkRxBytes: wsMetrics.networkRxBytes ?? undefined,
+      networkTxBytes: wsMetrics.networkTxBytes ?? undefined,
+      networkLimitMbps: wsMetrics.networkLimitMbps ?? undefined,
       networkUsage: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
         ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
         : undefined,
-      // Incluir apenas métricas essenciais, não todos os dados extras
+      
+      // Container - usar diretamente do WebSocket
+      containerUptimeSeconds: wsMetrics.containerUptimeSeconds ?? undefined,
+      containerRestartCount: wsMetrics.containerRestartCount ?? undefined,
+      containerStatus: wsMetrics.containerStatus ?? undefined,
+      
+      // Application - usar diretamente do WebSocket
+      applicationResponseTimeMs: wsMetrics.applicationResponseTimeMs ?? undefined,
+      applicationStatusCode: wsMetrics.applicationStatusCode ?? undefined,
+      
+      // Health - usar diretamente do WebSocket
+      healthState: wsMetrics.healthState ?? undefined,
+      errorMessage: wsMetrics.errorMessage ?? undefined,
+      
+      // Cluster Info - usar diretamente do WebSocket
+      clusterId: wsMetrics.clusterId ?? clusterIdNum,
+      clusterName: wsMetrics.clusterName ?? undefined,
+      timestamp: wsMetrics.timestamp ?? undefined, // LocalDateTime serializado como string ISO
     };
     
     // Atualizar métricas apenas se houver mudança significativa

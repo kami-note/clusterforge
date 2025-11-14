@@ -47,22 +47,33 @@ export function ClientDashboard() {
     router.push(`/client/clusters/${clusterId}`);
   };
 
-  const handleClusterAction = async (clusterId: string, action: 'start' | 'stop' | 'restart') => {
-    try {
-      // Optimistic update - update UI immediately
-      updateCluster(clusterId, { status: action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting' });
+  const handleClusterAction = (clusterId: string, action: 'start' | 'stop' | 'restart') => {
+    // Optimistic update - update UI immediately
+    updateCluster(clusterId, { status: action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting' });
 
-      const success = await performClusterAction(clusterId, action);
-
-      if (!success) {
-        throw new Error('Falha ao executar ação no cluster');
-      }
-
-      toast.success(`Cluster ${action === 'start' ? 'iniciado' : action === 'stop' ? 'parado' : 'reiniciado'} com sucesso!`);
-    } catch (err) {
-      toast.error(`Erro ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
-      console.error(`Error performing cluster action:`, err);
-    }
+    // Executar ação em background (não bloquear UI)
+    performClusterAction(clusterId, action)
+      .then((success) => {
+        if (!success) {
+          // Reverter atualização otimista em caso de falha
+          updateCluster(clusterId, { 
+            status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running' 
+          });
+          toast.error(`Falha ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
+        }
+        // Se sucesso, a atualização já foi feita otimisticamente e será confirmada pelo polling
+      })
+      .catch((err) => {
+        // Reverter atualização otimista em caso de erro
+        updateCluster(clusterId, { 
+          status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running' 
+        });
+        toast.error(`Erro ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
+        // Erro já tratado - não logar se for BackendOffline
+        if (!(err as any)?.name || (err as any).name !== 'BackendOffline') {
+          console.error(`Error performing cluster action:`, err);
+        }
+      });
   };
 
   const getStatusColor = (status: string) => {

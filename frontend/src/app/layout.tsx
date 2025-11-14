@@ -48,6 +48,37 @@ export default function RootLayout({
                     }
                   }
                 } catch (e) {}
+                
+                // Filtrar erros BackendOffline do console
+                const originalError = console.error;
+                console.error = function(...args) {
+                  // Verificar se algum argumento é um erro BackendOffline
+                  const shouldSuppress = args.some(arg => {
+                    if (arg && typeof arg === 'object') {
+                      // Verificar propriedade name
+                      if (arg.name === 'BackendOffline') return true;
+                      // Verificar mensagem
+                      const message = String(arg.message || '').toLowerCase();
+                      if (message.includes('servidor está temporariamente indisponível') ||
+                          message.includes('backend está em execução') ||
+                          message.includes('backend offline')) {
+                        return true;
+                      }
+                    }
+                    // Verificar se é string
+                    const str = String(arg || '').toLowerCase();
+                    if (str.includes('backend offline') ||
+                        str.includes('servidor está temporariamente indisponível')) {
+                      return true;
+                    }
+                    return false;
+                  });
+                  
+                  // Só logar se não for BackendOffline
+                  if (!shouldSuppress) {
+                    originalError.apply(console, args);
+                  }
+                };
               })();
             `,
           }}
