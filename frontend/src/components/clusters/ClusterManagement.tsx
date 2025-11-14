@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useDeferredValue, useTransition, memo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Skeleton from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useClusters } from '@/hooks/useClusters';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
+import { useDebounce } from '@/hooks/useDebounce';
 import { clusterService } from '@/services/cluster.service';
 import { toast } from 'sonner';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
@@ -205,6 +206,12 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const [processingClusters, setProcessingClusters] = useState<Set<string>>(new Set());
   const [clusterErrors, setClusterErrors] = useState<Map<string, DockerErrorDetails>>(new Map());
   
+  // Usar useDebounce para busca (melhora performance)
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+  
+  // Usar useTransition para operações pesadas (filtros)
+  const [isPending, startTransition] = useTransition();
+  
   // Mostrar erro de WebSocket apenas uma vez
   useEffect(() => {
     if (wsError && !wsErrorShown && !connected) {
@@ -282,26 +289,33 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     });
   }, [apiClusters, metrics]);
 
+  // Usar useDeferredValue para filtros (prioriza renderização da UI)
+  const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
+  const deferredStatusFilter = useDeferredValue(statusFilter);
+  const deferredOwnerFilter = useDeferredValue(ownerFilter);
+  const deferredServiceFilter = useDeferredValue(serviceFilter);
+  const deferredAlertFilter = useDeferredValue(alertFilter);
+  
   // Precisa ser declarado ANTES de qualquer retorno condicional para manter a ordem dos Hooks
   const filteredClusters = useMemo(() => {
     return clusters.filter(cluster => {
       const matchesSearch =
-        cluster.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        cluster.owner.toLowerCase().includes(searchTerm.toLowerCase());
+        cluster.name.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
+        cluster.owner.toLowerCase().includes(deferredSearchTerm.toLowerCase());
 
-      const matchesStatus = statusFilter === 'all' || cluster.status === statusFilter;
+      const matchesStatus = deferredStatusFilter === 'all' || cluster.status === deferredStatusFilter;
 
-      const matchesOwner = ownerFilter === 'Todos os Donos' || cluster.owner === ownerFilter;
+      const matchesOwner = deferredOwnerFilter === 'Todos os Donos' || cluster.owner === deferredOwnerFilter;
 
-      const matchesService = serviceFilter === 'Todos os Serviços' || cluster.service === serviceFilter;
+      const matchesService = deferredServiceFilter === 'Todos os Serviços' || cluster.service === deferredServiceFilter;
 
-      const matchesAlert = alertFilter === 'all' ||
-        (alertFilter === 'with-alerts' && cluster.hasAlert) ||
-        (alertFilter === 'no-alerts' && !cluster.hasAlert);
+      const matchesAlert = deferredAlertFilter === 'all' ||
+        (deferredAlertFilter === 'with-alerts' && cluster.hasAlert) ||
+        (deferredAlertFilter === 'no-alerts' && !cluster.hasAlert);
 
       return matchesSearch && matchesStatus && matchesOwner && matchesService && matchesAlert;
     });
-  }, [clusters, searchTerm, statusFilter, ownerFilter, serviceFilter, alertFilter]);
+  }, [clusters, deferredSearchTerm, deferredStatusFilter, deferredOwnerFilter, deferredServiceFilter, deferredAlertFilter]);
 
   // Exibir estado de carregamento claro para evitar mostrar dados inconsistentes
   if (loading) {
@@ -377,8 +391,8 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     return Math.min(Math.round((used / limit) * 100), 100);
   };
 
-  // Componente compacto para exibir métrica em formato horizontal
-  const CompactMetric = ({ 
+  // Componente compacto para exibir métrica em formato horizontal (memoizado para performance)
+  const CompactMetric = memo(({ 
     label, 
     icon: Icon, 
     percentage, 
@@ -434,7 +448,9 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         </div>
       </div>
     );
-  };
+  });
+  
+  CompactMetric.displayName = 'CompactMetric';
 
   // Função para parsear mensagens de erro do Docker
   const parseDockerError = (errorMessage: string, responseMessage?: string): DockerErrorDetails | null => {
@@ -799,6 +815,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           <p className="text-muted-foreground">
             Controle total sobre todos os serviços hospedados • {filteredClusters.length} de {clusters.length} clusters
             {connected && ' • Métricas atualizadas em tempo real'}
+            {isPending && ' • Filtrando...'}
           </p>
         </div>
         <Button className="flex items-center space-x-2" onClick={handleCreateCluster}>
@@ -837,14 +854,24 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                 <Input
                   placeholder="Buscar por nome ou dono..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    // Usar transition para atualização não urgente
+                    startTransition(() => {
+                      // A busca já está sendo debounced, então apenas marcamos como pending
+                    });
+                  }}
                   className="pl-10"
                 />
               </div>
             </div>
 
             {/* Filtro de Status */}
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => {
+              startTransition(() => {
+                setStatusFilter(value);
+              });
+            }}>
               <SelectTrigger>
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -857,7 +884,11 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             </Select>
 
             {/* Filtro de Dono */}
-            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+            <Select value={ownerFilter} onValueChange={(value) => {
+              startTransition(() => {
+                setOwnerFilter(value);
+              });
+            }}>
               <SelectTrigger>
                 <SelectValue placeholder="Dono" />
               </SelectTrigger>
@@ -869,7 +900,11 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             </Select>
 
             {/* Filtro de Serviço */}
-            <Select value={serviceFilter} onValueChange={setServiceFilter}>
+            <Select value={serviceFilter} onValueChange={(value) => {
+              startTransition(() => {
+                setServiceFilter(value);
+              });
+            }}>
               <SelectTrigger>
                 <SelectValue placeholder="Serviço" />
               </SelectTrigger>
@@ -881,7 +916,11 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             </Select>
 
             {/* Filtro de Alerta */}
-            <Select value={alertFilter} onValueChange={setAlertFilter}>
+            <Select value={alertFilter} onValueChange={(value) => {
+              startTransition(() => {
+                setAlertFilter(value);
+              });
+            }}>
               <SelectTrigger>
                 <SelectValue placeholder="Alerta" />
               </SelectTrigger>
@@ -961,7 +1000,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
                   )}
                   <Card 
                     className={`
-                      transition-all duration-200 hover:shadow-md
+                      transition-smooth hover-lift animate-fade-in
                       ${cluster.hasAlert ? 'border-red-200 dark:border-red-800' : ''}
                       ${isProcessing ? 'opacity-75 pointer-events-none' : ''}
                       ${clusterError ? 'border-orange-200 dark:border-orange-800' : ''}
