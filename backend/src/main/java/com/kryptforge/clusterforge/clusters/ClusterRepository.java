@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ClusterRepository extends JpaRepository<ClusterInstance, UUID> {
 	Optional<ClusterInstance> findByName(String name);
 	boolean existsByName(String name);
+	Optional<ClusterInstance> findByContainerId(String containerId);
 }
 
 
