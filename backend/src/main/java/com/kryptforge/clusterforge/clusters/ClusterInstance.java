@@ -67,6 +67,10 @@ public class ClusterInstance {
 	@Column(length = 64)
 	private String containerId;
 
+	@JdbcTypeCode(SqlTypes.VARCHAR)
+	@Column(name = "owner_id", length = 36)
+	private UUID ownerId;
+
 	@PrePersist
 	void onCreate() {
 		this.createdAt = Instant.now();
@@ -145,6 +149,14 @@ public class ClusterInstance {
 
 	public void setContainerId(String containerId) {
 		this.containerId = containerId;
+	}
+
+	public UUID getOwnerId() {
+		return ownerId;
+	}
+
+	public void setOwnerId(UUID ownerId) {
+		this.ownerId = ownerId;
 	}
 
 	public static class EnvConverter extends JsonAttributeConverter<Map<String,String>> {

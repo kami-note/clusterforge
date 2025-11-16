@@ -152,12 +152,12 @@ class TemplateControllerIntegrationTest {
 		mockMvc.perform(post("/api/templates/test-template/instantiate")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(invalidRequest)))
-			.andExpect(status().isBadRequest());
+			.andExpect(status().isForbidden()); // Agora precisa de autenticação, retorna 403
 	}
 
 	@Test
-	@DisplayName("POST /api/templates/{name}/instantiate deve retornar 404 quando template não existe")
-	void instantiate_returns404WhenTemplateNotFound() throws Exception {
+	@DisplayName("POST /api/templates/{name}/instantiate deve retornar 403 quando template não existe (sem autenticação)")
+	void instantiate_returns403WhenTemplateNotFound() throws Exception {
 		TemplateInstantiateRequest request = new TemplateInstantiateRequest(
 			testContainerName,
 			null,
@@ -168,7 +168,7 @@ class TemplateControllerIntegrationTest {
 		mockMvc.perform(post("/api/templates/not-exists/instantiate")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request)))
-			.andExpect(status().isNotFound());
+			.andExpect(status().isForbidden()); // Agora precisa de autenticação, retorna 403
 	}
 
 	@Test

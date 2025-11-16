@@ -13,11 +13,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.templates.TemplateService;
 import com.kryptforge.clusterforge.templates.dto.TemplateDetail;
 import com.kryptforge.clusterforge.templates.dto.TemplateFileEntry;
+import com.kryptforge.clusterforge.users.CurrentUser;
+import com.kryptforge.clusterforge.users.Role;
+import com.kryptforge.clusterforge.users.User;
 
 class DefaultClusterServiceTest {
 
@@ -25,7 +30,9 @@ class DefaultClusterServiceTest {
 	private TemplateService templateService;
 	private DockerEngineService dockerEngineService;
 	private PortManager portManager;
+	private CurrentUser currentUser;
 	private DefaultClusterService service;
+	private User mockUser;
 
 	@BeforeEach
 	void setup() {
@@ -33,7 +40,25 @@ class DefaultClusterServiceTest {
 		templateService = mock(TemplateService.class);
 		dockerEngineService = mock(DockerEngineService.class);
 		portManager = mock(PortManager.class);
-		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager);
+		currentUser = mock(CurrentUser.class);
+		
+		// Cria usuário mock para todos os testes
+		mockUser = new User();
+		try {
+			java.lang.reflect.Field idField = User.class.getDeclaredField("id");
+			idField.setAccessible(true);
+			idField.set(mockUser, UUID.randomUUID());
+			idField.setAccessible(false);
+		} catch (Exception e) {
+			throw new RuntimeException("Erro ao setar ID do usuário para teste", e);
+		}
+		mockUser.setUsername("testuser");
+		mockUser.setRole(Role.ADMIN);
+		
+		// Mock CurrentUser para retornar usuário autenticado
+		when(currentUser.getCurrentUser()).thenReturn(Optional.of(mockUser));
+		
+		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager, currentUser);
 	}
 
 	@Test
@@ -58,6 +83,7 @@ class DefaultClusterServiceTest {
 		existing.setName("c2");
 		existing.setTemplateName("webserver-php");
 		existing.setStatus(ClusterStatus.PENDING);
+		existing.setOwnerId(mockUser.getId());
 
 		when(repository.findById(any())).thenReturn(Optional.of(existing));
 		when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -80,6 +106,7 @@ class DefaultClusterServiceTest {
 		instance.setContainerId("container-123");
 		instance.setPorts(List.of(9000, 9001));
 		instance.setStatus(ClusterStatus.ACTIVE);
+		instance.setOwnerId(mockUser.getId());
 
 		when(repository.findById(id)).thenReturn(Optional.of(instance));
 		doNothing().when(dockerEngineService).stopContainer(anyString(), anyInt());
@@ -109,6 +136,7 @@ class DefaultClusterServiceTest {
 		instance.setName("test-cluster");
 		instance.setContainerId(null);
 		instance.setStatus(ClusterStatus.PENDING);
+		instance.setOwnerId(mockUser.getId());
 
 		when(repository.findById(id)).thenReturn(Optional.of(instance));
 		doNothing().when(repository).deleteById(id);
@@ -132,6 +160,7 @@ class DefaultClusterServiceTest {
 		instance.setContainerId("container-123");
 		instance.setPorts(List.of(9000, 9001));
 		instance.setStatus(ClusterStatus.ACTIVE);
+		instance.setOwnerId(mockUser.getId());
 
 		when(repository.findById(id)).thenReturn(Optional.of(instance));
 		doNothing().when(dockerEngineService).stopContainer(anyString(), anyInt());
@@ -148,9 +177,9 @@ class DefaultClusterServiceTest {
 		verify(dockerEngineService, times(1)).removeContainer("container-123", true, false);
 		// Verifica que liberou as portas
 		verify(portManager, times(1)).releasePorts(List.of(9000, 9001));
-		// Verifica que atualizou o registro (limpa containerId e status STOPPED)
+		// Verifica que atualizou o registro (limpa containerId e status DELETED)
 		verify(repository, times(1)).save(argThat(inst -> 
-			inst.getContainerId() == null && inst.getStatus() == ClusterStatus.STOPPED
+			inst.getContainerId() == null && inst.getStatus() == ClusterStatus.DELETED
 		));
 	}
 
@@ -162,6 +191,7 @@ class DefaultClusterServiceTest {
 		instance.setName("test-cluster");
 		instance.setContainerId("container-123");
 		instance.setPorts(List.of(9000));
+		instance.setOwnerId(mockUser.getId());
 
 		when(repository.findById(id)).thenReturn(Optional.of(instance));
 		doThrow(new RuntimeException("Container já parado")).when(dockerEngineService).stopContainer(anyString(), anyInt());
@@ -184,6 +214,7 @@ class DefaultClusterServiceTest {
 		ClusterInstance instance = new ClusterInstance();
 		instance.setName("test-cluster");
 		instance.setContainerId(null);
+		instance.setOwnerId(mockUser.getId());
 
 		when(repository.findById(id)).thenReturn(Optional.of(instance));
 
@@ -267,6 +298,7 @@ class DefaultClusterServiceTest {
 		instance.setName("test-cluster");
 		instance.setContainerId("container-123");
 		instance.setPorts(List.of(9000));
+		instance.setOwnerId(mockUser.getId());
 
 		when(repository.findById(id)).thenReturn(Optional.of(instance));
 		doNothing().when(dockerEngineService).stopContainer(anyString(), anyInt());

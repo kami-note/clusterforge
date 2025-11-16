@@ -13,6 +13,9 @@ import org.springframework.util.StringUtils;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.templates.TemplateService;
+import com.kryptforge.clusterforge.users.CurrentUser;
+import com.kryptforge.clusterforge.users.Role;
+import com.kryptforge.clusterforge.users.User;
 
 @Service
 @Transactional
@@ -22,13 +25,15 @@ public class DefaultClusterService implements ClusterService {
 	private final TemplateService templateService;
 	private final DockerEngineService dockerEngineService;
 	private final PortManager portManager;
+	private final CurrentUser currentUser;
 	private static final Logger log = LoggerFactory.getLogger(DefaultClusterService.class);
 
-	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager) {
+	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager, CurrentUser currentUser) {
 		this.repository = repository;
 		this.templateService = templateService;
 		this.dockerEngineService = dockerEngineService;
 		this.portManager = portManager;
+		this.currentUser = currentUser;
 	}
 
 	@Override
@@ -49,10 +54,14 @@ public class DefaultClusterService implements ClusterService {
 			throw new IllegalArgumentException("templateName inexistente: " + templateName, e);
 		}
 
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+
 		ClusterInstance c = new ClusterInstance();
 		c.setName(name);
 		c.setTemplateName(templateName);
 		c.setStatus(ClusterStatus.PENDING);
+		c.setOwnerId(user.getId());
 		if (params != null) {
 			c.setEnv(params.env());
 			c.setPorts(normalizePorts(params.ports()));
@@ -64,25 +73,62 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	@Transactional(readOnly = true)
 	public List<ClusterInstance> list() {
-		return repository.findAll();
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
+		if (user.getRole() == Role.ADMIN) {
+			return repository.findAll();
+		} else {
+			return repository.findByOwnerId(user.getId());
+		}
 	}
 
 	@Override
 	@Transactional(readOnly = true)
 	public Optional<ClusterInstance> get(UUID id) {
-		return repository.findById(id);
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
+		Optional<ClusterInstance> cluster = repository.findById(id);
+		
+		if (cluster.isEmpty()) {
+			return Optional.empty();
+		}
+		
+		ClusterInstance instance = cluster.get();
+		
+		// Admin tem acesso a todos, user apenas aos seus
+		if (user.getRole() == Role.ADMIN || user.getId().equals(instance.getOwnerId())) {
+			return cluster;
+		}
+		
+		return Optional.empty();
 	}
 
 	@Override
 	public ClusterInstance updateStatus(UUID id, ClusterStatus status) {
-		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
+		ClusterInstance c = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		checkOwnership(user, c);
+		
 		c.setStatus(status != null ? status : c.getStatus());
 		return repository.save(c);
 	}
 
 	@Override
 	public ClusterInstance updateParams(UUID id, ClusterParams params) {
-		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
+		ClusterInstance c = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		checkOwnership(user, c);
+		
 		if (params != null) {
 			if (params.env() != null) c.setEnv(params.env());
 			if (params.ports() != null) c.setPorts(normalizePorts(params.ports()));
@@ -100,8 +146,13 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public ClusterInstance syncStatus(UUID id) {
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
 		ClusterInstance instance = repository.findById(id)
 			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		checkOwnership(user, instance);
 		
 		String containerId = instance.getContainerId();
 		if (containerId == null || containerId.isBlank()) {
@@ -159,8 +210,13 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public ClusterInstance startContainer(UUID id) {
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
 		ClusterInstance instance = repository.findById(id)
 			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		checkOwnership(user, instance);
 		
 		String containerId = instance.getContainerId();
 		if (containerId == null || containerId.isBlank()) {
@@ -182,8 +238,13 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public ClusterInstance stopContainer(UUID id, int timeoutSeconds) {
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
 		ClusterInstance instance = repository.findById(id)
 			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		checkOwnership(user, instance);
 		
 		String containerId = instance.getContainerId();
 		if (containerId == null || containerId.isBlank()) {
@@ -211,8 +272,13 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public void delete(UUID id) {
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
 		ClusterInstance instance = repository.findById(id)
 			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		checkOwnership(user, instance);
 		
 		// Remove container Docker se existir
 		deleteContainer(id);
@@ -224,8 +290,13 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public void deleteContainer(UUID id) {
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
 		ClusterInstance instance = repository.findById(id)
 			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		checkOwnership(user, instance);
 		
 		String containerId = instance.getContainerId();
 		if (containerId == null || containerId.isBlank()) {
@@ -271,6 +342,18 @@ public class DefaultClusterService implements ClusterService {
 		String name = instance.getName();
 		repository.deleteById(id);
 		log.info("Instância '{}' removida do banco de dados (container não foi removido)", name);
+	}
+
+	private void checkOwnership(User user, ClusterInstance instance) {
+		// Admin tem acesso a todos os clusters
+		if (user.getRole() == Role.ADMIN) {
+			return;
+		}
+		
+		// User só tem acesso aos seus próprios clusters
+		if (!user.getId().equals(instance.getOwnerId())) {
+			throw new IllegalArgumentException("acesso negado: cluster não pertence ao usuário");
+		}
 	}
 
 	private List<Integer> normalizePorts(List<Integer> ports) {
