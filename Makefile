@@ -4,7 +4,7 @@ SCRIPT := /home/levi/Projects/clusterforge-f/scripts/install.sh
 DOCKER_DAEMON_JSON := /etc/docker/daemon.json
 DOCKER_OVERRIDE := /etc/systemd/system/docker.service.d/override.conf
 
-.PHONY: help status up-socket up-tcp down-tcp restart-docker
+.PHONY: help status up-socket up-tcp down-tcp restart-docker test test-ping
 
 help:
 	@echo "Targets disponíveis:"
@@ -13,6 +13,8 @@ help:
 	@echo "  make up-tcp        - Configura API TCP local (127.0.0.1:2375)"
 	@echo "  make down-tcp      - Desativa API TCP local (remove override e ajusta daemon.json, com backup)"
 	@echo "  make restart-docker- Reinicia o serviço Docker"
+	@echo "  make test          - Roda testes unitários do backend (sem ping real)"
+	@echo "  make test-ping     - Roda testes com ping real ao Docker (DOCKER_TEST_ALLOW_PING=1)"
 
 status:
 	sudo bash $(SCRIPT) --status
@@ -52,5 +54,11 @@ restart-docker:
 	sudo systemctl daemon-reload
 	sudo systemctl restart docker
 	@systemctl is-active --quiet docker && echo "Docker ativo." || (echo "Falha ao iniciar Docker" >&2; exit 1)
+
+test:
+	@bash -lc 'cd /home/levi/Projects/clusterforge-f/backend && ./mvnw -q -DskipITs test'
+
+test-ping:
+	@bash -lc 'cd /home/levi/Projects/clusterforge-f/backend && DOCKER_TEST_ALLOW_PING=1 ./mvnw -q -DskipITs test'
 
 
