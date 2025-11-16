@@ -23,6 +23,7 @@ public interface DockerEngineService {
 	String createContainer(String image,
 						   List<String> command,
 						   Map<String, String> environment,
+						   List<String> portBindings,
 						   List<String> bindMounts,
 						   String name);
 	void startContainer(String containerId);

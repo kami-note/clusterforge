@@ -20,6 +20,10 @@ import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Image;
+import com.github.dockerjava.api.model.Ports;
+import com.github.dockerjava.api.model.Ports.Binding;
+import com.github.dockerjava.api.model.ExposedPort;
+import com.github.dockerjava.api.model.InternetProtocol;
 import com.github.dockerjava.api.model.Volume;
 
 @Service
@@ -55,6 +59,7 @@ public class DefaultDockerEngineService implements DockerEngineService {
 	public String createContainer(String image,
 								  List<String> command,
 								  Map<String, String> environment,
+								  List<String> portBindings,
 								  List<String> bindMounts,
 								  String name) {
 		requireText(image, "image");
@@ -72,11 +77,52 @@ public class DefaultDockerEngineService implements DockerEngineService {
 			}
 		}
 
+		Ports ports = new Ports();
+		if (!CollectionUtils.isEmpty(portBindings)) {
+			for (String pb : portBindings) {
+				if (!StringUtils.hasText(pb)) continue;
+				// formatos aceitos: "8080:80", "127.0.0.1:8080:80", "8080:80/tcp", "8080:80/udp"
+				String spec = pb.trim();
+				String proto = "tcp";
+				int slashIdx = spec.indexOf('/');
+				if (slashIdx > 0) {
+					proto = spec.substring(slashIdx + 1).trim();
+					spec = spec.substring(0, slashIdx);
+				}
+				String[] parts = spec.split(":");
+				try {
+					if (parts.length == 2) {
+						int hostPort = Integer.parseInt(parts[0]);
+						int containerPort = Integer.parseInt(parts[1]);
+						InternetProtocol ip = "udp".equalsIgnoreCase(proto) ? InternetProtocol.UDP : InternetProtocol.TCP;
+						ExposedPort ep = new ExposedPort(containerPort, ip);
+						ports.bind(ep, Binding.bindPort(hostPort));
+					} else if (parts.length == 3) {
+						// hostIp : hostPort : containerPort
+						String hostIp = parts[0];
+						int hostPort = Integer.parseInt(parts[1]);
+						int containerPort = Integer.parseInt(parts[2]);
+						InternetProtocol ip = "udp".equalsIgnoreCase(proto) ? InternetProtocol.UDP : InternetProtocol.TCP;
+						ExposedPort ep = new ExposedPort(containerPort, ip);
+						ports.bind(ep, Binding.bindIpAndPort(hostIp, hostPort));
+					}
+				} catch (Exception ignored) {
+					// ignora entradas inválidas
+				}
+			}
+		}
+
 		HostConfig hostConfig = HostConfig.newHostConfig()
-			.withBinds(binds);
+			.withBinds(binds)
+			.withPortBindings(ports);
 
 		var createCmd = dockerClient.createContainerCmd(image)
 			.withHostConfig(hostConfig);
+
+		// expõe portas (necessário em alguns daemons)
+		if (!ports.getBindings().isEmpty()) {
+			createCmd.withExposedPorts(ports.getBindings().keySet().toArray(new ExposedPort[0]));
+		}
 
 		if (!CollectionUtils.isEmpty(command)) {
 			createCmd.withCmd(command);
