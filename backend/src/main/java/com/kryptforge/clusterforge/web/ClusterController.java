@@ -19,7 +19,6 @@ import org.springframework.web.server.ResponseStatusException;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
 import com.kryptforge.clusterforge.clusters.ClusterService;
 import com.kryptforge.clusterforge.clusters.ClusterStatus;
-import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterCreateRequest;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterResponse;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterStatusUpdateRequest;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterUpdateParamsRequest;
@@ -37,15 +36,8 @@ public class ClusterController {
 		this.dockerEngineService = dockerEngineService;
 	}
 
-	@PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
-	public ResponseEntity<ClusterResponse> create(@RequestBody ClusterCreateRequest req) {
-		try {
-			ClusterInstance c = service.create(req.name(), req.templateName(), req.toParams());
-			return ResponseEntity.status(HttpStatus.CREATED).body(ClusterResponse.from(c));
-		} catch (IllegalArgumentException e) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
-		}
-	}
+	// POST /api/clusters removido - use POST /api/templates/{name}/instantiate para criar clusters
+	// A instanciação de template já cria o container Docker e persiste no banco
 
 	@GetMapping
 	public List<ClusterResponse> list() {
