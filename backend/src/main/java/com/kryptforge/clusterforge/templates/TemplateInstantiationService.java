@@ -12,12 +12,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 
 import com.kryptforge.clusterforge.docker.DockerEngineService;
+import com.kryptforge.clusterforge.docker.PortManager;
 
 /**
  * Serviço responsável por instanciar um template (docker-compose.yml simplificado)
@@ -32,20 +36,28 @@ public class TemplateInstantiationService {
 
 	private final TemplateProperties templateProperties;
 	private final DockerEngineService dockerEngineService;
+	private final PortManager portManager;
+	private static final Logger log = LoggerFactory.getLogger(TemplateInstantiationService.class);
 
 	public TemplateInstantiationService(TemplateProperties templateProperties,
-										DockerEngineService dockerEngineService) {
+										DockerEngineService dockerEngineService,
+										PortManager portManager) {
 		this.templateProperties = Objects.requireNonNull(templateProperties, "templateProperties");
-	 this.dockerEngineService = Objects.requireNonNull(dockerEngineService, "dockerEngineService");
+		this.dockerEngineService = Objects.requireNonNull(dockerEngineService, "dockerEngineService");
+		this.portManager = Objects.requireNonNull(portManager, "portManager");
 	}
 
-	public String instantiate(String templateName,
+	public InstantiationResult instantiate(String templateName,
 							  String instanceName,
 							  Map<String, String> overrideEnv,
 							  List<String> overridePorts,
 							  List<String> overrideBinds) throws IOException {
 		requireText(templateName, "templateName");
 		requireText(instanceName, "instanceName");
+		// valida caracteres do nome (aproximação simples; Docker exige [a-zA-Z0-9][a-zA-Z0-9_.-]*)
+		if (!instanceName.matches("^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")) {
+			throw new IllegalArgumentException("instanceName inválido. Use [a-zA-Z0-9][a-zA-Z0-9_.-]*");
+		}
 
 		Path root = Path.of(templateProperties.getTemplatesPath()).toAbsolutePath().normalize();
 		Path dir = root.resolve(templateName).normalize();
@@ -69,10 +81,23 @@ public class TemplateInstantiationService {
 			env.putAll(overrideEnv);
 		}
 
-		// portas
+		// portas - usa PortManager para alocar portas dinamicamente se necessário
 		List<String> ports = new ArrayList<>(spec.ports);
 		if (!CollectionUtils.isEmpty(overridePorts)) {
 			ports = new ArrayList<>(overridePorts);
+		}
+		
+		// Mapeia portas usando PortManager para alocar portas do host dinamicamente
+		// Se a porta do host não for especificada (formato "containerPort" ou "0:containerPort"),
+		// o PortManager aloca uma porta disponível automaticamente
+		if (!ports.isEmpty()) {
+			try {
+				ports = portManager.mapPorts(ports);
+				log.debug("Portas mapeadas para template '{}': {}", templateName, ports);
+			} catch (Exception e) {
+				log.error("Erro ao mapear portas para template '{}': {}", templateName, e.getMessage());
+				throw new IllegalStateException("Erro ao alocar portas: " + e.getMessage(), e);
+			}
 		}
 
 		// volumes/binds - resolve caminhos relativos ao diretório do template
@@ -85,6 +110,9 @@ public class TemplateInstantiationService {
 			String containerPath = parts[1];
 			if (hostPath.startsWith("./") || hostPath.startsWith("../")) {
 				hostPath = dir.resolve(hostPath).normalize().toString();
+			} else if (!Path.of(hostPath).isAbsolute() && StringUtils.hasText(templateProperties.getVolumesBasePath())) {
+				// se for relativo mas não começar com ./ ou ../, prefixa volumesBasePath
+				hostPath = Path.of(templateProperties.getVolumesBasePath()).toAbsolutePath().resolve(hostPath).normalize().toString();
 			}
 			// mantém sufixo de modo se presente (:ro/:rw)
 			String mode = parts.length >= 3 ? ":" + parts[2] : "";
@@ -92,6 +120,14 @@ public class TemplateInstantiationService {
 		}
 		if (!CollectionUtils.isEmpty(overrideBinds)) {
 			binds = new ArrayList<>(overrideBinds);
+		}
+
+		// garante imagem presente
+		try {
+			log.info("Fazendo pull da imagem '{}' para template '{}'", spec.image, templateName);
+			dockerEngineService.pullImage(spec.image);
+		} catch (Exception e) {
+			log.warn("Falha ao fazer pull da imagem {}: {}", spec.image, e.getMessage());
 		}
 
 		// cria e inicia container
@@ -103,13 +139,22 @@ public class TemplateInstantiationService {
 			binds,
 			instanceName
 		);
-		dockerEngineService.startContainer(containerId);
-		return containerId;
+		try {
+			dockerEngineService.startContainer(containerId);
+		} catch (Exception e) {
+			log.warn("Falha ao iniciar container {}: {}", containerId, e.getMessage());
+			throw e;
+		}
+		return new InstantiationResult(containerId, ports);
 	}
 
 	private ComposeServiceSpec readFirstService(Path composeFile) throws IOException {
 		try (InputStream in = Files.newInputStream(composeFile)) {
-			Yaml yaml = new Yaml();
+			LoaderOptions opts = new LoaderOptions();
+			opts.setAllowRecursiveKeys(false);
+			opts.setMaxAliasesForCollections(50);
+			opts.setNestingDepthLimit(64);
+			Yaml yaml = new Yaml(opts);
 			Object doc = yaml.load(in);
 			if (!(doc instanceof Map)) {
 				throw new IllegalStateException("docker-compose inválido");
@@ -142,7 +187,6 @@ public class TemplateInstantiationService {
 		return o == null ? null : String.valueOf(o);
 	}
 
-	@SuppressWarnings("unchecked")
 	private static Map<String, String> asStringMap(Object o) {
 		Map<String, String> out = new LinkedHashMap<>();
 		if (o instanceof Map<?, ?> m) {
@@ -165,7 +209,6 @@ public class TemplateInstantiationService {
 		return out;
 	}
 
-	@SuppressWarnings("unchecked")
 	private static List<String> asStringList(Object o) {
 		List<String> out = new ArrayList<>();
 		if (o instanceof List<?> l) {

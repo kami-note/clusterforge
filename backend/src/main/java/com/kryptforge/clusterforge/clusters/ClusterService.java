@@ -16,7 +16,25 @@ public interface ClusterService {
 
 	ClusterInstance updateParams(UUID id, ClusterParams params);
 
+	ClusterInstance updateContainerId(UUID id, String containerId);
+
+	/**
+	 * Remove o container Docker e o registro do banco de dados.
+	 * @param id ID da instância
+	 */
 	void delete(UUID id);
+
+	/**
+	 * Remove apenas o container Docker (mantém registro no banco).
+	 * @param id ID da instância
+	 */
+	void deleteContainer(UUID id);
+
+	/**
+	 * Remove apenas do banco de dados (não remove container Docker).
+	 * @param id ID da instância
+	 */
+	void deleteFromDatabase(UUID id);
 
 	record ClusterParams(
 		java.util.Map<String,String> env,

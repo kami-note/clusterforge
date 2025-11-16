@@ -24,12 +24,14 @@ import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.api.model.Ports.Binding;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.InternetProtocol;
-import com.github.dockerjava.api.model.Volume;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class DefaultDockerEngineService implements DockerEngineService {
 
 	private final DockerClient dockerClient;
+	private static final Logger log = LoggerFactory.getLogger(DefaultDockerEngineService.class);
 
 	public DefaultDockerEngineService(DockerConnection connection) {
 		this.dockerClient = Objects.requireNonNull(connection, "connection").getClient();
@@ -71,9 +73,7 @@ public class DefaultDockerEngineService implements DockerEngineService {
 				String[] parts = spec.split(":");
 				if (parts.length < 2) continue;
 				// parts[0] = hostPath, parts[1] = containerPath
-				String containerPath = parts[1];
 				binds.add(Bind.parse(spec));
-				new Volume(containerPath);
 			}
 		}
 
@@ -106,8 +106,8 @@ public class DefaultDockerEngineService implements DockerEngineService {
 						ExposedPort ep = new ExposedPort(containerPort, ip);
 						ports.bind(ep, Binding.bindIpAndPort(hostIp, hostPort));
 					}
-				} catch (Exception ignored) {
-					// ignora entradas inválidas
+				} catch (Exception e) {
+					log.warn("Entrada de port binding inválida e será ignorada: '{}'", pb);
 				}
 			}
 		}

@@ -4,10 +4,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.kryptforge.clusterforge.docker.DockerEngineService;
+import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.templates.TemplateService;
 
 @Service
@@ -16,10 +20,15 @@ public class DefaultClusterService implements ClusterService {
 
 	private final ClusterRepository repository;
 	private final TemplateService templateService;
+	private final DockerEngineService dockerEngineService;
+	private final PortManager portManager;
+	private static final Logger log = LoggerFactory.getLogger(DefaultClusterService.class);
 
-	public DefaultClusterService(ClusterRepository repository, TemplateService templateService) {
+	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager) {
 		this.repository = repository;
 		this.templateService = templateService;
+		this.dockerEngineService = dockerEngineService;
+		this.portManager = portManager;
 	}
 
 	@Override
@@ -83,8 +92,74 @@ public class DefaultClusterService implements ClusterService {
 	}
 
 	@Override
+	public ClusterInstance updateContainerId(UUID id, String containerId) {
+		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		c.setContainerId(containerId);
+		return repository.save(c);
+	}
+
+	@Override
 	public void delete(UUID id) {
+		ClusterInstance instance = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		// Remove container Docker se existir
+		deleteContainer(id);
+		
+		// Remove do banco de dados
 		repository.deleteById(id);
+		log.info("Instância '{}' removida completamente (container e banco)", instance.getName());
+	}
+
+	@Override
+	public void deleteContainer(UUID id) {
+		ClusterInstance instance = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		String containerId = instance.getContainerId();
+		if (containerId == null || containerId.isBlank()) {
+			log.debug("Instância '{}' não possui containerId, pulando remoção do container", instance.getName());
+			return;
+		}
+
+		try {
+			// Para o container antes de remover
+			try {
+				dockerEngineService.stopContainer(containerId, 10);
+				log.debug("Container {} parado com sucesso", containerId);
+			} catch (Exception e) {
+				log.warn("Falha ao parar container {}: {}", containerId, e.getMessage());
+				// Continua tentando remover mesmo se não conseguir parar
+			}
+
+			// Remove o container (force=true para remover mesmo se estiver rodando)
+			dockerEngineService.removeContainer(containerId, true, false);
+			log.info("Container {} removido com sucesso para instância '{}'", containerId, instance.getName());
+			
+			// Libera portas alocadas
+			if (instance.getPorts() != null && !instance.getPorts().isEmpty()) {
+				portManager.releasePorts(instance.getPorts());
+				log.debug("Portas liberadas para instância '{}': {}", instance.getName(), instance.getPorts());
+			}
+			
+			// Limpa o containerId do registro
+			instance.setContainerId(null);
+			instance.setStatus(ClusterStatus.STOPPED);
+			repository.save(instance);
+		} catch (Exception e) {
+			log.error("Erro ao remover container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
+			throw new IllegalStateException("Falha ao remover container: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
+	public void deleteFromDatabase(UUID id) {
+		ClusterInstance instance = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		String name = instance.getName();
+		repository.deleteById(id);
+		log.info("Instância '{}' removida do banco de dados (container não foi removido)", name);
 	}
 
 	private List<Integer> normalizePorts(List<Integer> ports) {

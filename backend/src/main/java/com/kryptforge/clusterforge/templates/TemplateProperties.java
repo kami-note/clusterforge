@@ -1,31 +1,23 @@
 package com.kryptforge.clusterforge.templates;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
-@ConfigurationProperties(prefix = "docker.templates")
+@Component
 public class TemplateProperties {
 
-	private String path;
+	@Value("${docker.templates.path:}")
 	private String templatesPath;
+
+	@Value("${docker.volumes.basePath:}")
 	private String volumesBasePath;
 
-	public String getPath() {
-		return path;
-	}
-
-	public void setPath(String path) {
-		this.path = path;
-	}
-
-	// Compat: usado por DefaultTemplateService
 	public String getTemplatesPath() {
-		return templatesPath != null ? templatesPath : path;
+		return templatesPath;
 	}
 
 	public void setTemplatesPath(String templatesPath) {
 		this.templatesPath = templatesPath;
-		// Mantém compatibilidade com 'path'
-		this.path = templatesPath;
 	}
 
 	public String getVolumesBasePath() {

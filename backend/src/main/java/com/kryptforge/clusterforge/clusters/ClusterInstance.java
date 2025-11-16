@@ -64,6 +64,9 @@ public class ClusterInstance {
 	@Convert(converter = VolumesConverter.class)
 	private List<String> volumes;
 
+	@Column(length = 64)
+	private String containerId;
+
 	@PrePersist
 	void onCreate() {
 		this.createdAt = Instant.now();
@@ -134,6 +137,14 @@ public class ClusterInstance {
 
 	public void setVolumes(List<String> volumes) {
 		this.volumes = volumes;
+	}
+
+	public String getContainerId() {
+		return containerId;
+	}
+
+	public void setContainerId(String containerId) {
+		this.containerId = containerId;
 	}
 
 	public static class EnvConverter extends JsonAttributeConverter<Map<String,String>> {
