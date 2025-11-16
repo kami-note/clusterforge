@@ -65,5 +65,26 @@ public class UserService {
 		User user = userOpt.get();
 		return passwordEncoder.matches(password, user.getPassword());
 	}
+
+	@Transactional(readOnly = true)
+	public long count() {
+		return repository.count();
+	}
+
+	/**
+	 * Cria um novo usuário. Se for o primeiro usuário do sistema, cria como ADMIN.
+	 * Caso contrário, cria como USER.
+	 */
+	public User register(String username, String password) {
+		// Verifica se é o primeiro usuário
+		boolean isFirstUser = count() == 0;
+		Role role = isFirstUser ? Role.ADMIN : Role.USER;
+		
+		if (isFirstUser) {
+			log.info("Primeiro usuário sendo registrado - criando como ADMIN: {}", username);
+		}
+		
+		return create(username, password, role);
+	}
 }
 

@@ -8,6 +8,7 @@ import { STORAGE_KEYS } from '@/constants';
 interface AuthContextType {
   user: User | null;
   login: (username: string, password: string) => Promise<User | null>;
+  register: (username: string, password: string) => Promise<User | null>;
   logout: () => Promise<void>;
   isLoading: boolean;
 }
@@ -175,6 +176,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const register = async (username: string, password: string): Promise<User | null> => {
+    try {
+      setIsLoading(true);
+      
+      // Chama a API real
+      await authService.register(username, password);
+      
+      // Obtém informações do usuário do token JWT
+      const apiUser = await authService.getCurrentUser();
+      
+      if (!apiUser || !apiUser.username) {
+        throw new Error('Não foi possível obter informações do usuário');
+      }
+      
+      const userData: User = {
+        email: apiUser.email || apiUser.username,
+        type: apiUser.role === 'ADMIN' ? 'admin' : 'client',
+        username: apiUser.username,
+        id: apiUser.id,
+        role: apiUser.role,
+      };
+      
+      persistUserState(userData);
+      scheduleTokenRefresh(authService.getTokenExpiry());
+      
+      return userData;
+    } catch (error) {
+      console.error('Register error:', error);
+      authService.clearSession();
+      persistUserState(null);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     clearScheduledRefresh();
     setIsLoading(true);
@@ -192,6 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const contextValue = {
     user,
     login,
+    register,
     logout,
     isLoading,
   };

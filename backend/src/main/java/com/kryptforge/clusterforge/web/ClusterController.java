@@ -68,7 +68,8 @@ public class ClusterController {
 						instance.getUpdatedAt(),
 						instance.getEnv(),
 						instance.getPorts(),
-						instance.getVolumes()
+						instance.getVolumes(),
+						instance.getContainerId()
 					);
 				} catch (Exception e) {
 					// Em caso de erro ao buscar status, loga e retorna com status do banco
@@ -84,7 +85,8 @@ public class ClusterController {
 						instance.getUpdatedAt(),
 						instance.getEnv(),
 						instance.getPorts(),
-						instance.getVolumes()
+						instance.getVolumes(),
+						instance.getContainerId()
 					);
 				}
 			})
@@ -144,7 +146,8 @@ public class ClusterController {
 			instance.getUpdatedAt(),
 			instance.getEnv(),
 			instance.getPorts(),
-			instance.getVolumes()
+			instance.getVolumes(),
+			instance.getContainerId()
 		);
 	}
 

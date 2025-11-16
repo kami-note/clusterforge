@@ -81,15 +81,38 @@ public class TemplateInstantiationService {
 			env.putAll(overrideEnv);
 		}
 
-		// portas - usa PortManager para alocar portas dinamicamente se necessário
-		List<String> ports = new ArrayList<>(spec.ports);
+		// portas - extrai apenas as portas do container do docker-compose.yml
+		// e deixa o PortManager alocar portas do host automaticamente
+		List<String> ports = new ArrayList<>();
+		
+		// Se há override de portas do frontend, usa elas
 		if (!CollectionUtils.isEmpty(overridePorts)) {
 			ports = new ArrayList<>(overridePorts);
+		} else if (!spec.ports.isEmpty()) {
+			// Extrai apenas as portas do container do docker-compose.yml
+			// Formato no compose pode ser "hostPort:containerPort" ou "containerPort"
+			// Sempre passamos apenas containerPort para o PortManager alocar hostPort automaticamente
+			for (String portMapping : spec.ports) {
+				if (portMapping == null || portMapping.trim().isEmpty()) {
+					continue;
+				}
+				
+				String[] parts = portMapping.split(":");
+				if (parts.length == 1) {
+					// Apenas porta do container especificada - passa direto
+					ports.add(parts[0].trim());
+				} else if (parts.length == 2) {
+					// Formato "hostPort:containerPort" - extrai apenas containerPort
+					String containerPort = parts[1].trim();
+					ports.add(containerPort);
+					log.debug("Template '{}' especifica porta do host no compose ({}), usando apenas porta do container ({}) para alocação automática", 
+						templateName, parts[0].trim(), containerPort);
+				}
+			}
 		}
 		
 		// Mapeia portas usando PortManager para alocar portas do host dinamicamente
-		// Se a porta do host não for especificada (formato "containerPort" ou "0:containerPort"),
-		// o PortManager aloca uma porta disponível automaticamente
+		// O PortManager sempre aloca portas do host automaticamente quando recebe apenas containerPort
 		if (!ports.isEmpty()) {
 			try {
 				ports = portManager.mapPorts(ports);

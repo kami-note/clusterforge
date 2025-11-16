@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.kryptforge.clusterforge.users.dto.AuthDtos.LoginRequest;
 import com.kryptforge.clusterforge.users.dto.AuthDtos.LoginResponse;
+import com.kryptforge.clusterforge.users.dto.AuthDtos.RegisterRequest;
 
 import jakarta.validation.Valid;
 
@@ -40,6 +41,27 @@ public class AuthController {
 		String token = jwtService.generateToken(user);
 
 		return ResponseEntity.ok(new LoginResponse(
+			token,
+			user.getUsername(),
+			user.getRole().name(),
+			user.getId().toString()
+		));
+	}
+
+	@PostMapping(path = "/register", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
+		// Verifica se o username já existe
+		if (userService.findByUsername(request.username()).isPresent()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "username já utilizado");
+		}
+
+		// Cria o usuário (primeiro usuário será ADMIN, demais serão USER)
+		User user = userService.register(request.username(), request.password());
+
+		// Gera token JWT automaticamente após registro
+		String token = jwtService.generateToken(user);
+
+		return ResponseEntity.status(HttpStatus.CREATED).body(new LoginResponse(
 			token,
 			user.getUsername(),
 			user.getRole().name(),

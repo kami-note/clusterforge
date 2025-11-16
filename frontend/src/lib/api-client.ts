@@ -37,13 +37,13 @@ export class HttpClient {
     const method = options.method || 'GET';
     const fullUrl = `${this.baseUrl}${endpoint}`;
     
-    // Log da requisição para identificar rotas sendo spamadas
-    console.log(`[API Request] ${method} ${fullUrl}`, {
-      endpoint,
-      method,
-      timestamp: new Date().toISOString(),
-      hasToken: !!token,
-    });
+    // Log da requisição apenas em desenvolvimento (comentado para reduzir ruído)
+    // console.log(`[API Request] ${method} ${fullUrl}`, {
+    //   endpoint,
+    //   method,
+    //   timestamp: new Date().toISOString(),
+    //   hasToken: !!token,
+    // });
     
     const headers = new Headers({
       'Content-Type': 'application/json',
@@ -122,8 +122,9 @@ export class HttpClient {
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
         // Verificar se é backend offline ou erro de internet real
         // Quando o fetch falha completamente (sem resposta HTTP), geralmente é:
-        // 1. Backend offline (ERR_CONNECTION_REFUSED, Failed to fetch em localhost)
+        // 1. Backend offline (ERR_CONNECTION_REFUSED, Failed to fetch)
         // 2. Sem internet (ERR_NAME_NOT_RESOLVED, ERR_INTERNET_DISCONNECTED)
+        // 3. CORS (mais comum em produção, menos em localhost)
         // IMPORTANTE: Se o signal foi abortado, não é backend offline, é timeout
         const errorMessage = error.message.toLowerCase();
         const isLocalhost = this.baseUrl.includes('localhost') || 
@@ -139,30 +140,51 @@ export class HttpClient {
           } as ApiError;
         }
         
-        // Se for localhost e o fetch falhou, é muito provável que seja backend offline
-        // (não faz sentido ter internet mas não conseguir conectar ao localhost)
-        const isBackendOffline = 
-          isLocalhost || // Se for localhost, assume backend offline
-          errorMessage.includes('connection refused') ||
-          errorMessage.includes('err_connection_refused') ||
-          errorMessage.includes('failed to fetch');
+        // Verificar se é erro de CORS (geralmente inclui "CORS" ou "Cross-Origin" na mensagem)
+        // Erros de CORS não devem ser classificados como BackendOffline
+        const isCorsError = errorMessage.includes('cors') ||
+                           errorMessage.includes('cross-origin') ||
+                           errorMessage.includes('crossorigin') ||
+                           (typeof error.cause === 'object' && error.cause && 
+                            String(error.cause).toLowerCase().includes('cors'));
         
+        if (isCorsError) {
+          throw {
+            message: 'Erro de conexão com o servidor. Verifique a configuração de CORS.',
+            status: 0,
+            name: 'NetworkError',
+          } as ApiError;
+        }
+        
+        // Indicadores específicos de backend offline:
+        // - connection refused (porta fechada/backend não respondendo)
+        // - failed to fetch em localhost (geralmente significa backend não rodando)
+        const hasConnectionRefused = errorMessage.includes('connection refused') ||
+                                     errorMessage.includes('err_connection_refused') ||
+                                     errorMessage.includes('connectionreset') ||
+                                     errorMessage.includes('econnrefused');
+        
+        // Indicadores de erro de internet (não backend offline):
         const isInternetError = 
-          !isLocalhost && ( // Só considerar erro de internet se não for localhost
-            errorMessage.includes('err_name_not_resolved') ||
-            errorMessage.includes('err_internet_disconnected') ||
-            errorMessage.includes('networkerror when attempting to fetch resource')
+          errorMessage.includes('err_name_not_resolved') ||
+          errorMessage.includes('err_internet_disconnected') ||
+          errorMessage.includes('networkerror when attempting to fetch resource') ||
+          errorMessage.includes('network request failed');
+        
+        // Backend offline: apenas se for localhost OU tiver connection refused explícito
+        // E não for erro de internet
+        const isBackendOffline = 
+          !isInternetError && (
+            (isLocalhost && hasConnectionRefused) || // localhost + connection refused = backend offline
+            (!isLocalhost && hasConnectionRefused)   // qualquer URL + connection refused = backend offline
           );
         
-        // Priorizar detecção de backend offline
-        const finalIsBackendOffline = isBackendOffline && !isInternetError;
-        
         throw {
-          message: finalIsBackendOffline
+          message: isBackendOffline
             ? 'O servidor está temporariamente indisponível. Verifique se o backend está em execução.'
             : 'Sem conexão com a internet. Verifique se você está online e tente novamente.',
           status: 0,
-          name: finalIsBackendOffline ? 'BackendOffline' : 'NetworkError',
+          name: isBackendOffline ? 'BackendOffline' : 'NetworkError',
         } as ApiError;
       }
       

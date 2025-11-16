@@ -47,7 +47,8 @@ public final class ClusterDtos {
 		Instant updatedAt,
 		Map<String,String> env,
 		List<Integer> ports,
-		List<String> volumes
+		List<String> volumes,
+		String containerId
 	) {
 		public static ClusterResponse from(ClusterInstance c) {
 			return new ClusterResponse(
@@ -59,7 +60,8 @@ public final class ClusterDtos {
 				c.getUpdatedAt(),
 				c.getEnv(),
 				c.getPorts(),
-				c.getVolumes()
+				c.getVolumes(),
+				c.getContainerId()
 			);
 		}
 	}

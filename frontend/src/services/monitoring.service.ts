@@ -45,7 +45,7 @@ class MonitoringService {
   /**
    * Obtém status de saúde de um cluster específico
    */
-  async getClusterHealth(clusterId: number): Promise<ClusterHealthStatus> {
+  async getClusterHealth(clusterId: number | string): Promise<ClusterHealthStatus> {
     return httpClient.get<ClusterHealthStatus>(`/health/clusters/${clusterId}`);
   }
 

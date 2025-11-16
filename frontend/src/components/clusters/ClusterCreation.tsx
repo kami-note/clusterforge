@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -35,7 +36,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { templateService } from '@/services/template.service';
-import { clusterService, type CreateClusterRequest } from '@/services/cluster.service';
+import { clusterService } from '@/services/cluster.service';
+import type { TemplateInstantiateRequest } from '@/types';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 import { TIMEOUTS } from '@/constants';
 
@@ -82,6 +84,10 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   const [customPort, setCustomPort] = useState('');
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isCreating, setIsCreating] = useState(false); // Estado para controlar criação em andamento
+  const [creatingClusterName, setCreatingClusterName] = useState<string | null>(null); // Nome do cluster sendo criado
+  const [creationProgress, setCreationProgress] = useState(0); // Progresso da criação (0-100)
+  const [creationStage, setCreationStage] = useState<string>(''); // Etapa atual da criação
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [errorDetails, setErrorDetails] = useState<DockerErrorDetails | null>(null);
@@ -365,61 +371,99 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     
     console.log('Iniciando criação do cluster em background...');
     setLoading(true);
+    setIsCreating(true); // Marca que criação está em andamento
+    setCreatingClusterName(clusterName); // Guarda o nome do cluster sendo criado
+    setCreationProgress(0); // Reset progresso
+    setCreationStage('Iniciando criação...'); // Primeira etapa
     setErrorDetails(null); // Limpar erros anteriores
     
-    // Monta a requisição para o backend
-    const request: CreateClusterRequest = {
-      templateName: selectedService?.name || '',
-      baseName: clusterName,
-      cpuLimit: cpuAllocation[0] / 100, // Converte % para cores (ex: 30% = 0.30 cores)
-      memoryLimit: ramAllocation[0] * 1024, // Converte GB para MB
-      diskLimit: diskAllocation[0]
+    // Notificação inicial
+    toast.info('Iniciando criação do cluster...', { duration: 2000 });
+    
+    const templateName = selectedService?.name || '';
+    
+    // Monta a requisição para o novo backend usando TemplateService
+    // Portas e limites de recursos são gerenciados pelo backend (PortManager)
+    // O frontend não deve especificar portas - o PortManager aloca automaticamente
+    const request: TemplateInstantiateRequest = {
+      name: clusterName,
+      // ports removido - PortManager aloca portas automaticamente do template
+      // env e binds removidos por enquanto
     };
     
     console.log('Request:', request);
     
-    // Mostrar toast de progresso
-    const progressToastId = toast.loading('Criando cluster em segundo plano... Isso pode levar alguns minutos.');
+    // Simular progresso durante a criação (estimativa baseada em etapas)
+    // Etapa 1: Preparando (0-10%)
+    const timeout1 = setTimeout(() => {
+      setCreationProgress(10);
+      setCreationStage('Preparando ambiente...');
+      toast.info('Preparando ambiente...', { duration: 2000 });
+    }, 500);
     
-    // Executar criação em background (não bloquear UI)
-    clusterService.createCluster(request)
+    // Etapa 2: Baixando imagem (10-60%) - pode levar tempo
+    const timeout2 = setTimeout(() => {
+      setCreationProgress(30);
+      setCreationStage('Baixando imagem Docker...');
+      toast.info('Baixando imagem Docker (isso pode levar alguns minutos)...', { duration: 4000 });
+    }, 2000);
+    
+    // Cleanup dos timeouts se houver erro
+    const cleanupTimeouts = () => {
+      clearTimeout(timeout1);
+      clearTimeout(timeout2);
+    };
+    
+    // Executar criação em background usando TemplateService.instantiateTemplate
+    templateService.instantiateTemplate(templateName, request)
       .then(async (response) => {
         console.log('Response:', response);
         
-        if (!response.clusterId) {
-          // Parsear erro da resposta
-          const parsedError = parseDockerError(response.message || 'Erro ao criar cluster');
-          if (parsedError) {
-            setErrorDetails(parsedError);
-            toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { 
-              id: progressToastId,
-              duration: 10000 
-            });
-          } else {
-            toast.error(response.message || 'Erro ao criar cluster', { id: progressToastId });
-          }
+        cleanupTimeouts(); // Limpar timeouts quando a resposta chegar
+        
+        if (!response.containerId || !response.name) {
+          toast.error('Erro ao criar cluster: resposta inválida do servidor');
           setLoading(false);
+          setIsCreating(false);
+          setCreatingClusterName(null);
+          setCreationProgress(0);
+          setCreationStage('');
           return;
         }
         
-        // Cluster criado com sucesso - verificar status periodicamente
-        toast.success('Solicitação de criação enviada! Verificando status...', { 
-          id: progressToastId,
-          duration: 3000 
-        });
+        // Etapa 3: Container criado (60-80%)
+        setCreationProgress(70);
+        setCreationStage('Container criado! Iniciando...');
+        toast.success('Container criado com sucesso!', { duration: 2000 });
         
-        // Polling para verificar quando o cluster estiver pronto
-        await pollClusterStatus(response.clusterId);
+        // Etapa 4: Iniciando (80-90%)
+        setCreationProgress(85);
+        setCreationStage('Iniciando container...');
+        toast.info('Iniciando container...', { duration: 2000 });
         
-        // Se admin criou e retornou credenciais, mostra
-        if (response.ownerCredentials) {
-          toast.info(
-            `Credenciais do usuário: ${response.ownerCredentials.username} / ${response.ownerCredentials.password}`,
-            { duration: 10000 }
-          );
+        // Buscar cluster pelo nome retornado e fazer polling do status
+        // Primeiro, tentamos buscar na lista de clusters pelo nome
+        let foundCluster = await pollClusterByName(response.name);
+        
+        // Se encontramos o cluster pelo ID, fazer polling do status
+        if (foundCluster?.id) {
+          setCreationProgress(90);
+          setCreationStage('Verificando status do cluster...');
+          await pollClusterStatus(foundCluster.id);
+        } else {
+          // Se não encontrou pelo nome ainda, tentar novamente após alguns segundos
+          setTimeout(async () => {
+            foundCluster = await pollClusterByName(response.name);
+            if (foundCluster?.id) {
+              setCreationProgress(90);
+              setCreationStage('Verificando status do cluster...');
+              await pollClusterStatus(foundCluster.id);
+            }
+          }, 3000);
         }
         
         // Mantém compatibilidade com a interface antiga para o callback
+        // A porta será definida pelo backend através do PortManager
         const clusterData = {
           name: clusterName,
           service: selectedService,
@@ -429,13 +473,28 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             disk: diskAllocation[0]
           },
           startupCommand,
-          port: customPort || undefined
+          // port removido - será definido pelo backend via PortManager
         };
+        
+        // Etapa 5: Concluído (100%)
+        setCreationProgress(100);
+        setCreationStage('Cluster criado com sucesso!');
+        toast.success(`Cluster "${clusterName}" criado e em execução!`, { duration: 5000 });
         
         onSubmit(clusterData);
         setLoading(false);
+        
+        // Manter banner por alguns segundos antes de remover
+        setTimeout(() => {
+          setIsCreating(false);
+          setCreatingClusterName(null);
+          setCreationProgress(0);
+          setCreationStage('');
+        }, 3000);
       })
       .catch((error: unknown) => {
+        cleanupTimeouts(); // Limpar timeouts em caso de erro
+        
         // Erro já tratado - não logar se for BackendOffline
       if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
         console.error('Error creating cluster:', error);
@@ -459,7 +518,10 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           }
         }
         
-        console.error('Mensagem de erro extraída:', errorMessage);
+        // Mensagem de erro já extraída - não logar se for BackendOffline
+        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+          console.error('Mensagem de erro extraída:', errorMessage);
+        }
         
         // Se for timeout, informar que está em processamento
         const apiError = error as any;
@@ -467,17 +529,20 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           toast.warning(
             'A criação do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
             { 
-              id: progressToastId,
               duration: 5000 
             }
           );
           
           // Tentar encontrar o cluster pelo nome após alguns segundos
-          setTimeout(() => {
-            pollClusterByName(clusterName);
+          setTimeout(async () => {
+            const foundCluster = await pollClusterByName(clusterName);
+            if (foundCluster?.id) {
+              await pollClusterStatus(foundCluster.id);
+            }
           }, 5000);
           
           // Permitir que usuário continue navegando
+          // A porta será definida pelo backend através do PortManager
           const clusterData = {
             name: clusterName,
             service: selectedService,
@@ -487,11 +552,15 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               disk: diskAllocation[0]
             },
             startupCommand,
-            port: customPort || undefined
+            // port removido - será definido pelo backend via PortManager
           };
           
           onSubmit(clusterData);
           setLoading(false);
+          setIsCreating(false);
+          setCreatingClusterName(null);
+          setCreationProgress(0);
+          setCreationStage('');
           return;
         }
         
@@ -499,24 +568,30 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         if (parsedError) {
           setErrorDetails(parsedError);
           toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { 
-            id: progressToastId,
             duration: 10000 
           });
         } else {
-          toast.error(errorMessage, { id: progressToastId });
+          toast.error(errorMessage);
         }
         setLoading(false);
+        setIsCreating(false);
+        setCreatingClusterName(null);
+        setCreationProgress(0);
+        setCreationStage('');
       });
   };
   
   // Função para fazer polling do status do cluster após criação
-  const pollClusterStatus = async (clusterId: number) => {
+  // Aceita string (UUID) ou number (legado) para compatibilidade
+  const pollClusterStatus = async (clusterId: string | number) => {
     const pollInterval = TIMEOUTS.CLUSTER_CREATE_POLL;
     const maxAttempts = TIMEOUTS.CLUSTER_CREATE_MAX_ATTEMPTS;
     let attempts = 0;
     let isReady = false;
     
-    const statusToastId = toast.loading('Aguardando cluster ficar pronto...');
+    // Atualiza progresso durante polling (90-95%)
+    setCreationProgress(90);
+    setCreationStage('Aguardando cluster ficar pronto...');
     
     while (attempts < maxAttempts && !isReady) {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
@@ -527,22 +602,25 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         // Verificar se cluster está em estado final (RUNNING, STOPPED, ou ERROR)
         if (clusterDetails.status === 'RUNNING' || clusterDetails.status === 'STOPPED') {
           isReady = true;
+          setCreationProgress(100);
+          setCreationStage(`Cluster ${clusterDetails.status === 'RUNNING' ? 'em execução' : 'parado'} com sucesso!`);
           toast.success(`Cluster criado com sucesso! Status: ${clusterDetails.status === 'RUNNING' ? 'Em execução' : 'Parado'}`, {
-            id: statusToastId,
             duration: 5000
           });
         } else if (clusterDetails.status === 'FAILED' || clusterDetails.status === 'ERROR') {
+          setCreationProgress(0);
+          setCreationStage('Erro ao criar cluster');
           toast.error('Cluster entrou em estado de erro durante a criação.', {
-            id: statusToastId,
             duration: 10000
           });
           setErrorDetails(parseDockerError('Cluster entrou em estado de erro'));
           break;
         } else {
           // Cluster ainda está sendo criado (CREATED, STARTING, etc)
-          toast.loading(`Cluster está sendo configurado... (Status: ${clusterDetails.status})`, {
-            id: statusToastId
-          });
+          // Incrementa progresso gradualmente durante o polling (90-95%)
+          const progress = Math.min(90 + (attempts * 5), 95);
+          setCreationProgress(progress);
+          setCreationStage(`Configurando cluster... (Status: ${clusterDetails.status})`);
         }
         
         attempts++;
@@ -554,26 +632,31 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     }
     
     if (!isReady && attempts >= maxAttempts) {
+      setCreationProgress(95);
+      setCreationStage('Criação está demorando mais que o esperado...');
       toast.warning('A criação do cluster está demorando mais que o esperado. Verifique o status manualmente.', {
-        id: statusToastId,
         duration: 8000
       });
     }
   };
   
   // Função para buscar cluster pelo nome caso a criação tenha sido iniciada mas demorou
-  const pollClusterByName = async (name: string) => {
+  // Retorna o cluster encontrado para permitir polling do status
+  const pollClusterByName = async (name: string): Promise<{ id: string; name: string } | null> => {
     try {
       const clusters = await clusterService.listClusters();
       const foundCluster = clusters.find(c => c.name === name || c.name.startsWith(name));
       
       if (foundCluster) {
-        toast.success(`Cluster "${foundCluster.name}" encontrado! A criação foi concluída em segundo plano.`, {
-          duration: 5000
-        });
+        return {
+          id: foundCluster.id,
+          name: foundCluster.name
+        };
       }
+      return null;
     } catch (error) {
       console.warn('Erro ao buscar cluster pelo nome:', error);
+      return null;
     }
   };
 
@@ -595,6 +678,49 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             </p>
           </div>
         </div>
+
+        {/* Banner de criação em andamento com barra de progresso */}
+        {isCreating && creatingClusterName && (
+          <Card className="border-primary bg-primary/5 shadow-lg">
+            <CardContent className="pt-6 pb-6">
+              <div className="space-y-4">
+                <div className="flex items-center space-x-3">
+                  <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-primary">
+                      Cluster "{creatingClusterName}" está sendo criado
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {creationStage || 'A criação está sendo processada em segundo plano...'}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="ml-2">
+                    {creationProgress}%
+                  </Badge>
+                </div>
+                
+                {/* Barra de progresso */}
+                <div className="space-y-2">
+                  <Progress value={creationProgress} className="h-2" />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>
+                      {creationProgress < 30 && 'Baixando imagem Docker...'}
+                      {creationProgress >= 30 && creationProgress < 70 && 'Criando container...'}
+                      {creationProgress >= 70 && creationProgress < 90 && 'Iniciando serviços...'}
+                      {creationProgress >= 90 && creationProgress < 100 && 'Finalizando configuração...'}
+                      {creationProgress === 100 && 'Concluído!'}
+                    </span>
+                    <span className="text-primary font-medium">{creationProgress}%</span>
+                  </div>
+                </div>
+                
+                <p className="text-xs text-muted-foreground italic">
+                  💡 Você pode continuar navegando enquanto isso. Você será notificado quando a criação for concluída.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Exibir erros detalhados se houver */}
         {errorDetails && (
@@ -949,9 +1075,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                     variant="outline" 
                     onClick={onBack}
                     className="w-full"
-                    disabled={loading}
+                    // Não bloqueia o botão - usuário pode voltar mesmo durante criação
                   >
-                    Cancelar
+                    {isCreating ? 'Voltar (Criação em andamento)' : 'Cancelar'}
                   </Button>
                 </div>
 

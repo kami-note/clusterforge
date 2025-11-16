@@ -19,6 +19,14 @@ public class AuthDtos {
 		String userId
 	) {}
 
+	public record RegisterRequest(
+		@NotBlank(message = "username é obrigatório")
+		String username,
+		
+		@NotBlank(message = "password é obrigatório")
+		String password
+	) {}
+
 	public record UserResponse(
 		String id,
 		String username,

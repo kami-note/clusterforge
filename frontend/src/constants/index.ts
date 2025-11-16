@@ -105,15 +105,6 @@ export const PAGINATION = {
 } as const;
 
 // ============================================
-// WEBSOCKET
-// ============================================
-export const WEBSOCKET_CONFIG = {
-  RECONNECT_DELAY: 3000,
-  MAX_RECONNECT_ATTEMPTS: 5,
-  HEARTBEAT_INTERVAL: 4000,
-} as const;
-
-// ============================================
 // TIMEOUTS
 // ============================================
 export const TIMEOUTS = {

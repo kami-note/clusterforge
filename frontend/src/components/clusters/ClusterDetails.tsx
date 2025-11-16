@@ -273,7 +273,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     chart4: '#ea580c', // laranja escuro (tema claro) ou roxo (tema escuro)
   });
 
-  // Carregar dados iniciais (apenas cluster, sem métricas - métricas vêm do WebSocket)
+  // Carregar dados iniciais (apenas cluster, sem métricas - métricas vêm do SSE)
   // Este efeito roda APENAS quando clusterId mudar, não quando realtimeMetrics mudar
   useEffect(() => {
     let isCancelled = false;
@@ -288,7 +288,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         if (clusterData) {
           setCluster(clusterData);
           
-          const clusterIdNum = parseInt(clusterId);
+          // ID agora é UUID (string), não precisa mais de parseInt
           
           // SEMPRE usar o status da API como fonte primária inicial
           // O status da API é mais confiável no momento do carregamento
@@ -296,7 +296,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           
           // Buscar health status da API para ter informação mais atualizada
           try {
-            const health = await monitoringService.getClusterHealth(clusterIdNum);
+            const health = await monitoringService.getClusterHealth(clusterId);
             if (!isCancelled && health) {
               setHealthStatus(health);
               
@@ -313,7 +313,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           // Buscar credenciais FTP
           try {
             setFtpLoading(true);
-            const ftpCreds = await clusterService.getFtpCredentials(clusterIdNum);
+            const ftpCreds = await clusterService.getFtpCredentials(clusterId);
             if (!isCancelled) {
               setFtpCredentials(ftpCreds);
             }
@@ -328,53 +328,54 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             }
           }
           
-          // Verificar WebSocket apenas para métricas, não para sobrescrever status inicial
-          const wsMetrics = realtimeMetrics && !isNaN(clusterIdNum) && realtimeMetrics[clusterIdNum] 
-            ? realtimeMetrics[clusterIdNum] 
+          // Verificar SSE apenas para métricas, não para sobrescrever status inicial
+          // ID agora é UUID (string), tentar buscar como string primeiro (UUID), depois como number (legado)
+          const sseMetrics = realtimeMetrics && (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)]) 
+            ? (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)])
             : null;
           
-          // Se houver métricas do WebSocket, usar TODOS os campos disponíveis
-          if (wsMetrics && connected && !isCancelled) {
-            const wsMetricsData: ClusterMetrics = {
+          // Se houver métricas do SSE, usar TODOS os campos disponíveis
+          if (sseMetrics && connected && !isCancelled) {
+            const sseMetricsData: ClusterMetrics = {
               // CPU
-              cpuUsagePercent: wsMetrics.cpuUsagePercent ?? undefined,
-              cpuLimitCores: wsMetrics.cpuLimitCores ?? undefined,
+              cpuUsagePercent: sseMetrics.cpuUsagePercent ?? undefined,
+              cpuLimitCores: sseMetrics.cpuLimitCores ?? undefined,
               
               // Memory
-              memoryUsagePercent: wsMetrics.memoryUsagePercent ?? undefined,
-              memoryUsageMb: wsMetrics.memoryUsageMb ?? undefined,
-              memoryLimitMb: wsMetrics.memoryLimitMb ?? undefined,
+              memoryUsagePercent: sseMetrics.memoryUsagePercent ?? undefined,
+              memoryUsageMb: sseMetrics.memoryUsageMb ?? undefined,
+              memoryLimitMb: sseMetrics.memoryLimitMb ?? undefined,
               
               // Disk
-              diskUsagePercent: wsMetrics.diskUsagePercent !== null && wsMetrics.diskUsagePercent !== undefined 
-                ? wsMetrics.diskUsagePercent 
+              diskUsagePercent: sseMetrics.diskUsagePercent !== null && sseMetrics.diskUsagePercent !== undefined 
+                ? sseMetrics.diskUsagePercent 
                 : undefined,
-              diskUsageMb: wsMetrics.diskUsageMb ?? undefined,
-              diskLimitMb: wsMetrics.diskLimitMb ?? undefined,
+              diskUsageMb: sseMetrics.diskUsageMb ?? undefined,
+              diskLimitMb: sseMetrics.diskLimitMb ?? undefined,
               
               // Network
-              networkRxBytes: wsMetrics.networkRxBytes ?? undefined,
-              networkTxBytes: wsMetrics.networkTxBytes ?? undefined,
-              networkUsage: wsMetrics.networkRxBytes && wsMetrics.networkTxBytes 
-                ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
+              networkRxBytes: sseMetrics.networkRxBytes ?? undefined,
+              networkTxBytes: sseMetrics.networkTxBytes ?? undefined,
+              networkUsage: sseMetrics.networkRxBytes && sseMetrics.networkTxBytes 
+                ? (sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024 
                 : undefined,
               
               // Container
-              containerUptimeSeconds: wsMetrics.containerUptimeSeconds ?? undefined,
-              containerRestartCount: wsMetrics.containerRestartCount ?? undefined,
-              containerStatus: wsMetrics.containerStatus ?? undefined,
+              containerUptimeSeconds: sseMetrics.containerUptimeSeconds ?? undefined,
+              containerRestartCount: sseMetrics.containerRestartCount ?? undefined,
+              containerStatus: sseMetrics.containerStatus ?? undefined,
               
               // Health
-              healthState: wsMetrics.healthState ?? undefined,
+              healthState: sseMetrics.healthState ?? undefined,
               
               // Cluster Info
-              clusterId: wsMetrics.clusterId ?? clusterIdNum,
+              clusterId: sseMetrics.clusterId ?? clusterId,
             };
-            setCurrentMetrics(wsMetricsData);
+            setCurrentMetrics(sseMetricsData);
             
             // Inicializar gráfico apenas se ainda não houver dados
             if (allResourceData.length === 0) {
-              generateInitialChartData(wsMetricsData);
+              generateInitialChartData(sseMetricsData);
             }
           }
           
@@ -447,7 +448,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   }, [allResourceData.length]); // Remover visiblePoints das dependências para evitar loop
 
 
-  // ÚNICA fonte de atualização: WebSocket para métricas em tempo real
+  // ÚNICA fonte de atualização: SSE para métricas em tempo real
   // Usar refs para evitar loops - não incluir status nas dependências
   const statusRef = useRef(status);
   useEffect(() => {
@@ -457,18 +458,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   useEffect(() => {
     if (!cluster) return;
 
-    const clusterIdNum = parseInt(clusterId);
-    if (isNaN(clusterIdNum)) {
-      setMetricsError('ID do cluster inválido');
-      return;
-    }
-
-    const wsMetrics = realtimeMetrics && realtimeMetrics[clusterIdNum] 
-      ? realtimeMetrics[clusterIdNum] 
+    // ID agora é UUID (string), não precisa mais de parseInt
+    // Tentar buscar como string primeiro (UUID), depois como number (legado)
+    const sseMetrics = realtimeMetrics && (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)]) 
+      ? (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)])
       : null;
     
-    // Só processar se WebSocket estiver conectado E houver métricas
-    if (!wsMetrics || !connected) {
+    // Só processar se SSE estiver conectado E houver métricas
+    if (!sseMetrics || !connected) {
       if (!connected) {
         setMetricsError(null); // Limpar erro quando desconectado (já há aviso visual)
       }
@@ -480,87 +477,87 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       setMetricsError(null);
     }
     
-    // Debug: verificar TODOS os campos recebidos do WebSocket
+    // Debug: verificar TODOS os campos recebidos do SSE
     if (process.env.NODE_ENV === 'development') {
-      console.log('📊 Métricas COMPLETAS recebidas do WebSocket para cluster', clusterIdNum, {
+      console.log('📊 Métricas COMPLETAS recebidas do SSE para cluster', clusterId, {
         // CPU
-        cpuUsagePercent: wsMetrics.cpuUsagePercent,
-        cpuLimitCores: wsMetrics.cpuLimitCores,
+        cpuUsagePercent: sseMetrics.cpuUsagePercent,
+        cpuLimitCores: sseMetrics.cpuLimitCores,
         
         // Memory
-        memoryUsagePercent: wsMetrics.memoryUsagePercent,
-        memoryUsageMb: wsMetrics.memoryUsageMb,
-        memoryLimitMb: wsMetrics.memoryLimitMb,
+        memoryUsagePercent: sseMetrics.memoryUsagePercent,
+        memoryUsageMb: sseMetrics.memoryUsageMb,
+        memoryLimitMb: sseMetrics.memoryLimitMb,
         
         // Disk
-        diskUsagePercent: wsMetrics.diskUsagePercent,
-        diskUsageMb: wsMetrics.diskUsageMb,
-        diskLimitMb: wsMetrics.diskLimitMb,
+        diskUsagePercent: sseMetrics.diskUsagePercent,
+        diskUsageMb: sseMetrics.diskUsageMb,
+        diskLimitMb: sseMetrics.diskLimitMb,
         
         // Network
-        networkRxBytes: wsMetrics.networkRxBytes,
-        networkTxBytes: wsMetrics.networkTxBytes,
-        networkMB: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
-          ? ((wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
+        networkRxBytes: sseMetrics.networkRxBytes,
+        networkTxBytes: sseMetrics.networkTxBytes,
+        networkMB: sseMetrics.networkRxBytes !== undefined && sseMetrics.networkTxBytes !== undefined
+          ? ((sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
           : 'N/A',
         
         // Container
-        containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
-        containerStatus: wsMetrics.containerStatus,
+        containerUptimeSeconds: sseMetrics.containerUptimeSeconds,
+        containerStatus: sseMetrics.containerStatus,
         
         // Health
-        healthState: wsMetrics.healthState,
+        healthState: sseMetrics.healthState,
         
         // Objeto completo para debug
-        objetoCompleto: wsMetrics
+        objetoCompleto: sseMetrics
       });
     }
     
-    // Usar TODOS os campos disponíveis do WebSocket (ClusterMetricsMessage)
+    // Usar TODOS os campos disponíveis do SSE (ContainerStats)
     const metrics: ClusterMetrics = {
-      // CPU - usar diretamente do WebSocket
-      cpuUsagePercent: wsMetrics.cpuUsagePercent ?? undefined,
-      cpuLimitCores: wsMetrics.cpuLimitCores ?? undefined,
+      // CPU - usar diretamente do SSE
+      cpuUsagePercent: sseMetrics.cpuUsagePercent ?? undefined,
+      cpuLimitCores: sseMetrics.cpuLimitCores ?? undefined,
       
-      // Memory - usar diretamente do WebSocket
-      memoryUsagePercent: wsMetrics.memoryUsagePercent ?? undefined,
-      memoryUsageMb: wsMetrics.memoryUsageMb ?? undefined,
-      memoryLimitMb: wsMetrics.memoryLimitMb ?? undefined,
+      // Memory - usar diretamente do SSE
+      memoryUsagePercent: sseMetrics.memoryUsagePercent ?? undefined,
+      memoryUsageMb: sseMetrics.memoryUsageMb ?? undefined,
+      memoryLimitMb: sseMetrics.memoryLimitMb ?? undefined,
       
-      // Disk - usar diretamente do WebSocket
-      diskUsagePercent: wsMetrics.diskUsagePercent !== null && wsMetrics.diskUsagePercent !== undefined 
-        ? wsMetrics.diskUsagePercent 
+      // Disk - usar diretamente do SSE
+      diskUsagePercent: sseMetrics.diskUsagePercent !== null && sseMetrics.diskUsagePercent !== undefined 
+        ? sseMetrics.diskUsagePercent 
         : undefined,
-      diskUsageMb: wsMetrics.diskUsageMb ?? undefined,
-      diskLimitMb: wsMetrics.diskLimitMb ?? undefined,
-      diskReadBytes: wsMetrics.diskReadBytes ?? undefined,
-      diskWriteBytes: wsMetrics.diskWriteBytes ?? undefined,
+      diskUsageMb: sseMetrics.diskUsageMb ?? undefined,
+      diskLimitMb: sseMetrics.diskLimitMb ?? undefined,
+      diskReadBytes: sseMetrics.diskReadBytes ?? undefined,
+      diskWriteBytes: sseMetrics.diskWriteBytes ?? undefined,
       
       // Network - calcular de networkRxBytes e networkTxBytes
-      networkRxBytes: wsMetrics.networkRxBytes ?? undefined,
-      networkTxBytes: wsMetrics.networkTxBytes ?? undefined,
-      networkLimitMbps: wsMetrics.networkLimitMbps ?? undefined,
-      networkUsage: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
-        ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
+      networkRxBytes: sseMetrics.networkRxBytes ?? undefined,
+      networkTxBytes: sseMetrics.networkTxBytes ?? undefined,
+      networkLimitMbps: sseMetrics.networkLimitMbps ?? undefined,
+      networkUsage: sseMetrics.networkRxBytes !== undefined && sseMetrics.networkTxBytes !== undefined
+        ? (sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024 
         : undefined,
       
-      // Container - usar diretamente do WebSocket
-      containerUptimeSeconds: wsMetrics.containerUptimeSeconds ?? undefined,
-      containerRestartCount: wsMetrics.containerRestartCount ?? undefined,
-      containerStatus: wsMetrics.containerStatus ?? undefined,
+      // Container - usar diretamente do SSE
+      containerUptimeSeconds: sseMetrics.containerUptimeSeconds ?? undefined,
+      containerRestartCount: sseMetrics.containerRestartCount ?? undefined,
+      containerStatus: sseMetrics.containerStatus ?? undefined,
       
-      // Application - usar diretamente do WebSocket
-      applicationResponseTimeMs: wsMetrics.applicationResponseTimeMs ?? undefined,
-      applicationStatusCode: wsMetrics.applicationStatusCode ?? undefined,
+      // Application - usar diretamente do SSE
+      applicationResponseTimeMs: sseMetrics.applicationResponseTimeMs ?? undefined,
+      applicationStatusCode: sseMetrics.applicationStatusCode ?? undefined,
       
-      // Health - usar diretamente do WebSocket
-      healthState: wsMetrics.healthState ?? undefined,
-      errorMessage: wsMetrics.errorMessage ?? undefined,
+      // Health - usar diretamente do SSE
+      healthState: sseMetrics.healthState ?? undefined,
+      errorMessage: sseMetrics.errorMessage ?? undefined,
       
-      // Cluster Info - usar diretamente do WebSocket
-      clusterId: wsMetrics.clusterId ?? clusterIdNum,
-      clusterName: wsMetrics.clusterName ?? undefined,
-      timestamp: wsMetrics.timestamp ?? undefined, // LocalDateTime serializado como string ISO
+      // Cluster Info - usar diretamente do SSE
+      clusterId: sseMetrics.clusterId ?? clusterId,
+      clusterName: sseMetrics.clusterName ?? undefined,
+      timestamp: sseMetrics.timestamp ?? undefined, // LocalDateTime serializado como string ISO
     };
     
     // Atualizar métricas apenas se houver mudança significativa
@@ -576,18 +573,18 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       return metrics;
     });
     
-    // Não usar WebSocket para alterar status; apenas a API controla estado.
+    // Não usar SSE para alterar status; apenas a API controla estado.
     
     // Atualizar healthStatus apenas se mudou
-    if (wsMetrics.healthState) {
+    if (sseMetrics.healthState) {
       setHealthStatus(prev => {
-        const newStatus = wsMetrics.healthState === 'HEALTHY' ? 'HEALTHY' : 
-                         wsMetrics.healthState === 'UNHEALTHY' ? 'UNHEALTHY' : 'UNKNOWN';
-        if (prev && prev.status === newStatus && prev.clusterId === clusterIdNum) {
+        const newStatus = sseMetrics.healthState === 'HEALTHY' ? 'HEALTHY' : 
+                         sseMetrics.healthState === 'UNHEALTHY' ? 'UNHEALTHY' : 'UNKNOWN';
+        if (prev && prev.status === newStatus && prev.clusterId === clusterId) {
           return prev; // Retornar mesmo objeto se não mudou
         }
         return {
-          clusterId: clusterIdNum,
+          clusterId: clusterId,
           status: newStatus
         };
       });
@@ -671,8 +668,8 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     }
   }, [realtimeMetrics, connected, clusterId, sanitizeValue, cluster]);
 
-  // NÃO fazer polling REST - usar apenas WebSocket para métricas em tempo real
-  // Se WebSocket não estiver disponível, o usuário verá uma mensagem ou dados estáticos
+  // NÃO fazer polling REST - usar apenas SSE para métricas em tempo real
+  // Se SSE não estiver disponível, o usuário verá uma mensagem ou dados estáticos
 
   // Simular novos logs
   useEffect(() => {
@@ -1202,13 +1199,13 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               {!connected && (
                 <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                   <p className="text-sm text-yellow-600 dark:text-yellow-400">
-                    WebSocket desconectado. Aguardando conexão para receber métricas em tempo real...
+                    SSE desconectado. Aguardando conexão para receber métricas em tempo real...
                   </p>
                 </div>
               )}
               {!currentMetrics && (
                 <div className="mb-4 p-3 bg-muted rounded-lg text-center">
-                  <p className="text-sm text-muted-foreground">Aguardando métricas via WebSocket...</p>
+                  <p className="text-sm text-muted-foreground">Aguardando métricas via SSE...</p>
                 </div>
               )}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1335,7 +1332,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                   </LineChart>
                 ) : (
                   <div className="flex items-center justify-center h-full text-muted-foreground">
-                    <p>Aguardando dados do WebSocket...</p>
+                    <p>Aguardando dados do SSE...</p>
                   </div>
                 )}
               </ResponsiveContainer>

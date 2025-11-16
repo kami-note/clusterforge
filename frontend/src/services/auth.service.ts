@@ -12,24 +12,85 @@ class AuthService {
    * Realiza login no sistema
    */
   async login(username: string, password: string): Promise<AuthResponse> {
-    const response = await httpClient.post<AuthResponse>('/auth/login', {
+    // Backend retorna: { token, username, role, userId }
+    const response = await httpClient.post<{
+      token: string;
+      username: string;
+      role: string;
+      userId: string;
+    }>('/auth/login', {
       username,
       password,
     });
 
-    this.persistSession(response);
+    // Calcular expiresIn a partir do token JWT
+    let expiresIn: number | undefined;
+    try {
+      const payload = response.token.split('.')[1];
+      const decoded = JSON.parse(atob(payload));
+      if (decoded.exp) {
+        // exp está em segundos, converter para milissegundos
+        const expirationTimestamp = decoded.exp * 1000;
+        expiresIn = expirationTimestamp - Date.now();
+      }
+    } catch (error) {
+      console.warn('Erro ao calcular expiresIn do token:', error);
+      // Usar padrão de 24 horas se não conseguir calcular
+      expiresIn = 86400000; // 24 horas
+    }
 
-    return response;
+    // Criar AuthResponse compatível
+    const authResponse: AuthResponse = {
+      token: response.token,
+      expiresIn: expiresIn,
+    };
+
+    this.persistSession(authResponse);
+
+    return authResponse;
   }
 
   /**
    * Registra um novo usuário
+   * Retorna AuthResponse com token JWT, pois o backend autentica automaticamente após registro
    */
-  async register(username: string, password: string): Promise<void> {
-    await httpClient.post('/auth/register', {
+  async register(username: string, password: string): Promise<AuthResponse> {
+    // Backend retorna: { token, username, role, userId }
+    const response = await httpClient.post<{
+      token: string;
+      username: string;
+      role: string;
+      userId: string;
+    }>('/auth/register', {
       username,
       password,
     });
+
+    // Calcular expiresIn a partir do token JWT
+    let expiresIn: number | undefined;
+    try {
+      const payload = response.token.split('.')[1];
+      const decoded = JSON.parse(atob(payload));
+      if (decoded.exp) {
+        // exp está em segundos, converter para milissegundos
+        const expirationTimestamp = decoded.exp * 1000;
+        expiresIn = expirationTimestamp - Date.now();
+      }
+    } catch (error) {
+      console.warn('Erro ao calcular expiresIn do token:', error);
+      // Usar padrão de 24 horas se não conseguir calcular
+      expiresIn = 86400000; // 24 horas
+    }
+
+    // Criar AuthResponse compatível
+    const authResponse: AuthResponse = {
+      token: response.token,
+      expiresIn: expiresIn,
+    };
+
+    this.persistSession(authResponse);
+
+    return authResponse;
   }
 
   /**
@@ -69,13 +130,17 @@ class AuthService {
       const payload = token.split('.')[1];
       const decoded = JSON.parse(atob(payload));
 
-      const userIdRaw = (decoded && (decoded.userId ?? decoded.sub)) ?? undefined;
-      const parsedId = typeof userIdRaw === 'number' ? userIdRaw : Number.parseInt(userIdRaw as string, 10);
+      // Novo backend retorna userId como string (UUID), username no sub e role
+      const userIdRaw = decoded.userId ?? decoded.sub;
+      // userId agora é UUID (string), mas pode ser number no legado
+      const userId = typeof userIdRaw === 'string' 
+        ? userIdRaw 
+        : (typeof userIdRaw === 'number' ? userIdRaw : undefined);
 
       return {
-        id: Number.isNaN(parsedId) ? undefined : parsedId,
-        username: decoded.sub || '',
-        email: decoded.sub || '',
+        id: typeof userId === 'number' ? userId : undefined,
+        username: decoded.username || decoded.sub || '',
+        email: decoded.username || decoded.sub || '',
         type: decoded.role === 'ADMIN' ? 'admin' : 'client',
         role: decoded.role || 'USER',
       };
@@ -115,7 +180,10 @@ class AuthService {
     if (response.refreshToken) {
       httpClient.setRefreshToken(response.refreshToken);
     }
-    const expiresAt = Date.now() + response.expiresIn;
+    // expiresIn pode ser undefined, usar padrão de 24 horas se não disponível
+    const expiresAt = response.expiresIn 
+      ? Date.now() + response.expiresIn 
+      : Date.now() + 86400000; // 24 horas padrão
     httpClient.setTokenExpiry(expiresAt);
   }
 }

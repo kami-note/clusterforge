@@ -1,45 +1,46 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { websocketService, ClusterMetrics, ClusterStatsMessage } from '@/services/websocket.service';
+import { sseService, ClusterMetrics } from '@/services/sse.service';
 import { useAuth } from './useAuth';
 import { clusterService, ClusterListItem } from '@/services/cluster.service';
 
 export interface RealtimeMetrics {
-  metrics: Record<number, ClusterMetrics>;
-  connected: boolean;
+  metrics: Record<number | string, ClusterMetrics>; // Aceita number (legado) ou string (UUID)
+  connected: boolean; // Indica se pelo menos um cluster está conectado
   error: Error | null;
   requestUpdate: () => void;
 }
 
 /**
- * Hook para consumir métricas em tempo real via WebSocket
- * Filtra automaticamente os clusters baseado no role do usuário
+ * Hook para consumir métricas em tempo real via SSE
+ * Conecta a SSE para cada cluster do usuário
  */
 export function useRealtimeMetrics(): RealtimeMetrics {
   const { user } = useAuth();
-  const [metrics, setMetrics] = useState<Record<number, ClusterMetrics>>({});
-  // Removido: stats do WebSocket não são mais usados
+  const [metrics, setMetrics] = useState<Record<number | string, ClusterMetrics>>({});
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [userClusters, setUserClusters] = useState<ClusterListItem[]>([]);
+  const [connectedClusters, setConnectedClusters] = useState<Set<string | number>>(new Set());
   const isSubscribedRef = useRef(false);
   const userClustersRef = useRef<ClusterListItem[]>([]);
   const userRef = useRef(user);
-  
+
   // Atualizar refs quando mudarem
   useEffect(() => {
     userRef.current = user;
   }, [user]);
-  
+
   useEffect(() => {
     userClustersRef.current = userClusters;
   }, [userClusters]);
-  
-  // Buscar clusters do usuário para filtrar métricas
+
+  // Buscar clusters do usuário para conectar SSE
   useEffect(() => {
     if (user) {
-      clusterService.listClusters()
+      clusterService
+        .listClusters()
         .then((clusters) => {
           setUserClusters(clusters);
         })
@@ -48,137 +49,116 @@ export function useRealtimeMetrics(): RealtimeMetrics {
         });
     }
   }, [user]);
-  
-  // Separar a conexão WebSocket da atualização de clusters
+
+  // Conectar SSE para cada cluster
   useEffect(() => {
-    if (!user) {
-      // Desconectar se não houver usuário (resetar tentativas de reconexão)
-      websocketService.disconnect(true);
+    if (!user || !userClusters.length) {
+      // Desconectar todos se não houver usuário ou clusters
+      sseService.disconnectAll();
       setConnected(false);
+      setConnectedClusters(new Set());
+      setMetrics({});
       isSubscribedRef.current = false;
       return;
     }
-    
-    // Conectar ao WebSocket apenas uma vez
+
+    // Conectar apenas uma vez
     if (!isSubscribedRef.current) {
       isSubscribedRef.current = true;
-      
+
       // Callback para métricas (usa refs para sempre ter valores atualizados)
-      const handleMetrics = (newMetrics: Record<number, ClusterMetrics>) => {
-        // Usar refs para garantir valores atualizados
-        const currentUser = userRef.current;
-        const currentClusters = userClustersRef.current;
-        if (currentUser) {
-          const filteredMetrics = filterMetricsByUserRole(newMetrics, currentUser, currentClusters);
-          setMetrics(filteredMetrics);
-          setError(null);
-        }
+      const handleMetrics = (clusterId: string | number, metricsData: ClusterMetrics) => {
+        setMetrics((prev) => ({
+          ...prev,
+          [clusterId]: metricsData,
+        }));
+        setError(null);
       };
-      
-      // Removido: callback de estatísticas
-      
+
       // Callback para mudanças de conexão
-      const handleConnectionChange = (isConnected: boolean) => {
-        setConnected(isConnected);
-        if (!isConnected) {
-          setError(new Error('Desconectado do servidor. Tentando reconectar...'));
-        } else {
-          setError(null);
-        }
+      const handleConnectionChange = (clusterId: string | number, isConnected: boolean) => {
+        setConnectedClusters((prev) => {
+          const next = new Set(prev);
+          if (isConnected) {
+            next.add(clusterId);
+          } else {
+            next.delete(clusterId);
+          }
+          
+          // Atualizar estado de conexão global (conectado se pelo menos um cluster estiver conectado)
+          const hasConnections = next.size > 0;
+          
+          // Atualizar estado de conexão e erro usando useEffect separado
+          setConnected(hasConnections);
+          
+          if (!isConnected && next.size === 0) {
+            // Todos os clusters desconectados
+            setError(new Error('Desconectado do servidor. Tentando reconectar...'));
+          } else if (hasConnections) {
+            // Pelo menos um cluster conectado
+            setError(null);
+          }
+          
+          return next;
+        });
       };
-      
+
       // Registrar callbacks
-      const unsubscribeMetrics = websocketService.onMetrics(handleMetrics);
-      // Removido: assinatura de estatísticas
-      const unsubscribeConnection = websocketService.onConnectionChange(handleConnectionChange);
-      
-      // Conectar (apenas uma vez)
-      if (!websocketService.getConnected()) {
-        websocketService.connect();
-      }
-      
+      const unsubscribeMetrics = sseService.onMetrics(handleMetrics);
+      const unsubscribeConnection = sseService.onConnectionChange(handleConnectionChange);
+
+      // Conectar SSE para cada cluster
+      userClusters.forEach((cluster) => {
+        // Buscar containerId do cluster se não estiver disponível
+        if (cluster.containerId) {
+          sseService.connect(cluster.id, cluster.containerId).catch((err) => {
+            console.error(`Erro ao conectar SSE para cluster ${cluster.id}:`, err);
+          });
+        } else {
+          // Se não tiver containerId, tentar obter do detalhe do cluster
+          clusterService
+            .getCluster(cluster.id)
+            .then((details) => {
+              if (details.containerId) {
+                return sseService.connect(cluster.id, details.containerId);
+              }
+            })
+            .catch((err) => {
+              console.error(`Erro ao obter containerId do cluster ${cluster.id}:`, err);
+            });
+        }
+      });
+
       // Cleanup apenas quando o componente for desmontado ou usuário mudar
       return () => {
         unsubscribeMetrics();
-        // Removido: unsubscribe de estatísticas
         unsubscribeConnection();
-        // Resetar tentativas de reconexão ao desconectar manualmente
-        websocketService.disconnect(true);
+        sseService.disconnectAll();
         isSubscribedRef.current = false;
       };
     }
-    // filterMetricsByUserRole e filterStatsByUserRole são estáveis (useCallback sem dependências)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]); // Apenas user como dependência
-  
-  /**
-   * Filtra métricas baseado no role do usuário e lista de clusters
-   * Admin vê todos os clusters, usuário vê apenas os seus
-   */
-  const filterMetricsByUserRole = useCallback((
-    allMetrics: Record<number, ClusterMetrics>,
-    currentUser: { type: string; id?: number },
-    clusters: ClusterListItem[]
-  ): Record<number, ClusterMetrics> => {
-    if (currentUser.type === 'admin') {
-      // Admin vê todos os clusters
-      return allMetrics;
-    }
-    
-    // Usuário vê apenas seus clusters
-    const userClusterIds = new Set(clusters.map(c => c.id));
-    const filtered: Record<number, ClusterMetrics> = {};
-    
-    Object.keys(allMetrics).forEach(key => {
-      const clusterId = Number(key);
-      if (userClusterIds.has(clusterId)) {
-        filtered[clusterId] = allMetrics[clusterId];
-      }
-    });
-    
-    return filtered;
-  }, []);
-  
-  /**
-   * Filtra estatísticas baseado no role do usuário
-   */
-  const filterStatsByUserRole = useCallback((
-    allStats: ClusterStatsMessage,
-    currentUser: { type: string; id?: number },
-    clusters: ClusterListItem[]
-  ): ClusterStatsMessage => {
-    if (currentUser.type === 'admin') {
-      // Admin vê todas as estatísticas
-      return allStats;
-    }
-    
-    // Para usuários, filtrar clusters
-    const filteredClusters = filterMetricsByUserRole(allStats.clusters, currentUser, clusters);
-    
-    // Recalcular estatísticas apenas com clusters filtrados
-    const filteredStats: ClusterStatsMessage = {
-      ...allStats,
-      clusters: filteredClusters,
-      systemStats: allStats.systemStats ? {
-        ...allStats.systemStats,
-        totalClusters: Object.keys(filteredClusters).length,
-      } : undefined,
-    };
-    
-    return filteredStats;
-  }, [filterMetricsByUserRole]);
-  
+  }, [user, userClusters]);
+
   /**
    * Solicita atualização imediata de métricas
+   * Com SSE, as métricas são enviadas automaticamente pelo servidor
+   * Esta função apenas reconecta se necessário
    */
   const requestUpdate = useCallback(() => {
-    if (connected) {
-      websocketService.requestMetrics();
+    if (user && userClusters.length > 0) {
+      // Reconectar todos os clusters
+      userClusters.forEach((cluster) => {
+        if (cluster.containerId) {
+          sseService.connect(cluster.id, cluster.containerId).catch((err) => {
+            console.error(`Erro ao reconectar SSE para cluster ${cluster.id}:`, err);
+          });
+        }
+      });
     } else {
       setError(new Error('Não conectado ao servidor'));
     }
-  }, [connected]);
-  
+  }, [user, userClusters]);
+
   return {
     metrics,
     connected,
@@ -186,4 +166,3 @@ export function useRealtimeMetrics(): RealtimeMetrics {
     requestUpdate,
   };
 }
-
