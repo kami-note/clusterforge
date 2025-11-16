@@ -44,9 +44,18 @@ class MonitoringService {
 
   /**
    * Obtém status de saúde de um cluster específico
+   * Retorna null se o endpoint não existir (não crítico)
    */
-  async getClusterHealth(clusterId: number | string): Promise<ClusterHealthStatus> {
-    return httpClient.get<ClusterHealthStatus>(`/health/clusters/${clusterId}`);
+  async getClusterHealth(clusterId: number | string): Promise<ClusterHealthStatus | null> {
+    try {
+      return await httpClient.get<ClusterHealthStatus>(`/health/clusters/${clusterId}`);
+    } catch (error: any) {
+      // Se o endpoint não existir (404 ou 403), retornar null (não crítico)
+      if (error?.status === 404 || error?.status === 403) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**

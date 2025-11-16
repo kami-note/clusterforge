@@ -5,6 +5,7 @@
 import { config } from '@/lib/config';
 import { httpClient } from '@/lib/api-client';
 import type { ClusterMetrics } from '@/types';
+import { STORAGE_KEYS } from '@/constants';
 
 export type { ClusterMetrics };
 
@@ -65,9 +66,8 @@ class SseService {
     }
 
     try {
-      // Construir URL do SSE
-      const baseUrl = config.api.baseUrl.replace('/api', '');
-      const sseUrl = `${baseUrl}/docker/containers/${actualContainerId}/metrics/stream?timeoutMillis=300000`;
+      // Construir URL do SSE (o endpoint está em /api/docker/...)
+      const sseUrl = `${config.api.baseUrl}/docker/containers/${actualContainerId}/metrics/stream?timeoutMillis=300000`;
 
       // EventSource não suporta headers customizados, então usamos fetch com ReadableStream
       const response = await fetch(sseUrl, {
@@ -299,11 +299,11 @@ class SseService {
   }
 
   /**
-   * Obtém o token JWT do localStorage
+   * Obtém o token JWT do localStorage usando a chave correta
    */
   private getToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem('token');
+    return localStorage.getItem(STORAGE_KEYS.TOKEN) || localStorage.getItem(config.auth.tokenKey);
   }
 
   /**

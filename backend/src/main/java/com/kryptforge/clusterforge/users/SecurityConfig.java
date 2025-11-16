@@ -134,7 +134,10 @@ public class SecurityConfig {
 		configuration.setMaxAge(3600L);
 		
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+		// Aplicar CORS para todos os endpoints da API
 		source.registerCorsConfiguration("/api/**", configuration);
+		// Aplicar CORS também para endpoints Docker (incluindo SSE)
+		source.registerCorsConfiguration("/docker/**", configuration);
 		
 		return source;
 	}

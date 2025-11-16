@@ -295,6 +295,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           let initialStatus = clusterData.status;
           
           // Buscar health status da API para ter informação mais atualizada
+          // Endpoint pode não existir no backend (não crítico)
           try {
             const health = await monitoringService.getClusterHealth(clusterId);
             if (!isCancelled && health) {
@@ -304,22 +305,30 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               // mas priorizar o status da entidade do cluster (que vem de /clusters/{id})
               // A API pode ter status diferente do health check
             }
-          } catch (error) {
-            if (process.env.NODE_ENV === 'development') {
-              console.debug("Failed to fetch health status from API, using cluster status:", error);
+          } catch (error: any) {
+            // Não logar se for 403/404 (endpoint não existe ou não autorizado)
+            // Apenas usar o status do cluster como fallback (comportamento normal)
+            if (error?.status !== 403 && error?.status !== 404) {
+              if (process.env.NODE_ENV === 'development') {
+                console.debug("Failed to fetch health status from API, using cluster status:", error);
+              }
             }
           }
           
-          // Buscar credenciais FTP
+          // Buscar credenciais FTP (endpoint pode não existir no backend)
           try {
             setFtpLoading(true);
             const ftpCreds = await clusterService.getFtpCredentials(clusterId);
             if (!isCancelled) {
               setFtpCredentials(ftpCreds);
             }
-          } catch (error) {
-            if (process.env.NODE_ENV === 'development') {
-              console.debug("Failed to fetch FTP credentials:", error);
+          } catch (error: any) {
+            // Não logar se for 403/404 (endpoint não existe ou não autorizado)
+            // Isso é comportamento normal se o endpoint não estiver implementado
+            if (error?.status !== 403 && error?.status !== 404) {
+              if (process.env.NODE_ENV === 'development') {
+                console.debug("Failed to fetch FTP credentials:", error);
+              }
             }
             // Não definir credenciais se falhar (pode não estar configurado)
           } finally {
