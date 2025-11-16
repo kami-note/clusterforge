@@ -99,6 +99,117 @@ public class DefaultClusterService implements ClusterService {
 	}
 
 	@Override
+	public ClusterInstance syncStatus(UUID id) {
+		ClusterInstance instance = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		String containerId = instance.getContainerId();
+		if (containerId == null || containerId.isBlank()) {
+			// Sem containerId, mantém status atual (provavelmente PENDING ou ERROR)
+			log.debug("Instância '{}' não possui containerId, mantendo status atual: {}", instance.getName(), instance.getStatus());
+			return instance;
+		}
+
+		try {
+			// Tenta inspecionar o container para verificar seu estado real
+			var inspect = dockerEngineService.inspectContainer(containerId);
+			if (inspect != null && inspect.getState() != null) {
+				String dockerStatus = inspect.getState().getStatus();
+				Boolean running = inspect.getState().getRunning();
+				
+				ClusterStatus newStatus;
+				if (running != null && running) {
+					// Container está rodando
+					newStatus = ClusterStatus.ACTIVE;
+				} else if ("exited".equalsIgnoreCase(dockerStatus) || "stopped".equalsIgnoreCase(dockerStatus)) {
+					// Container foi parado
+					newStatus = ClusterStatus.STOPPED;
+				} else if ("created".equalsIgnoreCase(dockerStatus)) {
+					// Container criado mas não iniciado
+					newStatus = ClusterStatus.PENDING;
+				} else {
+					// Outros estados (restarting, removing, etc) - mantém status atual ou marca como ERROR
+					log.warn("Container {} está em estado inesperado: {}", containerId, dockerStatus);
+					newStatus = instance.getStatus(); // Mantém status atual
+				}
+				
+				if (instance.getStatus() != newStatus) {
+					log.info("Status da instância '{}' sincronizado: {} -> {}", instance.getName(), instance.getStatus(), newStatus);
+					instance.setStatus(newStatus);
+					return repository.save(instance);
+				}
+			}
+		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
+			// Container não existe mais - foi removido
+			log.info("Container {} não encontrado, atualizando status para DELETED para instância '{}'", containerId, instance.getName());
+			instance.setStatus(ClusterStatus.DELETED);
+			instance.setContainerId(null); // Limpa containerId já que não existe mais
+			return repository.save(instance);
+		} catch (Exception e) {
+			log.error("Erro ao sincronizar status do container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
+			// Em caso de erro, marca como ERROR
+			if (instance.getStatus() != ClusterStatus.ERROR) {
+				instance.setStatus(ClusterStatus.ERROR);
+				return repository.save(instance);
+			}
+		}
+		
+		return instance;
+	}
+
+	@Override
+	public ClusterInstance startContainer(UUID id) {
+		ClusterInstance instance = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		String containerId = instance.getContainerId();
+		if (containerId == null || containerId.isBlank()) {
+			throw new IllegalStateException("Instância '{}' não possui containerId".formatted(instance.getName()));
+		}
+
+		try {
+			dockerEngineService.startContainer(containerId);
+			log.info("Container {} iniciado para instância '{}'", containerId, instance.getName());
+			instance.setStatus(ClusterStatus.ACTIVE);
+			return repository.save(instance);
+		} catch (Exception e) {
+			log.error("Erro ao iniciar container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
+			instance.setStatus(ClusterStatus.ERROR);
+			repository.save(instance);
+			throw new IllegalStateException("Falha ao iniciar container: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
+	public ClusterInstance stopContainer(UUID id, int timeoutSeconds) {
+		ClusterInstance instance = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		String containerId = instance.getContainerId();
+		if (containerId == null || containerId.isBlank()) {
+			throw new IllegalStateException("Instância '{}' não possui containerId".formatted(instance.getName()));
+		}
+
+		try {
+			dockerEngineService.stopContainer(containerId, timeoutSeconds);
+			log.info("Container {} parado para instância '{}'", containerId, instance.getName());
+			instance.setStatus(ClusterStatus.STOPPED);
+			return repository.save(instance);
+		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
+			// Container não existe mais
+			log.warn("Container {} não encontrado ao tentar parar, atualizando status para DELETED", containerId);
+			instance.setStatus(ClusterStatus.DELETED);
+			instance.setContainerId(null);
+			return repository.save(instance);
+		} catch (Exception e) {
+			log.error("Erro ao parar container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
+			instance.setStatus(ClusterStatus.ERROR);
+			repository.save(instance);
+			throw new IllegalStateException("Falha ao parar container: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
 	public void delete(UUID id) {
 		ClusterInstance instance = repository.findById(id)
 			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
@@ -142,9 +253,9 @@ public class DefaultClusterService implements ClusterService {
 				log.debug("Portas liberadas para instância '{}': {}", instance.getName(), instance.getPorts());
 			}
 			
-			// Limpa o containerId do registro
+			// Limpa o containerId do registro e atualiza status para DELETED
 			instance.setContainerId(null);
-			instance.setStatus(ClusterStatus.STOPPED);
+			instance.setStatus(ClusterStatus.DELETED);
 			repository.save(instance);
 		} catch (Exception e) {
 			log.error("Erro ao remover container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());

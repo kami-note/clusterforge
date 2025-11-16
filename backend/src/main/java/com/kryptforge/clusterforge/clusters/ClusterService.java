@@ -19,6 +19,29 @@ public interface ClusterService {
 	ClusterInstance updateContainerId(UUID id, String containerId);
 
 	/**
+	 * Sincroniza o status da instância com o estado real do container Docker.
+	 * Verifica se o container existe e qual é seu estado atual.
+	 * @param id ID da instância
+	 * @return instância atualizada com status sincronizado
+	 */
+	ClusterInstance syncStatus(UUID id);
+
+	/**
+	 * Inicia o container Docker e atualiza o status para ACTIVE.
+	 * @param id ID da instância
+	 * @return instância atualizada
+	 */
+	ClusterInstance startContainer(UUID id);
+
+	/**
+	 * Para o container Docker e atualiza o status para STOPPED.
+	 * @param id ID da instância
+	 * @param timeoutSeconds timeout em segundos para parar o container
+	 * @return instância atualizada
+	 */
+	ClusterInstance stopContainer(UUID id, int timeoutSeconds);
+
+	/**
 	 * Remove o container Docker e o registro do banco de dados.
 	 * @param id ID da instância
 	 */
@@ -26,6 +49,7 @@ public interface ClusterService {
 
 	/**
 	 * Remove apenas o container Docker (mantém registro no banco).
+	 * Atualiza o status para DELETED.
 	 * @param id ID da instância
 	 */
 	void deleteContainer(UUID id);

@@ -245,9 +245,9 @@ class ClusterServiceIntegrationTest {
 		Optional<ClusterInstance> found = clusterService.get(id);
 		assertTrue(found.isPresent(), "Instância deve ainda existir no banco");
 
-		// Verifica que status foi atualizado para STOPPED
+		// Verifica que status foi atualizado para DELETED
 		ClusterInstance updated = found.get();
-		assertEquals(ClusterStatus.STOPPED, updated.getStatus(), "Status deve ser STOPPED");
+		assertEquals(ClusterStatus.DELETED, updated.getStatus(), "Status deve ser DELETED");
 		assertNull(updated.getContainerId(), "containerId deve ser limpo");
 	}
 
@@ -316,12 +316,13 @@ class ClusterServiceIntegrationTest {
 			// Verifica que instância foi atualizada
 			Optional<ClusterInstance> found = clusterService.get(id);
 			assertTrue(found.isPresent());
-			assertEquals(ClusterStatus.STOPPED, found.get().getStatus());
+			assertEquals(ClusterStatus.DELETED, found.get().getStatus());
 		} else {
 			// Se não houver portas, apenas verifica que funciona
 			clusterService.deleteContainer(id);
 			Optional<ClusterInstance> found = clusterService.get(id);
 			assertTrue(found.isPresent());
+			assertEquals(ClusterStatus.DELETED, found.get().getStatus());
 		}
 	}
 
@@ -359,6 +360,111 @@ class ClusterServiceIntegrationTest {
 		});
 
 		assertTrue(ex.getMessage().contains("não encontrado"));
+	}
+
+	@Test
+	@DisplayName("syncStatus deve sincronizar status baseado no estado real do container")
+	void syncStatus_syncsWithRealContainerState() throws Exception {
+		// Cria instância com container rodando
+		ClusterInstance instance = createTestInstance();
+		UUID id = instance.getId();
+		String containerId = instance.getContainerId();
+		assertNotNull(containerId);
+
+		// Sincroniza status
+		ClusterInstance synced = clusterService.syncStatus(id);
+		assertEquals(ClusterStatus.ACTIVE, synced.getStatus(), "Status deve ser ACTIVE quando container está rodando");
+
+		// Para o container
+		dockerEngineService.stopContainer(containerId, 10);
+		
+		// Sincroniza novamente
+		synced = clusterService.syncStatus(id);
+		assertEquals(ClusterStatus.STOPPED, synced.getStatus(), "Status deve ser STOPPED quando container está parado");
+	}
+
+	@Test
+	@DisplayName("syncStatus deve atualizar para DELETED quando container não existe")
+	void syncStatus_updatesToDeletedWhenContainerNotFound() throws Exception {
+		// Cria instância com container
+		ClusterInstance instance = createTestInstance();
+		UUID id = instance.getId();
+		String containerId = instance.getContainerId();
+		assertNotNull(containerId);
+
+		// Remove o container manualmente
+		try {
+			dockerEngineService.stopContainer(containerId, 5);
+		} catch (Exception ignored) {
+		}
+		dockerEngineService.removeContainer(containerId, true, false);
+
+		// Sincroniza status
+		ClusterInstance synced = clusterService.syncStatus(id);
+		assertEquals(ClusterStatus.DELETED, synced.getStatus(), "Status deve ser DELETED quando container não existe");
+		assertNull(synced.getContainerId(), "containerId deve ser limpo");
+	}
+
+	@Test
+	@DisplayName("startContainer deve iniciar container e atualizar status para ACTIVE")
+	void startContainer_startsAndUpdatesStatus() throws Exception {
+		// Cria instância com container
+		ClusterInstance instance = createTestInstance();
+		UUID id = instance.getId();
+		String containerId = instance.getContainerId();
+		assertNotNull(containerId);
+
+		// Para o container primeiro
+		dockerEngineService.stopContainer(containerId, 10);
+		instance = clusterService.updateStatus(id, ClusterStatus.STOPPED);
+
+		// Inicia o container
+		ClusterInstance started = clusterService.startContainer(id);
+		assertEquals(ClusterStatus.ACTIVE, started.getStatus(), "Status deve ser ACTIVE após iniciar");
+
+		// Verifica que container está rodando
+		var inspect = dockerEngineService.inspectContainer(containerId);
+		assertTrue(inspect.getState().getRunning(), "Container deve estar rodando");
+	}
+
+	@Test
+	@DisplayName("stopContainer deve parar container e atualizar status para STOPPED")
+	void stopContainer_stopsAndUpdatesStatus() throws Exception {
+		// Cria instância com container rodando
+		ClusterInstance instance = createTestInstance();
+		UUID id = instance.getId();
+		String containerId = instance.getContainerId();
+		assertNotNull(containerId);
+
+		// Para o container
+		ClusterInstance stopped = clusterService.stopContainer(id, 10);
+		assertEquals(ClusterStatus.STOPPED, stopped.getStatus(), "Status deve ser STOPPED após parar");
+
+		// Verifica que container está parado
+		var inspect = dockerEngineService.inspectContainer(containerId);
+		assertFalse(inspect.getState().getRunning(), "Container deve estar parado");
+	}
+
+	@Test
+	@DisplayName("stopContainer deve atualizar para DELETED se container não existir")
+	void stopContainer_updatesToDeletedIfContainerNotFound() throws Exception {
+		// Cria instância com container
+		ClusterInstance instance = createTestInstance();
+		UUID id = instance.getId();
+		String containerId = instance.getContainerId();
+		assertNotNull(containerId);
+
+		// Remove o container manualmente
+		try {
+			dockerEngineService.stopContainer(containerId, 5);
+		} catch (Exception ignored) {
+		}
+		dockerEngineService.removeContainer(containerId, true, false);
+
+		// Tenta parar (deve detectar que não existe e atualizar para DELETED)
+		ClusterInstance stopped = clusterService.stopContainer(id, 10);
+		assertEquals(ClusterStatus.DELETED, stopped.getStatus(), "Status deve ser DELETED quando container não existe");
+		assertNull(stopped.getContainerId(), "containerId deve ser limpo");
 	}
 }
 

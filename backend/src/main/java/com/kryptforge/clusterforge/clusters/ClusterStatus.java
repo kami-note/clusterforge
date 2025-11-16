@@ -4,6 +4,7 @@ public enum ClusterStatus {
 	PENDING,
 	ACTIVE,
 	STOPPED,
+	DELETED,
 	ERROR
 }
 
