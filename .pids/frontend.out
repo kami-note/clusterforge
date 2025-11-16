@@ -1,0 +1,10 @@
+
+> clusterforge_frontend@0.1.0 dev /home/levi/Projects/clusterforge-f/frontend
+> next dev --turbopack
+
+   ▲ Next.js 15.5.4 (Turbopack)
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.0.135:3000
+
+ ✓ Starting...
+ ✓ Ready in 2.4s
