@@ -13,8 +13,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.DockerQueryService;
+import com.kryptforge.clusterforge.docker.DockerStreamService;
 import com.kryptforge.clusterforge.docker.dto.ContainerDetail;
 import com.kryptforge.clusterforge.docker.dto.ContainerSummary;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping(path = "/api/docker", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -22,10 +24,12 @@ public class DockerController {
 
 	private final DockerQueryService dockerQueryService;
 	private final DockerEngineService dockerEngineService;
+	private final DockerStreamService dockerStreamService;
 
-	public DockerController(DockerQueryService dockerQueryService, DockerEngineService dockerEngineService) {
+	public DockerController(DockerQueryService dockerQueryService, DockerEngineService dockerEngineService, DockerStreamService dockerStreamService) {
 		this.dockerQueryService = dockerQueryService;
 		this.dockerEngineService = dockerEngineService;
+		this.dockerStreamService = dockerStreamService;
 	}
 
 	@GetMapping("/containers")
@@ -53,6 +57,14 @@ public class DockerController {
 	) {
 		dockerEngineService.stopContainer(id, timeoutSeconds);
 		return ResponseEntity.noContent().build();
+	}
+
+	@GetMapping(path = "/containers/{id}/metrics/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public SseEmitter streamContainerMetrics(
+		@PathVariable("id") String id,
+		@RequestParam(name = "timeoutMillis", defaultValue = "300000") long timeoutMillis
+	) {
+		return dockerStreamService.streamContainerStats(id, timeoutMillis);
 	}
 }
 

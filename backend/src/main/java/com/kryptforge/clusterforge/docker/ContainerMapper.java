@@ -12,8 +12,10 @@ import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerPort;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.Statistics;
 import com.kryptforge.clusterforge.docker.dto.ContainerSummary;
 import com.kryptforge.clusterforge.docker.dto.ContainerDetail;
+import com.kryptforge.clusterforge.docker.dto.ContainerStats;
 
 /**
  * Mapper dedicado para converter modelos do docker-java em DTOs estáveis.
@@ -82,6 +84,90 @@ public final class ContainerMapper {
 			networks,
 			ports
 		);
+	}
+
+	public static ContainerStats toStats(String containerId, Statistics s) {
+		// CPU %
+		double cpuPercent = 0.0d;
+		try {
+			Long cpuDelta = delta(s.getCpuStats() != null ? s.getCpuStats().getCpuUsage().getTotalUsage() : null,
+				s.getPreCpuStats() != null ? s.getPreCpuStats().getCpuUsage().getTotalUsage() : null);
+			Long systemDelta = delta(s.getCpuStats() != null ? s.getCpuStats().getSystemCpuUsage() : null,
+				s.getPreCpuStats() != null ? s.getPreCpuStats().getSystemCpuUsage() : null);
+			int cpuCount = 1;
+			if (s.getCpuStats() != null && s.getCpuStats().getOnlineCpus() != null) {
+				cpuCount = s.getCpuStats().getOnlineCpus().intValue();
+			} else if (s.getCpuStats() != null && s.getCpuStats().getCpuUsage() != null && s.getCpuStats().getCpuUsage().getPercpuUsage() != null) {
+				cpuCount = s.getCpuStats().getCpuUsage().getPercpuUsage().size();
+			}
+			if (cpuDelta > 0 && systemDelta > 0) {
+				cpuPercent = (cpuDelta.doubleValue() / systemDelta.doubleValue()) * cpuCount * 100.0d;
+			}
+		} catch (Exception ignored) {
+			cpuPercent = 0.0d;
+		}
+
+		// Memória
+		long memUsage = 0L;
+		long memLimit = 0L;
+		double memPercent = 0.0d;
+		if (s.getMemoryStats() != null) {
+			if (s.getMemoryStats().getUsage() != null) memUsage = s.getMemoryStats().getUsage();
+			if (s.getMemoryStats().getLimit() != null) memLimit = s.getMemoryStats().getLimit();
+			if (memLimit > 0) {
+				memPercent = (memUsage * 100.0d) / memLimit;
+			}
+		}
+
+		// Rede (somatório de interfaces)
+		long rx = 0L, tx = 0L;
+		if (s.getNetworks() != null) {
+			for (var e : s.getNetworks().entrySet()) {
+				if (e.getValue() != null) {
+					if (e.getValue().getRxBytes() != null) rx += e.getValue().getRxBytes();
+					if (e.getValue().getTxBytes() != null) tx += e.getValue().getTxBytes();
+				}
+			}
+		}
+
+		// Blocos (read/write)
+		long blkRead = 0L, blkWrite = 0L;
+		if (s.getBlkioStats() != null && s.getBlkioStats().getIoServiceBytesRecursive() != null) {
+			var list = s.getBlkioStats().getIoServiceBytesRecursive();
+			for (var entry : list) {
+				if (entry == null || entry.getOp() == null || entry.getValue() == null) continue;
+				String op = entry.getOp();
+				if ("Read".equalsIgnoreCase(op)) blkRead += entry.getValue();
+				else if ("Write".equalsIgnoreCase(op)) blkWrite += entry.getValue();
+			}
+		}
+
+		// PIDs
+		long pids = 0L;
+		if (s.getPidsStats() != null && s.getPidsStats().getCurrent() != null) {
+			pids = s.getPidsStats().getCurrent();
+		}
+
+		return new ContainerStats(
+			containerId,
+			s.getRead(),
+			round2(cpuPercent),
+			memUsage,
+			memLimit,
+			round2(memPercent),
+			rx, tx,
+			blkRead, blkWrite,
+			pids
+		);
+	}
+
+	private static long delta(Long now, Long prev) {
+		if (now == null || prev == null) return 0L;
+		return Math.max(0L, now - prev);
+	}
+
+	private static double round2(double v) {
+		return Math.round(v * 100.0d) / 100.0d;
 	}
 
 	private static List<String> formatPorts(ContainerPort[] ports) {
