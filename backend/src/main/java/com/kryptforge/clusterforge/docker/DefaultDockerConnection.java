@@ -26,11 +26,13 @@ public class DefaultDockerConnection implements DockerConnection {
 			.withDockerHost(effectiveHost)
 			.build();
 
+		// Timeout de resposta muito alto para suportar streams longos (ex: eventos Docker)
+		// 24 horas é suficiente para streams de eventos que podem ficar sem dados por longos períodos
 		this.httpClient = new ApacheDockerHttpClient.Builder()
 			.dockerHost(config.getDockerHost())
 			.maxConnections(100)
 			.connectionTimeout(Duration.ofSeconds(10))
-			.responseTimeout(Duration.ofSeconds(60))
+			.responseTimeout(Duration.ofHours(24))
 			.build();
 
 		this.client = DockerClientBuilder.getInstance(config)

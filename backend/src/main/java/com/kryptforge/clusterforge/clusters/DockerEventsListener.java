@@ -1,5 +1,6 @@
 package com.kryptforge.clusterforge.clusters;
 
+import java.net.SocketTimeoutException;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 
@@ -87,16 +88,23 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 
 						@Override
 						public void onError(Throwable throwable) {
-							log.error("Erro na escuta de eventos do Docker: {}", throwable.getMessage(), throwable);
+							// Timeout é esperado em streams longos, mas não deve ser tratado como erro crítico
+							if (throwable instanceof SocketTimeoutException) {
+								log.warn("Timeout na escuta de eventos do Docker (normal em streams longos). Reconectando...");
+							} else {
+								log.error("Erro na escuta de eventos do Docker: {}", throwable.getMessage(), throwable);
+							}
 							running = false;
 							// Tenta reconectar após 5 segundos
 							try {
 								Thread.sleep(5000);
 								if (enabled) {
+									log.info("Tentando reconectar ao stream de eventos do Docker...");
 									startListening();
 								}
 							} catch (InterruptedException e) {
 								Thread.currentThread().interrupt();
+								log.warn("Thread de eventos Docker interrompida");
 							}
 						}
 
