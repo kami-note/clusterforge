@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { sseService, ClusterMetrics } from '@/services/sse.service';
 import { useAuth } from './useAuth';
-import { clusterService, ClusterListItem } from '@/services/cluster.service';
 
 export interface RealtimeMetrics {
   metrics: Record<number | string, ClusterMetrics>; // Aceita number (legado) ou string (UUID)
@@ -16,16 +15,19 @@ export interface RealtimeMetrics {
  * Hook para consumir métricas em tempo real via SSE
  * Conecta a SSE para cada cluster do usuário
  */
+let realtimeSubscriberCounter = 0;
+
 export function useRealtimeMetrics(): RealtimeMetrics {
   const { user } = useAuth();
   const [metrics, setMetrics] = useState<Record<number | string, ClusterMetrics>>({});
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const [userClusters, setUserClusters] = useState<ClusterListItem[]>([]);
   const [connectedClusters, setConnectedClusters] = useState<Set<string | number>>(new Set());
   const isSubscribedRef = useRef(false);
-  const userClustersRef = useRef<ClusterListItem[]>([]);
   const userRef = useRef(user);
+  const aggregateSubscriberIdRef = useRef<string>('');
+  const aggregateSubscribedRef = useRef(false);
+  const connectedClustersRef = useRef<Set<string | number>>(new Set());
 
   // Atualizar refs quando mudarem
   useEffect(() => {
@@ -33,37 +35,52 @@ export function useRealtimeMetrics(): RealtimeMetrics {
   }, [user]);
 
   useEffect(() => {
-    userClustersRef.current = userClusters;
-  }, [userClusters]);
+    connectedClustersRef.current = connectedClusters;
+  }, [connectedClusters]);
 
-  // Buscar clusters do usuário para conectar SSE
-  useEffect(() => {
-    if (user) {
-      clusterService
-        .listClusters()
-        .then((clusters) => {
-          setUserClusters(clusters);
-        })
-        .catch((err) => {
-          console.error('Erro ao buscar clusters do usuário:', err);
-        });
-    }
-  }, [user]);
+  if (!aggregateSubscriberIdRef.current) {
+    realtimeSubscriberCounter += 1;
+    aggregateSubscriberIdRef.current = `all-clusters-${realtimeSubscriberCounter}`;
+  }
 
-  // Conectar SSE para todos os clusters quando usuário estiver disponível
+  const shouldConnectAllClusters = Boolean(user);
+
+  // Garantir conexão SSE agregada enquanto houver pelo menos um assinante ativo
   useEffect(() => {
-    if (user && userClusters.length > 0) {
-      // Conectar ao endpoint agregado que retorna métricas de todos os clusters
-      sseService.connectAllClusters(5000).catch((err) => {
+    const subscriberId = aggregateSubscriberIdRef.current;
+
+    const connectAll = async () => {
+      try {
+        await sseService.connectAllClustersFor(subscriberId, 5000);
+      } catch (err) {
         console.error('Erro ao conectar SSE para todos os clusters:', err);
+        aggregateSubscribedRef.current = false;
+        setError(new Error('Não foi possível conectar às métricas em tempo real'));
+        // Liberar assinatura para permitir nova tentativa futura
+        sseService.disconnectAllClusters({ subscriberId });
+      }
+    };
+
+    if (shouldConnectAllClusters && !aggregateSubscribedRef.current) {
+      aggregateSubscribedRef.current = true;
+      connectAll().catch(() => {
+        // Caso já tenha sido tratado acima
       });
+    } else if (!shouldConnectAllClusters && aggregateSubscribedRef.current) {
+      sseService.disconnectAllClusters({ subscriberId });
+      aggregateSubscribedRef.current = false;
     }
 
     return () => {
-      // Desconectar quando componente desmontar ou usuário mudar
-      sseService.disconnectAllClusters();
+      if (aggregateSubscribedRef.current) {
+        sseService.disconnectAllClusters({ subscriberId });
+        aggregateSubscribedRef.current = false;
+      } else {
+        // Garantir cleanup caso a conexão tenha falhado antes de marcar o ref
+        sseService.disconnectAllClusters({ subscriberId });
+      }
     };
-  }, [user, userClusters.length]);
+  }, [shouldConnectAllClusters]);
 
   // NÃO conectar SSE automaticamente aqui
   // Apenas registrar callbacks e gerenciar métricas recebidas
@@ -138,7 +155,27 @@ export function useRealtimeMetrics(): RealtimeMetrics {
         isSubscribedRef.current = false;
       };
     }
-  }, [user, userClusters]);
+  }, [user]);
+
+  useEffect(() => {
+    const updateConnectedState = (isConnected: boolean) => {
+      const hasConnections = isConnected || connectedClustersRef.current.size > 0;
+      setConnected(hasConnections);
+      if (!hasConnections) {
+        setError(new Error('Desconectado do servidor. Tentando reconectar...'));
+      } else {
+        setError(null);
+      }
+    };
+
+    updateConnectedState(sseService.isAllClustersConnected());
+
+    const unsubscribe = sseService.onAllClustersConnectionChange(updateConnectedState);
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   /**
    * Solicita atualização imediata de métricas
@@ -146,16 +183,15 @@ export function useRealtimeMetrics(): RealtimeMetrics {
    * Esta função reconecta ao endpoint agregado
    */
   const requestUpdate = useCallback(() => {
-    if (user) {
-      // Reconectar ao endpoint agregado
-      sseService.connectAllClusters(5000).catch((err) => {
+    if (shouldConnectAllClusters) {
+      sseService.connectAllClustersFor(aggregateSubscriberIdRef.current, 5000).catch((err) => {
         console.error('Erro ao reconectar SSE para todos os clusters:', err);
         setError(new Error('Erro ao reconectar ao servidor'));
       });
     } else {
       setError(new Error('Não conectado ao servidor'));
     }
-  }, [user]);
+  }, [shouldConnectAllClusters]);
 
   return {
     metrics,

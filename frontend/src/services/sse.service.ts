@@ -11,6 +11,7 @@ export type { ClusterMetrics };
 
 type MetricsCallback = (clusterId: string | number, metrics: ClusterMetrics) => void;
 type ConnectionCallback = (clusterId: string | number, connected: boolean) => void;
+type AllClustersConnectionCallback = (connected: boolean) => void;
 
 interface SseConnection {
   eventSource: EventSource | AbortController | null;
@@ -35,6 +36,7 @@ const SSE_CONFIG = {
   STREAM_TIMEOUT_MS: 300000, // Timeout do stream SSE (5 minutos)
   DISCONNECT_DELAY_MS: 100, // Delay após desconectar antes de reconectar
   RETRY_NETWORK_ERROR_DELAY_MS: 2000, // Delay antes de retentar após NetworkError
+  SAFE_DISCONNECT_GRACE_MS: 1500, // Janela antes de encerrar SSE agregado (1.5s)
 } as const;
 
 // Utilitário para logs condicionais (apenas em desenvolvimento)
@@ -55,8 +57,12 @@ class SseService {
   private allClustersConnection: AllClustersConnection | null = null;
   private metricsCallbacks: Set<MetricsCallback> = new Set();
   private connectionCallbacks: Set<ConnectionCallback> = new Set();
+  private allClustersConnectionCallbacks: Set<AllClustersConnectionCallback> = new Set();
   private maxReconnectAttempts = SSE_CONFIG.MAX_RECONNECT_ATTEMPTS;
   private reconnectDelay = SSE_CONFIG.RECONNECT_DELAY_MS;
+  private allClustersSubscribers: Set<string> = new Set();
+  private pendingAllClustersDisconnect: NodeJS.Timeout | null = null;
+  private allClustersConnectPromise: Promise<void> | null = null;
 
   /**
    * Conecta ao SSE para um cluster específico
@@ -287,7 +293,7 @@ class SseService {
   disconnectAll(): void {
     const clusterIds = Array.from(this.connections.keys());
     clusterIds.forEach((clusterId) => this.disconnect(clusterId));
-    this.disconnectAllClusters();
+    this.disconnectAllClusters({ force: true, clearSubscribers: true });
   }
 
   /**
@@ -295,108 +301,175 @@ class SseService {
    * Usa o endpoint agregado que retorna métricas de todos os containers
    */
   async connectAllClusters(intervalMillis: number = 5000): Promise<void> {
-    // Se já existe conexão ativa, não conectar novamente
     if (this.allClustersConnection?.connected) {
       debugLog('✅ SSE já está conectado para todos os clusters');
       return;
     }
 
-    // Verificar token
-    const token = this.getToken();
-    if (!token) {
-      console.warn('⚠️ Token JWT não encontrado. Não é possível conectar SSE para todos os clusters.');
-      if (this.allClustersConnection) {
-        this.disconnectAllClusters();
-      }
-      return;
+    if (this.allClustersConnectPromise) {
+      return this.allClustersConnectPromise;
     }
 
-    // Se já existe conexão mas não está conectada, desconectar primeiro
-    if (this.allClustersConnection) {
-      this.disconnectAllClusters();
-      await new Promise(resolve => setTimeout(resolve, SSE_CONFIG.DISCONNECT_DELAY_MS));
-      
-      const newToken = this.getToken();
-      if (!newToken) {
-        console.warn('⚠️ Token JWT não encontrado após desconectar.');
+    this.allClustersConnectPromise = (async () => {
+      const token = this.getToken();
+      if (!token) {
+        console.warn('⚠️ Token JWT não encontrado. Não é possível conectar SSE para todos os clusters.');
+        if (this.allClustersConnection) {
+          this.disconnectAllClusters({ force: true, clearSubscribers: false });
+        }
         return;
       }
-    }
+
+      if (this.allClustersConnection) {
+        this.disconnectAllClusters({ force: true, clearSubscribers: false });
+        await new Promise(resolve => setTimeout(resolve, SSE_CONFIG.DISCONNECT_DELAY_MS));
+
+        const newToken = this.getToken();
+        if (!newToken) {
+          console.warn('⚠️ Token JWT não encontrado após desconectar.');
+          return;
+        }
+      }
+
+      try {
+        const sseUrl = `${config.api.baseUrl}/docker/clusters/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}&intervalMillis=${intervalMillis}`;
+
+        debugLog(`🔌 Tentando conectar SSE para todos os clusters`);
+        debugLog(`🔗 URL do SSE: ${sseUrl}`);
+
+        const fetchAbortController = new AbortController();
+        const fetchTimeout = setTimeout(() => {
+          console.warn(`⏱️ Timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s atingido para conexão SSE de todos os clusters. Abortando...`);
+          fetchAbortController.abort();
+        }, SSE_CONFIG.FETCH_TIMEOUT_MS);
+
+        let response: Response;
+        try {
+          debugLog(`📡 Iniciando fetch para SSE (timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s)...`);
+          const startTime = Date.now();
+          response = await fetch(sseUrl, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'text/event-stream',
+            },
+            signal: fetchAbortController.signal,
+          });
+          const elapsed = Date.now() - startTime;
+          clearTimeout(fetchTimeout);
+          debugLog(`✅ Fetch completado em ${elapsed}ms - Status: ${response.status} ${response.statusText}`);
+        } catch (fetchError: unknown) {
+          clearTimeout(fetchTimeout);
+          const error = fetchError as Error & { name?: string };
+          console.error('❌ Erro no fetch para SSE de todos os clusters:', error);
+          if (error?.name === 'AbortError') {
+            throw new Error(`SSE connection timeout: A conexão demorou mais de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000} segundos para responder.`);
+          }
+          throw fetchError;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          console.error(`❌ SSE falhou para todos os clusters - Status: ${response.status} ${response.statusText}`, errorText);
+          throw new Error(`SSE connection failed: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+
+        if (this.pendingAllClustersDisconnect) {
+          clearTimeout(this.pendingAllClustersDisconnect);
+          this.pendingAllClustersDisconnect = null;
+        }
+
+        const abortController = new AbortController();
+
+        const connection: AllClustersConnection = {
+          eventSource: abortController,
+          connected: false,
+          reconnectAttempts: 0,
+          reconnectTimeout: null,
+        };
+
+        debugLog(`✅ Resposta SSE recebida para todos os clusters - Status: ${response.status} ${response.statusText}`);
+        this.processAllClustersSseStream(response, connection, abortController.signal);
+
+        this.allClustersConnection = connection;
+        debugLog(`📡 Conexão SSE registrada para todos os clusters`);
+      } catch (error: unknown) {
+        const err = error as Error & { name?: string; message?: string };
+
+        if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+          debugLog(`ℹ️ Conexão SSE cancelada para todos os clusters:`, err?.message || 'Abortado manualmente');
+          return;
+        }
+
+        console.error('❌ Erro ao criar conexão SSE para todos os clusters:', err);
+        this.disconnectAllClusters({ force: true, clearSubscribers: false });
+      }
+    })();
 
     try {
-      const sseUrl = `${config.api.baseUrl}/docker/clusters/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}&intervalMillis=${intervalMillis}`;
-
-      debugLog(`🔌 Tentando conectar SSE para todos os clusters`);
-      debugLog(`🔗 URL do SSE: ${sseUrl}`);
-
-      const fetchAbortController = new AbortController();
-      const fetchTimeout = setTimeout(() => {
-        console.warn(`⏱️ Timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s atingido para conexão SSE de todos os clusters. Abortando...`);
-        fetchAbortController.abort();
-      }, SSE_CONFIG.FETCH_TIMEOUT_MS);
-
-      let response: Response;
-      try {
-        debugLog(`📡 Iniciando fetch para SSE (timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s)...`);
-        const startTime = Date.now();
-        response = await fetch(sseUrl, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'text/event-stream',
-          },
-          signal: fetchAbortController.signal,
-        });
-        const elapsed = Date.now() - startTime;
-        clearTimeout(fetchTimeout);
-        debugLog(`✅ Fetch completado em ${elapsed}ms - Status: ${response.status} ${response.statusText}`);
-      } catch (fetchError: unknown) {
-        clearTimeout(fetchTimeout);
-        const error = fetchError as Error & { name?: string };
-        console.error('❌ Erro no fetch para SSE de todos os clusters:', error);
-        if (error?.name === 'AbortError') {
-          throw new Error(`SSE connection timeout: A conexão demorou mais de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000} segundos para responder.`);
-        }
-        throw fetchError;
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        console.error(`❌ SSE falhou para todos os clusters - Status: ${response.status} ${response.statusText}`, errorText);
-        throw new Error(`SSE connection failed: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-
-      const abortController = new AbortController();
-      
-      const connection: AllClustersConnection = {
-        eventSource: abortController,
-        connected: false,
-        reconnectAttempts: 0,
-        reconnectTimeout: null,
-      };
-
-      // Processar stream SSE
-      debugLog(`✅ Resposta SSE recebida para todos os clusters - Status: ${response.status} ${response.statusText}`);
-      this.processAllClustersSseStream(response, connection, abortController.signal);
-
-      this.allClustersConnection = connection;
-      debugLog(`📡 Conexão SSE registrada para todos os clusters`);
-    } catch (error: unknown) {
-      const err = error as Error & { name?: string; message?: string };
-      
-      if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
-        debugLog(`ℹ️ Conexão SSE cancelada para todos os clusters:`, err?.message || 'Abortado manualmente');
-        return;
-      }
-      
-      console.error('❌ Erro ao criar conexão SSE para todos os clusters:', err);
-      this.disconnectAllClusters();
+      await this.allClustersConnectPromise;
+    } finally {
+      this.allClustersConnectPromise = null;
     }
+  }
+
+  async connectAllClustersFor(subscriberId: string, intervalMillis: number = 5000): Promise<void> {
+    if (!subscriberId) {
+      throw new Error('subscriberId é obrigatório para conectar SSE agregado');
+    }
+
+    const hadSubscriber = this.allClustersSubscribers.has(subscriberId);
+    this.allClustersSubscribers.add(subscriberId);
+    if (!hadSubscriber) {
+      debugLog(`👥 Assinante SSE agregado registrado (${this.allClustersSubscribers.size} ativos)`);
+    }
+
+    if (this.pendingAllClustersDisconnect) {
+      clearTimeout(this.pendingAllClustersDisconnect);
+      this.pendingAllClustersDisconnect = null;
+    }
+
+    await this.connectAllClusters(intervalMillis);
   }
 
   /**
    * Desconecta SSE para todos os clusters
    */
-  disconnectAllClusters(): void {
+  disconnectAllClusters(options: { subscriberId?: string; force?: boolean; clearSubscribers?: boolean } = {}): void {
+    const { subscriberId, force = false } = options;
+    const clearSubscribers = options.clearSubscribers ?? (!subscriberId || force);
+
+    if (subscriberId && this.allClustersSubscribers.delete(subscriberId)) {
+      debugLog(`👋 Assinante SSE agregado removido (${this.allClustersSubscribers.size} restantes)`);
+    } else if (clearSubscribers) {
+      this.allClustersSubscribers.clear();
+    }
+
+    if (this.pendingAllClustersDisconnect && force) {
+      clearTimeout(this.pendingAllClustersDisconnect);
+      this.pendingAllClustersDisconnect = null;
+    }
+
+    if (!force && this.allClustersSubscribers.size > 0) {
+      debugLog(`⌛ Mantendo SSE agregado ativo (${this.allClustersSubscribers.size} assinantes restantes)`);
+      return;
+    }
+
+    if (!force && this.allClustersSubscribers.size === 0) {
+      if (!this.pendingAllClustersDisconnect) {
+        this.pendingAllClustersDisconnect = setTimeout(() => {
+          this.pendingAllClustersDisconnect = null;
+          this.disconnectAllClusters({ force: true, clearSubscribers: true });
+        }, SSE_CONFIG.SAFE_DISCONNECT_GRACE_MS);
+        debugLog(`⏳ Agendando desconexão SSE agregada em ${SSE_CONFIG.SAFE_DISCONNECT_GRACE_MS}ms`);
+      }
+      return;
+    }
+
+    if (this.pendingAllClustersDisconnect) {
+      clearTimeout(this.pendingAllClustersDisconnect);
+      this.pendingAllClustersDisconnect = null;
+    }
+
     const connection = this.allClustersConnection;
     if (!connection) return;
 
@@ -504,6 +577,16 @@ class SseService {
         return;
       }
 
+      const isBenignStreamError =
+        error?.name === 'TypeError' &&
+        typeof error?.message === 'string' &&
+        error.message.toLowerCase().includes('input stream');
+
+      if (isBenignStreamError) {
+        debugLog(`ℹ️ Stream SSE encerrado pelo cliente (input stream fechado).`);
+        return;
+      }
+
       console.warn(`⚠️ Erro no SSE stream para todos os clusters:`, error);
       connection.connected = false;
       this.notifyAllClustersConnectionChange(false);
@@ -513,7 +596,7 @@ class SseService {
         this.scheduleAllClustersReconnect(connection);
       } else {
         console.error(`❌ Máximo de tentativas de reconexão atingido para todos os clusters`);
-        this.disconnectAllClusters();
+        this.disconnectAllClusters({ force: true, clearSubscribers: false });
       }
     }
   }
@@ -532,7 +615,7 @@ class SseService {
     );
 
     connection.reconnectTimeout = setTimeout(() => {
-      this.disconnectAllClusters();
+      this.disconnectAllClusters({ force: true, clearSubscribers: false });
       this.connectAllClusters().catch((err) => {
         if (process.env.NODE_ENV === 'development') {
           console.error(`Erro ao reconectar SSE para todos os clusters:`, err);
@@ -582,6 +665,14 @@ class SseService {
     // Notificar para cada cluster conhecido
     this.connections.forEach((_, clusterId) => {
       this.notifyConnectionCallbacks(clusterId, connected);
+    });
+
+    this.allClustersConnectionCallbacks.forEach((callback) => {
+      try {
+        callback(connected);
+      } catch (error) {
+        console.error('Erro em callback de conexão agregada:', error);
+      }
     });
   }
 
@@ -799,6 +890,14 @@ class SseService {
   onConnectionChange(callback: ConnectionCallback): () => void {
     this.connectionCallbacks.add(callback);
     return () => this.connectionCallbacks.delete(callback);
+  }
+
+  /**
+   * Registra callback para mudanças de conexão do stream agregado
+   */
+  onAllClustersConnectionChange(callback: AllClustersConnectionCallback): () => void {
+    this.allClustersConnectionCallbacks.add(callback);
+    return () => this.allClustersConnectionCallbacks.delete(callback);
   }
 
   /**
