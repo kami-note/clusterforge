@@ -24,13 +24,15 @@ import {
   Server,
   ZoomIn,
   ZoomOut,
-  Maximize2
+  Maximize2,
+  FolderTree
 } from 'lucide-react';
 import { useClusters } from '@/hooks/useClusters';
 import { Cluster } from '@/types';
 import { clusterService, FtpCredentials } from '@/services/cluster.service';
 import { monitoringService, ClusterMetrics, ClusterHealthStatus } from '@/services/monitoring.service';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
+import { ClusterFileManager } from '@/components/clusters/ClusterFileManager';
 
 interface ClusterDetailsProps {
   clusterId: string;
@@ -91,8 +93,9 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const consoleRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedInitialDataRef = useRef(false);
-  const [ftpCredentials, setFtpCredentials] = useState<{ host: string; port: number; username: string; password: string } | null>(null);
+  const [ftpCredentials, setFtpCredentials] = useState<FtpCredentials | null>(null);
   const [ftpLoading, setFtpLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState<'overview' | 'files'>('overview');
 
   // Função auxiliar para sanitizar valores numéricos
   const sanitizeValue = useCallback((value: number | undefined | null): number => {
@@ -1077,7 +1080,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       {/* 1. Informações Essenciais e Ações Rápidas */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center space-x-4">
               <Button variant="outline" onClick={onBack}>
                 <ArrowLeft className="h-4 w-4" />
@@ -1087,20 +1090,31 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 <Server className="h-8 w-8 text-primary" />
                 <div>
                   <h1>{cluster.name}</h1>
-                  <div className="flex items-center space-x-4 mt-1">
-                    <div className={`w-3 h-3 rounded-full ${getStatusColor(status)}`} />
-                    <span className="text-sm">{getStatusText(status)}</span>
+                  <div className="flex items-center space-x-4 mt-1 text-sm text-muted-foreground">
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-3 h-3 rounded-full ${getStatusColor(status)}`} />
+                      <span>{getStatusText(status)}</span>
+                    </div>
+                    <span>•</span>
+                    <span>Uptime: {cluster.lastUpdate}</span>
+                    <span>•</span>
+                    <span>{cluster.serviceType}</span>
                   </div>
-                  <span className="text-sm text-muted-foreground">•</span>
-                  <span className="text-sm text-muted-foreground">Uptime: {cluster.lastUpdate}</span>
-                  <span className="text-sm text-muted-foreground">•</span>
-                  <span className="text-sm text-muted-foreground">{cluster.serviceType}</span>
                 </div>
               </div>
             </div>
             
             {/* Botões de Ação */}
-            <div className="flex space-x-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:space-x-3">
+              <Button
+                size="lg"
+                variant={activeSection === 'files' ? 'default' : 'outline'}
+                className="h-12 px-6"
+                onClick={() => setActiveSection(prev => prev === 'files' ? 'overview' : 'files')}
+              >
+                <FolderTree className="h-5 w-5 mr-2" />
+                {activeSection === 'files' ? 'Voltar para Monitoramento' : 'Gerenciador de Arquivos'}
+              </Button>
               {status === 'stopped' ? (
                 <Button 
                   size="lg" 
@@ -1122,31 +1136,49 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 </Button>
               ) : null}
               
-              <Button 
-                size="lg" 
-                variant="outline" 
-                onClick={() => handleAction('restart')}
-                disabled={status === 'restarting'}
-                className="h-12 px-6"
-              >
-                <RotateCw className={`h-5 w-5 mr-2 ${status === 'restarting' ? 'animate-spin' : ''}`} />
-                Reiniciar
-              </Button>
-              
-              <Button 
-                size="lg" 
-                variant="outline" 
-                onClick={() => handleAction('reinstall')}
-                className="h-12 px-6"
-              >
-                <RefreshCw className="h-5 w-5 mr-2" />
-                Reinstalar
-              </Button>
+              <div className="flex space-x-3">
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  onClick={() => handleAction('restart')}
+                  disabled={status === 'restarting'}
+                  className="h-12 px-6"
+                >
+                  <RotateCw className={`h-5 w-5 mr-2 ${status === 'restarting' ? 'animate-spin' : ''}`} />
+                  Reiniciar
+                </Button>
+                
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  onClick={() => handleAction('reinstall')}
+                  className="h-12 px-6"
+                >
+                  <RefreshCw className="h-5 w-5 mr-2" />
+                  Reinstalar
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {activeSection === 'files' ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Gerenciador de Arquivos</CardTitle>
+            <CardDescription>
+              Interface estilo Windows pronta para integração WebDAV do cluster
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ClusterFileManager 
+              clusterName={cluster.name}
+              endpointHint={ftpCredentials?.host ? `webdav://${ftpCredentials.host}` : undefined}
+            />
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* 2. Monitoramento de Recursos */}
         <div className="xl:col-span-2 space-y-6">
@@ -1348,7 +1380,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             </CardContent>
           </Card>
 
-          {/* 3. Entrada de Comando e Console */}
+          {/* 3. Console de Controle */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1359,7 +1391,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                     <CardDescription>Digite comandos e monitore a saída do servidor</CardDescription>
                   </div>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex flex-wrap gap-2">
                   <Button 
                     variant="outline" 
                     size="sm"
@@ -1380,7 +1412,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Entrada de Comando */}
               <div>
                 <label className="text-sm">Comando de Inicialização</label>
                 <div className="flex space-x-2 mt-2">
@@ -1403,7 +1434,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
 
               <Separator />
 
-              {/* Console de Saída */}
               <div>
                 <label className="text-sm">Saída do Console</label>
                 <div className="mt-2">
@@ -1577,6 +1607,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           </Card>
         </div>
       </div>
+      )}
     </div>
   );
 }
