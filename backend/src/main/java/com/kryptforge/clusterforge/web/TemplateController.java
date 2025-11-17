@@ -131,6 +131,17 @@ public class TemplateController {
 			instance = clusterService.updateContainerId(instance.getId(), result.containerId());
 			instance = clusterService.updateStatus(instance.getId(), ClusterStatus.ACTIVE);
 
+			// atualiza com informações do servidor FTP se foi criado
+			if (result.ftpInfo() != null) {
+				instance = clusterService.updateFtpInfo(
+					instance.getId(),
+					result.ftpInfo().containerId(),
+					result.ftpInfo().hostPort(),
+					result.ftpInfo().ftpUser(),
+					result.ftpInfo().ftpPassword()
+				);
+			}
+
 			return ResponseEntity.status(HttpStatus.CREATED)
 				.body(new TemplateInstantiateResponse(result.containerId(), request.name()));
 		} catch (IllegalArgumentException e) {

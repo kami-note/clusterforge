@@ -12,6 +12,7 @@ import org.springframework.util.StringUtils;
 
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
+import com.kryptforge.clusterforge.ftp.FtpService;
 import com.kryptforge.clusterforge.templates.TemplateService;
 import com.kryptforge.clusterforge.users.CurrentUser;
 import com.kryptforge.clusterforge.users.Role;
@@ -26,14 +27,16 @@ public class DefaultClusterService implements ClusterService {
 	private final DockerEngineService dockerEngineService;
 	private final PortManager portManager;
 	private final CurrentUser currentUser;
+	private final FtpService ftpService;
 	private static final Logger log = LoggerFactory.getLogger(DefaultClusterService.class);
 
-	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager, CurrentUser currentUser) {
+	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager, CurrentUser currentUser, FtpService ftpService) {
 		this.repository = repository;
 		this.templateService = templateService;
 		this.dockerEngineService = dockerEngineService;
 		this.portManager = portManager;
 		this.currentUser = currentUser;
+		this.ftpService = ftpService;
 	}
 
 	@Override
@@ -141,6 +144,16 @@ public class DefaultClusterService implements ClusterService {
 	public ClusterInstance updateContainerId(UUID id, String containerId) {
 		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
 		c.setContainerId(containerId);
+		return repository.save(c);
+	}
+
+	@Override
+	public ClusterInstance updateFtpInfo(UUID id, String ftpContainerId, Integer ftpPort, String ftpUser, String ftpPassword) {
+		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		c.setFtpContainerId(ftpContainerId);
+		c.setFtpPort(ftpPort);
+		c.setFtpUser(ftpUser);
+		c.setFtpPassword(ftpPassword);
 		return repository.save(c);
 	}
 
@@ -305,6 +318,26 @@ public class DefaultClusterService implements ClusterService {
 		}
 
 		try {
+			// Remove o servidor FTP associado primeiro (se existir)
+			String ftpContainerId = instance.getFtpContainerId();
+			Integer ftpPort = instance.getFtpPort();
+			if (ftpContainerId != null && !ftpContainerId.isBlank()) {
+				try {
+					log.info("Removendo servidor FTP {} para instância '{}'", ftpContainerId, instance.getName());
+					ftpService.removeFtpServer(ftpContainerId);
+					log.info("Servidor FTP {} removido com sucesso", ftpContainerId);
+					
+					// Libera a porta FTP
+					if (ftpPort != null) {
+						portManager.releasePort(ftpPort);
+						log.debug("Porta FTP {} liberada para instância '{}'", ftpPort, instance.getName());
+					}
+				} catch (Exception e) {
+					log.warn("Falha ao remover servidor FTP {}: {}", ftpContainerId, e.getMessage());
+					// Continua com a remoção do container principal mesmo se o FTP falhar
+				}
+			}
+
 			// Para o container antes de remover
 			try {
 				dockerEngineService.stopContainer(containerId, 10);
@@ -324,8 +357,12 @@ public class DefaultClusterService implements ClusterService {
 				log.debug("Portas liberadas para instância '{}': {}", instance.getName(), instance.getPorts());
 			}
 			
-			// Limpa o containerId do registro e atualiza status para DELETED
+			// Limpa o containerId e informações do FTP do registro e atualiza status para DELETED
 			instance.setContainerId(null);
+			instance.setFtpContainerId(null);
+			instance.setFtpPort(null);
+			instance.setFtpUser(null);
+			instance.setFtpPassword(null);
 			instance.setStatus(ClusterStatus.DELETED);
 			repository.save(instance);
 		} catch (Exception e) {

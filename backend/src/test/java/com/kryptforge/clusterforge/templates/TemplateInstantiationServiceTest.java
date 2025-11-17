@@ -25,6 +25,7 @@ class TemplateInstantiationServiceTest {
 	private TemplateProperties templateProperties;
 	private DockerEngineService dockerEngineService;
 	private PortManager portManager;
+	private com.kryptforge.clusterforge.ftp.FtpService ftpService;
 	private TemplateInstantiationService service;
 
 	@BeforeEach
@@ -34,8 +35,10 @@ class TemplateInstantiationServiceTest {
 		templateProperties.setVolumesBasePath(tempDir.resolve("volumes").toString());
 		dockerEngineService = mock(DockerEngineService.class);
 		portManager = mock(PortManager.class);
+		ftpService = mock(com.kryptforge.clusterforge.ftp.FtpService.class);
 		when(portManager.mapPorts(anyList())).thenAnswer(inv -> inv.getArgument(0));
-		service = new TemplateInstantiationService(templateProperties, dockerEngineService, portManager);
+		when(portManager.allocatePort()).thenReturn(-1); // Simula falha na alocação de porta FTP para não criar FTP nos testes unitários
+		service = new TemplateInstantiationService(templateProperties, dockerEngineService, portManager, ftpService);
 	}
 
 	@Test

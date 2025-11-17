@@ -69,6 +69,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
+		<!-- FTP client para operações diretas nos servidores FTP dos clusters -->
+		<dependency>
+			<groupId>commons-net</groupId>
+			<artifactId>commons-net</artifactId>
+			<version>3.11.1</version>
+		</dependency>
 		<!-- YAML parsing -->
 		<dependency>
 			<groupId>org.yaml</groupId>

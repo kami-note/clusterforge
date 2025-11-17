@@ -19,6 +19,17 @@ public interface ClusterService {
 	ClusterInstance updateContainerId(UUID id, String containerId);
 
 	/**
+	 * Atualiza informações do servidor FTP da instância.
+	 * @param id ID da instância
+	 * @param ftpContainerId ID do container FTP
+	 * @param ftpPort porta do host do servidor FTP
+	 * @param ftpUser usuário FTP
+	 * @param ftpPassword senha FTP
+	 * @return instância atualizada
+	 */
+	ClusterInstance updateFtpInfo(UUID id, String ftpContainerId, Integer ftpPort, String ftpUser, String ftpPassword);
+
+	/**
 	 * Sincroniza o status da instância com o estado real do container Docker.
 	 * Verifica se o container existe e qual é seu estado atual.
 	 * @param id ID da instância

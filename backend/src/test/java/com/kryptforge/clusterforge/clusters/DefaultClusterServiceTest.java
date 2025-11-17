@@ -31,6 +31,7 @@ class DefaultClusterServiceTest {
 	private DockerEngineService dockerEngineService;
 	private PortManager portManager;
 	private CurrentUser currentUser;
+	private com.kryptforge.clusterforge.ftp.FtpService ftpService;
 	private DefaultClusterService service;
 	private User mockUser;
 
@@ -41,6 +42,7 @@ class DefaultClusterServiceTest {
 		dockerEngineService = mock(DockerEngineService.class);
 		portManager = mock(PortManager.class);
 		currentUser = mock(CurrentUser.class);
+		ftpService = mock(com.kryptforge.clusterforge.ftp.FtpService.class);
 		
 		// Cria usuário mock para todos os testes
 		mockUser = new User();
@@ -58,7 +60,7 @@ class DefaultClusterServiceTest {
 		// Mock CurrentUser para retornar usuário autenticado
 		when(currentUser.getCurrentUser()).thenReturn(Optional.of(mockUser));
 		
-		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager, currentUser);
+		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager, currentUser, ftpService);
 	}
 
 	@Test

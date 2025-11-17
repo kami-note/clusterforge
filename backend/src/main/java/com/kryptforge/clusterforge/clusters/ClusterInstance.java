@@ -71,6 +71,18 @@ public class ClusterInstance {
 	@Column(name = "owner_id", length = 36)
 	private UUID ownerId;
 
+	@Column(name = "ftp_container_id", length = 64)
+	private String ftpContainerId;
+
+	@Column(name = "ftp_port")
+	private Integer ftpPort;
+
+	@Column(name = "ftp_user", length = 64)
+	private String ftpUser;
+
+	@Column(name = "ftp_password", length = 128)
+	private String ftpPassword;
+
 	@PrePersist
 	void onCreate() {
 		this.createdAt = Instant.now();
@@ -157,6 +169,38 @@ public class ClusterInstance {
 
 	public void setOwnerId(UUID ownerId) {
 		this.ownerId = ownerId;
+	}
+
+	public String getFtpContainerId() {
+		return ftpContainerId;
+	}
+
+	public void setFtpContainerId(String ftpContainerId) {
+		this.ftpContainerId = ftpContainerId;
+	}
+
+	public Integer getFtpPort() {
+		return ftpPort;
+	}
+
+	public void setFtpPort(Integer ftpPort) {
+		this.ftpPort = ftpPort;
+	}
+
+	public String getFtpUser() {
+		return ftpUser;
+	}
+
+	public void setFtpUser(String ftpUser) {
+		this.ftpUser = ftpUser;
+	}
+
+	public String getFtpPassword() {
+		return ftpPassword;
+	}
+
+	public void setFtpPassword(String ftpPassword) {
+		this.ftpPassword = ftpPassword;
 	}
 
 	public static class EnvConverter extends JsonAttributeConverter<Map<String,String>> {

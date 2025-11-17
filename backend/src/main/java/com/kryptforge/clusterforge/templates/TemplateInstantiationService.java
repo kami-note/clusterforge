@@ -22,6 +22,8 @@ import org.yaml.snakeyaml.Yaml;
 
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
+import com.kryptforge.clusterforge.ftp.FtpService;
+import com.kryptforge.clusterforge.ftp.FtpService.FtpServerInfo;
 
 /**
  * Serviço responsável por instanciar um template (docker-compose.yml simplificado)
@@ -37,14 +39,17 @@ public class TemplateInstantiationService {
 	private final TemplateProperties templateProperties;
 	private final DockerEngineService dockerEngineService;
 	private final PortManager portManager;
+	private final FtpService ftpService;
 	private static final Logger log = LoggerFactory.getLogger(TemplateInstantiationService.class);
 
 	public TemplateInstantiationService(TemplateProperties templateProperties,
 										DockerEngineService dockerEngineService,
-										PortManager portManager) {
+										PortManager portManager,
+										FtpService ftpService) {
 		this.templateProperties = Objects.requireNonNull(templateProperties, "templateProperties");
 		this.dockerEngineService = Objects.requireNonNull(dockerEngineService, "dockerEngineService");
 		this.portManager = Objects.requireNonNull(portManager, "portManager");
+		this.ftpService = Objects.requireNonNull(ftpService, "ftpService");
 	}
 
 	public InstantiationResult instantiate(String templateName,
@@ -153,6 +158,9 @@ public class TemplateInstantiationService {
 			log.warn("Falha ao fazer pull da imagem {}: {}", spec.image, e.getMessage());
 		}
 
+		// Identifica ou cria o volume principal para o servidor FTP
+		String mainVolumePath = identifyOrCreateMainVolume(instanceName, binds);
+
 		// cria e inicia container
 		String containerId = dockerEngineService.createContainer(
 			spec.image,
@@ -168,7 +176,35 @@ public class TemplateInstantiationService {
 			log.warn("Falha ao iniciar container {}: {}", containerId, e.getMessage());
 			throw e;
 		}
-		return new InstantiationResult(containerId, ports);
+
+		// Cria servidor FTP para o container
+		FtpServerInfo ftpInfo = null;
+		int ftpPort = -1;
+		try {
+			ftpPort = portManager.allocatePort();
+			if (ftpPort == -1) {
+				log.warn("Não foi possível alocar porta para servidor FTP do container {}", instanceName);
+			} else {
+				log.info("Criando servidor FTP para container {} na porta {}", instanceName, ftpPort);
+				ftpInfo = ftpService.createFtpServer(instanceName, mainVolumePath, ftpPort, null, null);
+				log.info("Servidor FTP criado com sucesso para container {}: containerId={}, port={}", 
+					instanceName, ftpInfo.containerId(), ftpInfo.hostPort());
+			}
+		} catch (Exception e) {
+			log.error("Falha ao criar servidor FTP para container {}: {}", instanceName, e.getMessage(), e);
+			// Libera a porta FTP se foi alocada mas a criação falhou
+			if (ftpPort != -1) {
+				try {
+					portManager.releasePort(ftpPort);
+					log.debug("Porta FTP {} liberada após falha na criação do servidor", ftpPort);
+				} catch (Exception ex) {
+					log.warn("Falha ao liberar porta FTP {}: {}", ftpPort, ex.getMessage());
+				}
+			}
+			// Não falha a instanciação se o FTP falhar, apenas registra o erro
+		}
+
+		return new InstantiationResult(containerId, ports, ftpInfo);
 	}
 
 	private ComposeServiceSpec readFirstService(Path composeFile) throws IOException {
@@ -242,6 +278,44 @@ public class TemplateInstantiationService {
 			out.add(s);
 		}
 		return out;
+	}
+
+	/**
+	 * Identifica o volume principal do container ou cria um volume padrão se não houver volumes.
+	 * O volume principal é o primeiro volume que não seja read-only.
+	 * 
+	 * @param instanceName nome da instância
+	 * @param binds lista de bind mounts do container
+	 * @return caminho do volume principal
+	 */
+	private String identifyOrCreateMainVolume(String instanceName, List<String> binds) {
+		// Procura o primeiro volume que não seja read-only
+		for (String bind : binds) {
+			if (!StringUtils.hasText(bind)) continue;
+			String[] parts = bind.split(":");
+			if (parts.length < 2) continue;
+			String hostPath = parts[0];
+			// Verifica se não é read-only
+			if (parts.length < 3 || !"ro".equalsIgnoreCase(parts[2])) {
+				return hostPath;
+			}
+		}
+
+		// Se não encontrou volume adequado, cria um volume padrão baseado no nome da instância
+		String volumesBasePath = templateProperties.getVolumesBasePath();
+		if (!StringUtils.hasText(volumesBasePath)) {
+			volumesBasePath = "./data/volumes";
+		}
+		Path volumePath = Path.of(volumesBasePath).toAbsolutePath().resolve(instanceName).normalize();
+		
+		try {
+			Files.createDirectories(volumePath);
+			log.info("Volume padrão criado para instância {}: {}", instanceName, volumePath);
+		} catch (Exception e) {
+			log.warn("Falha ao criar volume padrão {}: {}", volumePath, e.getMessage());
+		}
+		
+		return volumePath.toString();
 	}
 
 	private static void requireText(String value, String name) {
