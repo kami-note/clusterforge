@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.kryptforge.clusterforge.clusters.ClusterService;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.DockerQueryService;
 import com.kryptforge.clusterforge.docker.DockerStreamService;
@@ -25,11 +26,18 @@ public class DockerController {
 	private final DockerQueryService dockerQueryService;
 	private final DockerEngineService dockerEngineService;
 	private final DockerStreamService dockerStreamService;
+	private final ClusterService clusterService;
 
-	public DockerController(DockerQueryService dockerQueryService, DockerEngineService dockerEngineService, DockerStreamService dockerStreamService) {
+	public DockerController(
+		DockerQueryService dockerQueryService,
+		DockerEngineService dockerEngineService,
+		DockerStreamService dockerStreamService,
+		ClusterService clusterService
+	) {
 		this.dockerQueryService = dockerQueryService;
 		this.dockerEngineService = dockerEngineService;
 		this.dockerStreamService = dockerStreamService;
+		this.clusterService = clusterService;
 	}
 
 	@GetMapping("/containers")
@@ -65,6 +73,25 @@ public class DockerController {
 		@RequestParam(name = "timeoutMillis", defaultValue = "300000") long timeoutMillis
 	) {
 		return dockerStreamService.streamContainerStats(id, timeoutMillis);
+	}
+
+	/**
+	 * Stream de métricas de todos os containers visíveis ao usuário atual.
+	 * Admin vê todos os clusters, usuário comum vê apenas os seus.
+	 * Métricas são enviadas periodicamente (não em tempo real) para reduzir carga.
+	 * 
+	 * @param timeoutMillis Timeout do SSE (padrão: 5 minutos)
+	 * @param intervalMillis Intervalo entre atualizações em ms (padrão: 5 segundos)
+	 * @return SseEmitter com métricas de todos os clusters visíveis
+	 */
+	@GetMapping(path = "/clusters/metrics/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public SseEmitter streamAllClustersMetrics(
+		@RequestParam(name = "timeoutMillis", defaultValue = "300000") long timeoutMillis,
+		@RequestParam(name = "intervalMillis", defaultValue = "5000") long intervalMillis
+	) {
+		// Obter clusters visíveis ao usuário atual (já filtra por permissões)
+		var clusters = clusterService.list();
+		return dockerStreamService.streamAllClustersMetrics(clusters, timeoutMillis, intervalMillis);
 	}
 }
 

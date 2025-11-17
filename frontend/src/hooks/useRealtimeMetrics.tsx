@@ -50,6 +50,21 @@ export function useRealtimeMetrics(): RealtimeMetrics {
     }
   }, [user]);
 
+  // Conectar SSE para todos os clusters quando usuário estiver disponível
+  useEffect(() => {
+    if (user && userClusters.length > 0) {
+      // Conectar ao endpoint agregado que retorna métricas de todos os clusters
+      sseService.connectAllClusters(5000).catch((err) => {
+        console.error('Erro ao conectar SSE para todos os clusters:', err);
+      });
+    }
+
+    return () => {
+      // Desconectar quando componente desmontar ou usuário mudar
+      sseService.disconnectAllClusters();
+    };
+  }, [user, userClusters.length]);
+
   // NÃO conectar SSE automaticamente aqui
   // Apenas registrar callbacks e gerenciar métricas recebidas
   // A conexão SSE será feita pelo ClusterDetails quando necessário
@@ -87,16 +102,17 @@ export function useRealtimeMetrics(): RealtimeMetrics {
             next.delete(clusterId);
           }
           
-          // Atualizar estado de conexão global (conectado se pelo menos um cluster estiver conectado)
-          const hasConnections = next.size > 0;
+          // Verificar conexão agregada (mais confiável)
+          const allClustersConnected = sseService.isAllClustersConnected();
+          const hasConnections = allClustersConnected || next.size > 0;
           
-          // Atualizar estado de conexão e erro usando useEffect separado
+          // Atualizar estado de conexão e erro
           setConnected(hasConnections);
           
-          if (!isConnected && next.size === 0) {
+          if (!hasConnections) {
             // Todos os clusters desconectados
             setError(new Error('Desconectado do servidor. Tentando reconectar...'));
-          } else if (hasConnections) {
+          } else {
             // Pelo menos um cluster conectado
             setError(null);
           }
@@ -127,24 +143,19 @@ export function useRealtimeMetrics(): RealtimeMetrics {
   /**
    * Solicita atualização imediata de métricas
    * Com SSE, as métricas são enviadas automaticamente pelo servidor
-   * Esta função apenas reconecta clusters que já estavam conectados
+   * Esta função reconecta ao endpoint agregado
    */
   const requestUpdate = useCallback(() => {
     if (user) {
-      // Reconectar apenas clusters que já estavam conectados
-      // Não conectar novos clusters automaticamente
-      connectedClusters.forEach((clusterId) => {
-        const cluster = userClusters.find((c) => c.id === clusterId);
-        if (cluster?.containerId) {
-          sseService.connect(cluster.id, cluster.containerId).catch((err) => {
-            console.error(`Erro ao reconectar SSE para cluster ${cluster.id}:`, err);
-          });
-        }
+      // Reconectar ao endpoint agregado
+      sseService.connectAllClusters(5000).catch((err) => {
+        console.error('Erro ao reconectar SSE para todos os clusters:', err);
+        setError(new Error('Erro ao reconectar ao servidor'));
       });
     } else {
       setError(new Error('Não conectado ao servidor'));
     }
-  }, [user, userClusters, connectedClusters]);
+  }, [user]);
 
   return {
     metrics,
