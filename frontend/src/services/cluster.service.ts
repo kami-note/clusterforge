@@ -198,7 +198,8 @@ class ClusterService {
       return await httpClient.get<FtpCredentials>(`/clusters/${clusterId}/ftp-credentials`);
     } catch (error: any) {
       // Se endpoint não existir ou acesso negado, retornar valores padrão ou vazios (não crítico)
-      if (error?.status === 404 || error?.status === 403) {
+      // 401 também pode ocorrer se o endpoint não existir e requerer autenticação
+      if (error?.status === 404 || error?.status === 403 || error?.status === 401) {
         return {
           host: '',
           port: 21,

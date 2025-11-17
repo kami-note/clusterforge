@@ -19,6 +19,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -38,11 +39,63 @@ public class SecurityConfig {
 	}
 
 	@Bean
-	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	public org.springframework.security.web.AuthenticationEntryPoint authenticationEntryPoint() {
+		return (request, response, authException) -> {
+			// Não fazer nada se a resposta já foi commitada (evita erro duplo)
+			// Isso pode acontecer quando o CORS já escreveu headers na resposta
+			if (response.isCommitted()) {
+				return;
+			}
+			response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+			response.setContentType("application/json");
+			response.setCharacterEncoding("UTF-8");
+			try {
+				response.getWriter().write("{\"error\":\"Não autenticado\",\"message\":\"Token inválido ou ausente\"}");
+			} catch (Exception e) {
+				// Ignorar se não conseguir escrever (resposta pode ter sido commitada durante a escrita)
+			}
+		};
+	}
+
+	@Bean
+	public org.springframework.security.web.access.AccessDeniedHandler accessDeniedHandler() {
+		return (request, response, accessDeniedException) -> {
+			// Não fazer nada se a resposta já foi commitada (evita erro duplo)
+			// Isso pode acontecer quando o CORS já escreveu headers na resposta
+			if (response.isCommitted()) {
+				// Log apenas em debug para não poluir os logs
+				org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecurityConfig.class);
+				log.debug("Tentativa de tratar AccessDeniedException para {} {}, mas resposta já foi commitada", 
+					request.getMethod(), request.getRequestURI());
+				return;
+			}
+			response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+			response.setContentType("application/json");
+			response.setCharacterEncoding("UTF-8");
+			try {
+				response.getWriter().write("{\"error\":\"Acesso negado\",\"message\":\"Você não tem permissão para acessar este recurso\"}");
+			} catch (Exception e) {
+				// Ignorar se não conseguir escrever (resposta pode ter sido commitada durante a escrita)
+				org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecurityConfig.class);
+				log.debug("Erro ao escrever resposta de acesso negado para {} {}: {}", 
+					request.getMethod(), request.getRequestURI(), e.getMessage());
+			}
+		};
+	}
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(
+		HttpSecurity http,
+		SecurityExceptionFilter securityExceptionFilter,
+		org.springframework.security.web.AuthenticationEntryPoint authenticationEntryPoint,
+		org.springframework.security.web.access.AccessDeniedHandler accessDeniedHandler
+	) throws Exception {
 		http
 			.csrf(csrf -> csrf.disable())
 			.cors(cors -> cors.configurationSource(corsConfigurationSource()))
 			.authorizeHttpRequests(auth -> auth
+				// Permitir OPTIONS requests (preflight CORS) sem autenticação
+				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 				.requestMatchers("/api/auth/**").permitAll()
 				.requestMatchers("/").permitAll()
 				.requestMatchers("/h2-console/**").permitAll()
@@ -53,8 +106,15 @@ public class SecurityConfig {
 			.sessionManagement(session -> session
 				.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
 			)
+			// Adicionar filtro de exceções antes do CORS para capturar exceções antes que a resposta seja commitada
+			.addFilterBefore(securityExceptionFilter, org.springframework.web.filter.CorsFilter.class)
 			.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-			.headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()));
+			.headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()))
+			// Configurar tratamento de exceções para evitar logs de erro quando a resposta já foi enviada
+			.exceptionHandling(exceptions -> exceptions
+				.authenticationEntryPoint(authenticationEntryPoint)
+				.accessDeniedHandler(accessDeniedHandler)
+			);
 
 		return http.build();
 	}

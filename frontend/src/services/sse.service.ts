@@ -20,65 +20,173 @@ interface SseConnection {
   reconnectTimeout: NodeJS.Timeout | null;
 }
 
+// Constantes configuráveis
+const SSE_CONFIG = {
+  FETCH_TIMEOUT_MS: 10000, // Timeout para conexão inicial (10 segundos)
+  RECONNECT_DELAY_MS: 3000, // Delay entre tentativas de reconexão (3 segundos)
+  MAX_RECONNECT_ATTEMPTS: 5, // Número máximo de tentativas de reconexão
+  STREAM_TIMEOUT_MS: 300000, // Timeout do stream SSE (5 minutos)
+  DISCONNECT_DELAY_MS: 100, // Delay após desconectar antes de reconectar
+  RETRY_NETWORK_ERROR_DELAY_MS: 2000, // Delay antes de retentar após NetworkError
+} as const;
+
+// Utilitário para logs condicionais (apenas em desenvolvimento)
+const debugLog = (...args: unknown[]): void => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(...args);
+  }
+};
+
+const debugWarn = (...args: unknown[]): void => {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn(...args);
+  }
+};
 
 class SseService {
   private connections: Map<string | number, SseConnection> = new Map();
   private metricsCallbacks: Set<MetricsCallback> = new Set();
   private connectionCallbacks: Set<ConnectionCallback> = new Set();
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 3000; // 3 segundos
+  private maxReconnectAttempts = SSE_CONFIG.MAX_RECONNECT_ATTEMPTS;
+  private reconnectDelay = SSE_CONFIG.RECONNECT_DELAY_MS;
 
   /**
    * Conecta ao SSE para um cluster específico
    * Obtém o containerId do cluster automaticamente se não for fornecido
    */
   async connect(clusterId: string | number, containerId?: string): Promise<void> {
-    // Se já existe conexão para este cluster, desconectar primeiro
-    if (this.connections.has(clusterId)) {
-      this.disconnect(clusterId);
+    // Se já existe conexão ativa para este cluster, não conectar novamente
+    const existingConnection = this.connections.get(clusterId);
+    if (existingConnection?.connected) {
+      debugLog(`✅ SSE já está conectado para cluster ${clusterId}`);
+      return;
     }
 
+    // Verificar token ANTES de desconectar conexão existente
     const token = this.getToken();
     if (!token) {
       console.warn(`⚠️ Token JWT não encontrado. Não é possível conectar SSE para cluster ${clusterId}.`);
+      if (existingConnection) {
+        this.disconnect(clusterId);
+      }
       this.notifyConnectionCallbacks(clusterId, false);
       return;
     }
 
-    // Se containerId não foi fornecido, buscar do cluster
-    let actualContainerId = containerId;
-    if (!actualContainerId) {
-      try {
-        const clusterDetails = await httpClient.get<{ containerId?: string; id?: string }>(
-          `/clusters/${clusterId}`
-        );
-        actualContainerId = clusterDetails.containerId;
-        if (!actualContainerId) {
-          console.warn(`⚠️ Cluster ${clusterId} não possui containerId. Não é possível conectar SSE.`);
-          this.notifyConnectionCallbacks(clusterId, false);
-          return;
-        }
-      } catch (error) {
-        console.error(`❌ Erro ao obter containerId do cluster ${clusterId}:`, error);
+    // Se já existe conexão mas não está conectada, desconectar primeiro
+    if (existingConnection) {
+      this.disconnect(clusterId);
+      // Aguardar um pouco antes de reconectar para evitar conflitos
+      await new Promise(resolve => setTimeout(resolve, SSE_CONFIG.DISCONNECT_DELAY_MS));
+      
+      // Verificar token novamente após desconectar (pode ter mudado)
+      const newToken = this.getToken();
+      if (!newToken) {
+        console.warn(`⚠️ Token JWT não encontrado após desconectar. Não é possível conectar SSE para cluster ${clusterId}.`);
         this.notifyConnectionCallbacks(clusterId, false);
         return;
       }
     }
 
+    // Se containerId não foi fornecido, buscar do cluster
+    let actualContainerId: string;
     try {
-      // Construir URL do SSE (o endpoint está em /api/docker/...)
-      const sseUrl = `${config.api.baseUrl}/docker/containers/${actualContainerId}/metrics/stream?timeoutMillis=300000`;
+      if (!containerId) {
+        const clusterDetails = await httpClient.get<{ containerId?: string; id?: string }>(
+          `/clusters/${clusterId}`
+        );
+        actualContainerId = clusterDetails.containerId || '';
+        if (!actualContainerId) {
+          console.warn(`⚠️ Cluster ${clusterId} não possui containerId. Não é possível conectar SSE.`);
+          this.notifyConnectionCallbacks(clusterId, false);
+          return;
+        }
+      } else {
+        actualContainerId = containerId;
+      }
 
-      // EventSource não suporta headers customizados, então usamos fetch com ReadableStream
-      const response = await fetch(sseUrl, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'text/event-stream',
-        },
-      });
+      // Construir URL do SSE (o endpoint está em /api/docker/...)
+      const sseUrl = `${config.api.baseUrl}/docker/containers/${actualContainerId}/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}`;
+
+      debugLog(`🔌 Tentando conectar SSE para cluster ${clusterId} com containerId ${actualContainerId}`);
+      debugLog(`🔗 URL do SSE: ${sseUrl}`);
+      debugLog(`🔑 Token disponível: ${token ? `Sim (${token.length} chars)` : 'Não'}`);
+
+      // Criar AbortController com timeout para evitar que fetch trave indefinidamente
+      const fetchAbortController = new AbortController();
+      const fetchTimeout = setTimeout(() => {
+        console.warn(`⏱️ Timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s atingido para conexão SSE do cluster ${clusterId}. Abortando...`);
+        fetchAbortController.abort();
+      }, SSE_CONFIG.FETCH_TIMEOUT_MS);
+
+      let response: Response;
+      try {
+        // EventSource não suporta headers customizados, então usamos fetch com ReadableStream
+        debugLog(`📡 Iniciando fetch para SSE (timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s)...`);
+        const startTime = Date.now();
+        response = await fetch(sseUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'text/event-stream',
+          },
+          signal: fetchAbortController.signal,
+        });
+        const elapsed = Date.now() - startTime;
+        clearTimeout(fetchTimeout);
+        debugLog(`✅ Fetch completado em ${elapsed}ms - Status: ${response.status} ${response.statusText}`);
+      } catch (fetchError: unknown) {
+        clearTimeout(fetchTimeout);
+        const error = fetchError as Error & { name?: string };
+        console.error(`❌ Erro no fetch para SSE do cluster ${clusterId}:`, error);
+        if (error?.name === 'AbortError') {
+          throw new Error(`SSE connection timeout: A conexão demorou mais de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000} segundos para responder. URL: ${sseUrl}`);
+        }
+        throw fetchError;
+      }
 
       if (!response.ok) {
-        throw new Error(`SSE connection failed: ${response.status} ${response.statusText}`);
+        const errorText = await response.text().catch(() => '');
+        console.error(`❌ SSE falhou para cluster ${clusterId} - Status: ${response.status} ${response.statusText}`, errorText);
+        
+        // Se for 401, verificar se o token mudou e tentar novamente uma vez
+        if (response.status === 401) {
+          console.warn(`⚠️ SSE retornou 401 (não autorizado) para cluster ${clusterId}. Verificando token...`);
+          const newToken = this.getToken();
+          if (newToken && newToken !== token) {
+            debugLog(`🔄 Token atualizado, tentando reconectar SSE para cluster ${clusterId}...`);
+            // Tentar uma vez mais com o novo token
+            const retryResponse = await fetch(sseUrl, {
+              headers: {
+                Authorization: `Bearer ${newToken}`,
+                Accept: 'text/event-stream',
+              },
+            });
+            
+            if (!retryResponse.ok) {
+              const retryErrorText = await retryResponse.text().catch(() => '');
+              console.error(`❌ Retry SSE também falhou para cluster ${clusterId} - Status: ${retryResponse.status}`, retryErrorText);
+              throw new Error(`SSE connection failed: ${retryResponse.status} ${retryResponse.statusText} - ${retryErrorText}`);
+            }
+            
+            debugLog(`✅ Retry SSE bem-sucedido para cluster ${clusterId} com novo token`);
+            // Usar a resposta bem-sucedida
+            const abortController = new AbortController();
+            const connection: SseConnection = {
+              eventSource: abortController,
+              clusterId,
+              connected: false,
+              reconnectAttempts: 0,
+              reconnectTimeout: null,
+            };
+            
+            this.processSseStream(retryResponse, clusterId, connection, actualContainerId, abortController.signal);
+            this.connections.set(clusterId, connection);
+            return;
+          } else {
+            debugWarn(`⚠️ Token não mudou ou não disponível`);
+          }
+        }
+        throw new Error(`SSE connection failed: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       const abortController = new AbortController();
@@ -92,12 +200,49 @@ class SseService {
       };
 
       // Processar stream SSE
+      debugLog(`✅ Resposta SSE recebida para cluster ${clusterId} - Status: ${response.status} ${response.statusText}`);
       this.processSseStream(response, clusterId, connection, actualContainerId, abortController.signal);
 
       this.connections.set(clusterId, connection);
-    } catch (error) {
-      console.error(`❌ Erro ao criar conexão SSE para cluster ${clusterId}:`, error);
+      debugLog(`📡 Conexão SSE registrada para cluster ${clusterId}`);
+    } catch (error: unknown) {
+      const err = error as Error & { name?: string; message?: string; stack?: string; containerId?: string };
+      
+      // Se for um erro de abort (cancelação manual), não logar como erro
+      if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+        debugLog(`ℹ️ Conexão SSE cancelada para cluster ${clusterId}:`, err?.message || 'Abortado manualmente');
+        return;
+      }
+      
+      // Log detalhado do erro
+      console.error(`❌ Erro ao criar conexão SSE para cluster ${clusterId}:`, err);
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`   Tipo do erro: ${err?.name || 'Unknown'}`);
+        console.error(`   Mensagem: ${err?.message || 'No message'}`);
+        console.error(`   Stack: ${err?.stack || 'No stack'}`);
+        
+        // Log da URL que estava tentando conectar
+        try {
+          const containerIdForError = err?.containerId || containerId || 'unknown';
+          const sseUrl = `${config.api.baseUrl}/docker/containers/${containerIdForError}/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}`;
+          console.error(`   URL tentada: ${sseUrl}`);
+        } catch (urlError) {
+          console.error(`   ContainerId: ${containerId || 'unknown'}`);
+        }
+      }
+      
       this.notifyConnectionCallbacks(clusterId, false);
+      
+      // Se for NetworkError, pode ser que o backend não esteja pronto ainda
+      // Tentar novamente após um delay
+      if (err?.name === 'TypeError' && err?.message?.includes('fetch')) {
+        debugLog(`🔄 Tentando reconectar SSE para cluster ${clusterId} após NetworkError...`);
+        setTimeout(() => {
+          this.connect(clusterId, actualContainerId).catch(() => {
+            // Ignorar erro na reconexão automática
+          });
+        }, SSE_CONFIG.RETRY_NETWORK_ERROR_DELAY_MS);
+      }
     }
   }
 
@@ -124,7 +269,7 @@ class SseService {
 
     connection.connected = false;
     this.connections.delete(clusterId);
-    console.log(`🔌 SSE desconectado para cluster ${clusterId}`);
+    debugLog(`🔌 SSE desconectado para cluster ${clusterId}`);
     this.notifyConnectionCallbacks(clusterId, false);
   }
 
@@ -157,26 +302,40 @@ class SseService {
     // Armazenar containerId na conexão para reconexão
     (connection as any).containerId = containerId;
     try {
-      // Marcar como conectado
-      connection.connected = true;
-      connection.reconnectAttempts = 0;
-      console.log(`✅ SSE conectado para cluster ${clusterId}`);
-      this.notifyConnectionCallbacks(clusterId, true);
-
+      debugLog(`📡 Iniciando processamento do stream SSE para cluster ${clusterId}...`);
+      
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
-
+      
       if (!reader) {
         throw new Error('Response body stream not available');
       }
+      
+      debugLog(`✅ Reader SSE criado para cluster ${clusterId}. Aguardando dados...`);
+      
+      // Marcar como conectado APÓS criar o reader (stream está pronto)
+      connection.connected = true;
+      connection.reconnectAttempts = 0;
+      console.log(`✅ SSE conectado e pronto para receber dados para cluster ${clusterId}`);
+      this.notifyConnectionCallbacks(clusterId, true);
+
+      let buffer = '';
+      let eventCount = 0;
+      
+      // Nota: reader e decoder já foram criados acima
 
       while (!signal.aborted) {
         const { done, value } = await reader.read();
 
         if (done) {
-          console.log(`📡 SSE stream finalizado para cluster ${clusterId}`);
+          debugLog(`📡 SSE stream finalizado para cluster ${clusterId} (${eventCount} eventos processados)`);
           break;
+        }
+        
+        // Log primeiro chunk apenas em desenvolvimento
+        if (eventCount === 0 && value && process.env.NODE_ENV === 'development') {
+          const firstChunk = decoder.decode(value, { stream: true });
+          debugLog(`📥 Primeiro chunk SSE recebido para cluster ${clusterId} (${firstChunk.length} bytes):`, firstChunk.substring(0, 200));
         }
 
         // Decodificar chunk
@@ -204,13 +363,20 @@ class SseService {
           } else if (line === '' || line === '\r') {
             // Linha vazia indica fim do evento SSE
             if (data && eventType === 'stats') {
+              eventCount++;
               try {
                 const jsonData = JSON.parse(data.trim());
                 const metrics: ClusterMetrics = this.mapContainerStatsToClusterMetrics(clusterId, jsonData);
+                
+                // Log apenas o primeiro evento e a cada 10 eventos (apenas em desenvolvimento)
+                if (process.env.NODE_ENV === 'development' && (eventCount === 1 || eventCount % 10 === 0)) {
+                  debugLog(`📊 SSE evento ${eventCount} recebido para cluster ${clusterId} - CPU: ${metrics.cpuUsagePercent?.toFixed(2)}%, RAM: ${metrics.memoryUsagePercent?.toFixed(2)}%`);
+                }
+                
                 this.notifyMetricsCallbacks(clusterId, metrics);
               } catch (error) {
-                console.error(`❌ Erro ao processar métricas SSE para cluster ${clusterId}:`, error);
-                console.error('Data recebida:', data.trim());
+                console.error(`❌ Erro ao processar métricas SSE para cluster ${clusterId} (evento ${eventCount}):`, error);
+                console.error('Data recebida:', data.trim().substring(0, 500));
               }
             }
             // Resetar para próximo evento
@@ -260,7 +426,9 @@ class SseService {
     connection.reconnectTimeout = setTimeout(() => {
       this.disconnect(clusterId);
       this.connect(clusterId, containerId).catch((err) => {
-        console.error(`Erro ao reconectar SSE para cluster ${clusterId}:`, err);
+        if (process.env.NODE_ENV === 'development') {
+          console.error(`Erro ao reconectar SSE para cluster ${clusterId}:`, err);
+        }
       });
     }, this.reconnectDelay);
   }

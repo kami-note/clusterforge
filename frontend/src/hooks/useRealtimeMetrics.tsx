@@ -50,10 +50,12 @@ export function useRealtimeMetrics(): RealtimeMetrics {
     }
   }, [user]);
 
-  // Conectar SSE para cada cluster
+  // NÃO conectar SSE automaticamente aqui
+  // Apenas registrar callbacks e gerenciar métricas recebidas
+  // A conexão SSE será feita pelo ClusterDetails quando necessário
   useEffect(() => {
-    if (!user || !userClusters.length) {
-      // Desconectar todos se não houver usuário ou clusters
+    if (!user) {
+      // Desconectar todos se não houver usuário
       sseService.disconnectAll();
       setConnected(false);
       setConnectedClusters(new Set());
@@ -62,7 +64,7 @@ export function useRealtimeMetrics(): RealtimeMetrics {
       return;
     }
 
-    // Conectar apenas uma vez
+    // Registrar callbacks apenas uma vez
     if (!isSubscribedRef.current) {
       isSubscribedRef.current = true;
 
@@ -107,33 +109,16 @@ export function useRealtimeMetrics(): RealtimeMetrics {
       const unsubscribeMetrics = sseService.onMetrics(handleMetrics);
       const unsubscribeConnection = sseService.onConnectionChange(handleConnectionChange);
 
-      // Conectar SSE para cada cluster
-      userClusters.forEach((cluster) => {
-        // Buscar containerId do cluster se não estiver disponível
-        if (cluster.containerId) {
-          sseService.connect(cluster.id, cluster.containerId).catch((err) => {
-            console.error(`Erro ao conectar SSE para cluster ${cluster.id}:`, err);
-          });
-        } else {
-          // Se não tiver containerId, tentar obter do detalhe do cluster
-          clusterService
-            .getCluster(cluster.id)
-            .then((details) => {
-              if (details.containerId) {
-                return sseService.connect(cluster.id, details.containerId);
-              }
-            })
-            .catch((err) => {
-              console.error(`Erro ao obter containerId do cluster ${cluster.id}:`, err);
-            });
-        }
-      });
+      // NÃO conectar SSE automaticamente aqui
+      // Deixar que ClusterDetails faça a conexão quando necessário
+      console.log(`📡 useRealtimeMetrics: Callbacks registrados. SSE será conectado quando necessário.`);
 
       // Cleanup apenas quando o componente for desmontado ou usuário mudar
       return () => {
         unsubscribeMetrics();
         unsubscribeConnection();
-        sseService.disconnectAll();
+        // NÃO desconectar todas as conexões aqui, pois pode estar sendo usado em ClusterDetails
+        // sseService.disconnectAll();
         isSubscribedRef.current = false;
       };
     }
@@ -142,13 +127,15 @@ export function useRealtimeMetrics(): RealtimeMetrics {
   /**
    * Solicita atualização imediata de métricas
    * Com SSE, as métricas são enviadas automaticamente pelo servidor
-   * Esta função apenas reconecta se necessário
+   * Esta função apenas reconecta clusters que já estavam conectados
    */
   const requestUpdate = useCallback(() => {
-    if (user && userClusters.length > 0) {
-      // Reconectar todos os clusters
-      userClusters.forEach((cluster) => {
-        if (cluster.containerId) {
+    if (user) {
+      // Reconectar apenas clusters que já estavam conectados
+      // Não conectar novos clusters automaticamente
+      connectedClusters.forEach((clusterId) => {
+        const cluster = userClusters.find((c) => c.id === clusterId);
+        if (cluster?.containerId) {
           sseService.connect(cluster.id, cluster.containerId).catch((err) => {
             console.error(`Erro ao reconectar SSE para cluster ${cluster.id}:`, err);
           });
@@ -157,7 +144,7 @@ export function useRealtimeMetrics(): RealtimeMetrics {
     } else {
       setError(new Error('Não conectado ao servidor'));
     }
-  }, [user, userClusters]);
+  }, [user, userClusters, connectedClusters]);
 
   return {
     metrics,

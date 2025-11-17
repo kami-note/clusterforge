@@ -125,6 +125,14 @@ class AuthService {
     const token = this.getToken();
     if (!token) return null;
 
+    // Verificar se token não expirou
+    const expiresAt = this.getTokenExpiry();
+    if (expiresAt && expiresAt <= Date.now()) {
+      console.warn('Token expirado ao tentar obter usuário atual');
+      this.clearSession();
+      return null;
+    }
+
     try {
       // Decodifica o JWT (payload está entre os dois pontos)
       const payload = token.split('.')[1];
@@ -169,7 +177,7 @@ class AuthService {
   /**
    * Obtém o token atual
    */
-  private getToken(): string | null {
+  getToken(): string | null {
     return typeof window !== 'undefined' 
       ? localStorage.getItem(STORAGE_KEYS.TOKEN) 
       : null;

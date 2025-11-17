@@ -20,6 +20,7 @@ const REFRESH_PADDING_MS = 60_000;
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const isInitialMountRef = useRef(true); // Track initial mount to avoid logout on first render
   const refreshTimeoutRef = useRef<number | null>(null);
   const handleTokenRefreshRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -105,25 +106,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const isInitialMount = isInitialMountRef.current;
+    isInitialMountRef.current = false;
+
+    // Validar token ANTES de carregar usuário do localStorage
+    const token = authService.getToken();
+    const expiresAt = authService.getTokenExpiry();
+    
+    // Se não tem token ou token expirou
+    if (!token || (expiresAt && expiresAt <= Date.now())) {
+      // No estado inicial (primeira renderização), apenas limpar silenciosamente sem logout
+      // Evita loop de logout/login quando não há token armazenado (comportamento normal)
+      if (isInitialMount) {
+        // Limpar estado silenciosamente sem disparar evento de logout
+        clearScheduledRefresh();
+        authService.clearSession();
+        persistUserState(null);
+        setIsLoading(false);
+        return;
+      }
+      // Se não for inicial, pode ser expiração durante sessão ativa
+      handleForcedLogout('TOKEN_EXPIRED_OR_MISSING');
+      return;
+    }
+
+    // Só carregar usuário do localStorage se o token for válido
     const storedUser = localStorage.getItem(STORAGE_KEYS.USER);
     if (storedUser) {
       try {
-        persistUserState(JSON.parse(storedUser) as User);
+        // Validar que o token ainda não expirou antes de restaurar usuário
+        const decodedUser = JSON.parse(storedUser) as User;
+        
+        // Verificar novamente expiração antes de restaurar
+        if (expiresAt && expiresAt <= Date.now()) {
+          if (isInitialMount) {
+            // Limpar estado silenciosamente
+            clearScheduledRefresh();
+            authService.clearSession();
+            persistUserState(null);
+            setIsLoading(false);
+            return;
+          }
+          handleForcedLogout('TOKEN_EXPIRED');
+          return;
+        }
+        
+        persistUserState(decodedUser);
       } catch (e) {
         console.error('Error parsing stored user:', e);
         localStorage.removeItem(STORAGE_KEYS.USER);
+        if (isInitialMount) {
+          clearScheduledRefresh();
+          authService.clearSession();
+          persistUserState(null);
+          setIsLoading(false);
+          return;
+        }
+        handleForcedLogout('INVALID_STORED_USER');
+        return;
       }
-    }
-
-    const expiresAt = authService.getTokenExpiry();
-    if (expiresAt && expiresAt <= Date.now()) {
-      handleForcedLogout('TOKEN_EXPIRED');
-      return;
+    } else {
+      // Sem usuário armazenado, mas tem token válido - tentar obter do token
+      // Isso pode acontecer se o localStorage foi limpo mas o token ainda está válido
+      // Neste caso, limpar token também para evitar inconsistências
+      if (token) {
+        console.warn('Token encontrado mas usuário não armazenado, limpando sessão');
+        if (isInitialMount) {
+          clearScheduledRefresh();
+          authService.clearSession();
+          persistUserState(null);
+          setIsLoading(false);
+          return;
+        }
+        handleForcedLogout('INCONSISTENT_STATE');
+        return;
+      }
     }
 
     scheduleTokenRefresh(expiresAt);
     setIsLoading(false);
-  }, [handleForcedLogout, persistUserState, scheduleTokenRefresh]);
+  }, [handleForcedLogout, persistUserState, scheduleTokenRefresh, clearScheduledRefresh]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

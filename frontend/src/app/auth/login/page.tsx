@@ -8,25 +8,35 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
+import { authService } from "@/services/auth.service";
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { user, login } = useAuth();
+  const { user, login, isLoading: authLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    // Se o usuário já estiver logado, redirecionar para o dashboard apropriado
+    // Aguardar verificação de autenticação terminar antes de redirecionar
+    if (authLoading) return;
+    
+    // Se o usuário já estiver logado E tiver token válido, redirecionar para o dashboard apropriado
     if (user) {
-      if (user.type === 'admin') {
-        router.push('/admin/dashboard');
-      } else {
-        router.push('/client/dashboard');
+      // Verificar se ainda tem token válido antes de redirecionar
+      const token = authService.getToken();
+      const expiresAt = authService.getTokenExpiry();
+      
+      if (token && (!expiresAt || expiresAt > Date.now())) {
+        if (user.type === 'admin') {
+          router.push('/admin/dashboard');
+        } else {
+          router.push('/client/dashboard');
+        }
       }
     }
-  }, [user, router]);
+  }, [user, authLoading, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

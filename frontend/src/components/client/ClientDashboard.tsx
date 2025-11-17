@@ -77,22 +77,54 @@ export function ClientDashboard() {
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'running': return 'bg-green-500';
-      case 'stopped': return 'bg-red-500';
-      case 'restarting': return 'bg-yellow-500';
-      case 'error': return 'bg-destructive';
-      default: return 'bg-gray-500';
+    switch (status?.toLowerCase()) {
+      case 'running':
+      case 'active':
+        return 'bg-green-500';
+      case 'stopped':
+      case 'deleted':
+        return 'bg-red-500';
+      case 'restarting':
+      case 'starting':
+      case 'stopping':
+        return 'bg-yellow-500';
+      case 'pending':
+        return 'bg-blue-500';
+      case 'error':
+      case 'failed':
+        return 'bg-destructive';
+      default:
+        return 'bg-gray-500';
     }
   };
 
   const getStatusText = (status: string) => {
-    switch (status) {
-      case 'running': return 'Em execução';
-      case 'stopped': return 'Parado';
-      case 'restarting': return 'Reiniciando';
-      case 'error': return 'Erro';
-      default: return 'Desconhecido';
+    switch (status?.toLowerCase()) {
+      case 'running':
+      case 'active':
+        return 'Em execução';
+      case 'stopped':
+        return 'Parado';
+      case 'deleted':
+        return 'Deletado';
+      case 'restarting':
+      case 'starting':
+      case 'stopping':
+        return 'Reiniciando';
+      case 'pending':
+        return 'Pendente';
+      case 'error':
+      case 'failed':
+        return 'Erro';
+      default:
+        // Tentar exibir o status original se não for reconhecido
+        if (status) {
+          const upperStatus = status.toUpperCase();
+          if (['PENDING', 'ACTIVE', 'STOPPED', 'DELETED', 'ERROR'].includes(upperStatus)) {
+            return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+          }
+        }
+        return 'Desconhecido';
     }
   };
 

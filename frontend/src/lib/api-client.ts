@@ -37,13 +37,15 @@ export class HttpClient {
     const method = options.method || 'GET';
     const fullUrl = `${this.baseUrl}${endpoint}`;
     
-    // Log da requisição apenas em desenvolvimento (comentado para reduzir ruído)
-    // console.log(`[API Request] ${method} ${fullUrl}`, {
-    //   endpoint,
-    //   method,
-    //   timestamp: new Date().toISOString(),
-    //   hasToken: !!token,
-    // });
+    // Log da requisição apenas em desenvolvimento
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[API Request] ${method} ${fullUrl}`, {
+        endpoint,
+        method,
+        hasToken: !!token,
+        tokenLength: token?.length || 0,
+      });
+    }
     
     const headers = new Headers({
       'Content-Type': 'application/json',
@@ -91,7 +93,7 @@ export class HttpClient {
       }
 
       if (!response.ok) {
-        await this.handleError(response);
+        await this.handleError(response, fullUrl);
       }
 
       // Se a resposta não tem conteúdo, retorna void
@@ -311,8 +313,11 @@ export class HttpClient {
   }
 
   async refreshSession(): Promise<AuthResponse | null> {
+    // Tenta usar refreshToken se disponível, senão usa o token atual
     const refreshToken = this.getRefreshToken();
-    if (!refreshToken) {
+    const currentToken = this.getToken();
+    
+    if (!refreshToken && !currentToken) {
       return null;
     }
 
@@ -325,7 +330,9 @@ export class HttpClient {
     }
 
     this.isRefreshing = true;
-    this.refreshPromise = this.performRefresh(refreshToken)
+    // Usa refreshToken se disponível, senão usa o token atual
+    const tokenToUse = refreshToken || currentToken || '';
+    this.refreshPromise = this.performRefresh(tokenToUse)
       .catch((error) => {
         throw error;
       })
@@ -343,10 +350,18 @@ export class HttpClient {
   }
 
   private async performRefresh(refreshToken: string): Promise<AuthResponse> {
+    // O backend aceita o token atual (não refresh token separado)
+    // Se não tiver refreshToken, tenta usar o token atual
+    const token = refreshToken || this.getToken();
+    
+    if (!token) {
+      throw new Error('Nenhum token disponível para refresh');
+    }
+
     const resp = await fetch(`${this.baseUrl}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({ token }),
       signal: AbortSignal.timeout(config.api.timeout),
     });
 
@@ -355,7 +370,31 @@ export class HttpClient {
       throw new Error('Refresh failed');
     }
 
-    const data: AuthResponse = await resp.json();
+    // Backend retorna LoginResponse: { token, username, role, userId }
+    const response = await resp.json();
+    
+    // Calcular expiresIn a partir do token JWT
+    let expiresIn: number | undefined;
+    try {
+      const payload = response.token.split('.')[1];
+      const decoded = JSON.parse(atob(payload));
+      if (decoded.exp) {
+        // exp está em segundos, converter para milissegundos
+        const expirationTimestamp = decoded.exp * 1000;
+        expiresIn = expirationTimestamp - Date.now();
+      }
+    } catch (error) {
+      console.warn('Erro ao calcular expiresIn do token:', error);
+      // Usar padrão de 24 horas se não conseguir calcular
+      expiresIn = 86400000; // 24 horas
+    }
+
+    // Criar AuthResponse compatível
+    const data: AuthResponse = {
+      token: response.token,
+      expiresIn: expiresIn,
+    };
+    
     this.applyAuthResponse(data);
     return data;
   }
@@ -363,12 +402,26 @@ export class HttpClient {
   private applyAuthResponse(response: AuthResponse): void {
     if (response?.token) {
       this.setToken(response.token);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] Token armazenado:', {
+          tokenLength: response.token.length,
+          hasExpiresIn: typeof response.expiresIn === 'number',
+          expiresIn: response.expiresIn,
+        });
+      }
     }
     if (response?.refreshToken) {
       this.setRefreshToken(response.refreshToken);
     }
     if (typeof response?.expiresIn === 'number') {
-      this.setTokenExpiry(Date.now() + response.expiresIn);
+      const expiresAt = Date.now() + response.expiresIn;
+      this.setTokenExpiry(expiresAt);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] Token expiry definido:', {
+          expiresAt: new Date(expiresAt).toISOString(),
+          expiresInMs: response.expiresIn,
+        });
+      }
     } else {
       this.clearTokenExpiry();
     }
@@ -400,7 +453,7 @@ export class HttpClient {
   /**
    * Tratamento centralizado de erros
    */
-  private async handleError(response: Response): Promise<never> {
+  private async handleError(response: Response, endpointUrl?: string): Promise<never> {
     let errorMessage = 'Erro desconhecido';
     let errorDetails: Record<string, string[]> | undefined;
 
@@ -432,13 +485,34 @@ export class HttpClient {
     };
 
     // 401 Unauthorized - limpa tokens e redireciona
+    // Mas só redireciona se não for um erro de endpoint não encontrado
+    // (endpoints que não existem podem retornar 401 se requerem autenticação)
     if (response.status === 401) {
       this.handleUnauthorizedResponse(response);
-      this.clearSession();
-      // Redireciona para login se estiver no browser
-      if (typeof window !== 'undefined') {
-        window.location.href = '/auth/login';
+      
+      // Verificar se é um erro de autenticação real ou endpoint não existente
+      // Endpoints conhecidos que não existem: /health/clusters, /monitoring, /ftp-credentials, etc
+      const url = endpointUrl || response.url || '';
+      const isNonExistentEndpoint = url.includes('/health/clusters') ||
+                                   url.includes('/monitoring/') ||
+                                   url.includes('/health/') ||
+                                   url.includes('/ftp-credentials');
+      
+      // Se a mensagem indicar token inválido/ausente E não for endpoint não existente, é erro de autenticação
+      const isAuthError = !isNonExistentEndpoint && (
+        errorMessage.toLowerCase().includes('token') || 
+        errorMessage.toLowerCase().includes('autenticado') ||
+        errorMessage.toLowerCase().includes('unauthorized')
+      );
+      
+      if (isAuthError) {
+        this.clearSession();
+        // Redireciona para login se estiver no browser
+        if (typeof window !== 'undefined') {
+          window.location.href = '/auth/login';
+        }
       }
+      // Se não for erro de autenticação real, apenas lança o erro sem redirecionar
     }
 
     throw error;

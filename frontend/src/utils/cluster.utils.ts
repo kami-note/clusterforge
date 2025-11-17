@@ -7,10 +7,17 @@ import { CLUSTER_STATUS_MAP, TEMPLATE_NAME_FORMAT } from '@/constants';
 
 /**
  * Mapeia status da API para o formato do frontend
+ * Backend retorna: PENDING, ACTIVE, STOPPED, DELETED, ERROR
  */
 export function mapClusterStatus(apiStatus?: string): ClusterStatus {
   if (!apiStatus) return 'stopped';
-  return CLUSTER_STATUS_MAP[apiStatus.toUpperCase()] || 'error';
+  const mapped = CLUSTER_STATUS_MAP[apiStatus.toUpperCase()];
+  if (mapped) return mapped;
+  
+  // Fallback: se não mapear, retornar 'stopped' ao invés de 'error'
+  // Isso evita mostrar "Desconhecido" ou "Erro" para status válidos não mapeados
+  console.warn(`Status não mapeado recebido da API: ${apiStatus}. Usando 'stopped' como fallback.`);
+  return 'stopped';
 }
 
 /**

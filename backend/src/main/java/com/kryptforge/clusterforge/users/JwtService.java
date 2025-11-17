@@ -112,9 +112,19 @@ public class JwtService {
 			// Tenta extrair claims (isso valida a assinatura automaticamente)
 			extractAllClaims(token);
 			// Verifica expiração
-			return !isTokenExpired(token);
+			boolean isValid = !isTokenExpired(token);
+			if (!isValid) {
+				log.warn("Token JWT expirado");
+			}
+			return isValid;
+		} catch (io.jsonwebtoken.security.SignatureException e) {
+			log.warn("Token JWT com assinatura inválida: {}", e.getMessage());
+			return false;
+		} catch (io.jsonwebtoken.ExpiredJwtException e) {
+			log.warn("Token JWT expirado: {}", e.getMessage());
+			return false;
 		} catch (Exception e) {
-			log.warn("Erro ao validar token: {}", e.getMessage());
+			log.warn("Erro ao validar token: {} - {}", e.getClass().getSimpleName(), e.getMessage());
 			return false;
 		}
 	}

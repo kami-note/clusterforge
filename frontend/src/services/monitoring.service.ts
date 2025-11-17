@@ -50,8 +50,9 @@ class MonitoringService {
     try {
       return await httpClient.get<ClusterHealthStatus>(`/health/clusters/${clusterId}`);
     } catch (error: any) {
-      // Se o endpoint não existir (404 ou 403), retornar null (não crítico)
-      if (error?.status === 404 || error?.status === 403) {
+      // Se o endpoint não existir (404, 403 ou 401), retornar null (não crítico)
+      // 401 pode ocorrer se o endpoint não existir e o Spring Security bloquear
+      if (error?.status === 404 || error?.status === 403 || error?.status === 401) {
         return null;
       }
       throw error;

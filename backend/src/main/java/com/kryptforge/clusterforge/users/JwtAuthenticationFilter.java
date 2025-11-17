@@ -39,6 +39,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		String authHeader = request.getHeader("Authorization");
 		
 		if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+			log.debug("Requisição {} {} sem header Authorization ou sem prefixo Bearer", 
+				request.getMethod(), request.getRequestURI());
 			filterChain.doFilter(request, response);
 			return;
 		}
@@ -48,13 +50,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			
 			// Valida token (assinatura e expiração)
 			if (!jwtService.validateToken(token)) {
+				log.warn("Token JWT inválido ou expirado para requisição: {} {} - Token length: {}", 
+					request.getMethod(), request.getRequestURI(), token.length());
+				// Limpar contexto de segurança se houver autenticação inválida
+				SecurityContextHolder.clearContext();
 				filterChain.doFilter(request, response);
 				return;
 			}
 
 			String username = jwtService.extractUsername(token);
 			
-			if (username == null || SecurityContextHolder.getContext().getAuthentication() != null) {
+			if (username == null) {
+				log.warn("Não foi possível extrair username do token JWT");
+				SecurityContextHolder.clearContext();
+				filterChain.doFilter(request, response);
+				return;
+			}
+			
+			// Se já existe autenticação, não sobrescrever (pode ser de outro filtro)
+			if (SecurityContextHolder.getContext().getAuthentication() != null) {
+				log.debug("Autenticação já existe no contexto de segurança");
 				filterChain.doFilter(request, response);
 				return;
 			}
@@ -62,13 +77,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			User user = userService.findByUsername(username).orElse(null);
 			
 			if (user == null) {
-				log.warn("Usuário '{}' do token JWT não encontrado", username);
+				log.warn("Usuário '{}' do token JWT não encontrado no banco de dados", username);
+				SecurityContextHolder.clearContext();
 				filterChain.doFilter(request, response);
 				return;
 			}
 			
 			// Verifica se o username do token corresponde ao usuário encontrado
 			if (!jwtService.validateToken(token, username)) {
+				log.warn("Token JWT não corresponde ao usuário '{}'", username);
+				// Limpar contexto de segurança se houver autenticação inválida
+				SecurityContextHolder.clearContext();
 				filterChain.doFilter(request, response);
 				return;
 			}
@@ -76,7 +95,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			// Verifica se a role no token corresponde à role do usuário
 			String role = jwtService.extractRole(token);
 			if (role == null || !role.equals(user.getRole().name())) {
-				log.warn("Role do token '{}' não corresponde à role do usuário '{}'", role, user.getRole());
+				log.warn("Role do token '{}' não corresponde à role do usuário '{}' para usuário '{}'", 
+					role, user.getRole(), username);
+				SecurityContextHolder.clearContext();
 				filterChain.doFilter(request, response);
 				return;
 			}
@@ -91,10 +112,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			
 			authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 			SecurityContextHolder.getContext().setAuthentication(authToken);
+			log.info("Autenticação JWT bem-sucedida para usuário '{}' com role '{}' na requisição {} {}", 
+				username, role, request.getMethod(), request.getRequestURI());
 		} catch (Exception e) {
-			log.warn("Erro ao processar token JWT: {}", e.getMessage());
+			log.warn("Erro ao processar token JWT para requisição {} {}: {}", 
+				request.getMethod(), request.getRequestURI(), e.getMessage());
+			// Limpar contexto de segurança em caso de erro
+			SecurityContextHolder.clearContext();
 		}
 
+		// Sempre continuar a cadeia - o Spring Security tratará a autorização
 		filterChain.doFilter(request, response);
 	}
 }

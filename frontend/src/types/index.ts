@@ -48,6 +48,7 @@ export interface Cluster {
   startupCommand: string;
   port?: string;
   ftpPort?: string;
+  containerId?: string; // ID do container Docker para SSE
 }
 
 export interface ClusterData {

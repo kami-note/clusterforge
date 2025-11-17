@@ -33,13 +33,14 @@ import { clusterService } from '@/services/cluster.service';
 import { toast } from 'sonner';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 import { TIMEOUTS } from '@/constants';
+import { mapClusterStatus } from '@/utils/cluster.utils';
 
 interface Cluster {
   id: string;
   name: string;
   owner: string;
   service: string;
-  status: 'active' | 'stopped' | 'reinstalling';
+  status: 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
   resources: {
     cpu: { used: number; limit: number };
     ram: { used: number; limit: number };
@@ -242,7 +243,22 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       const realtimeMetrics = metrics[clusterIdStr] || metrics[parseInt(clusterIdStr)];
       
       // Status SEMPRE baseado na API; SSE não altera status
-      let status: 'active' | 'stopped' | 'reinstalling' = cluster.status === 'running' ? 'active' : cluster.status === 'stopped' ? 'stopped' : 'active';
+      // Usa mapClusterStatus para mapear corretamente os status do backend (ACTIVE, PENDING, etc)
+      const mappedStatus = mapClusterStatus(cluster.status);
+      // Converter para formato do componente (compatibilidade com interface local)
+      let status: 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
+      // Se mapeou para 'running', converter para 'active' para compatibilidade
+      if (mappedStatus === 'running') {
+        status = 'active';
+      } else if (mappedStatus === 'restarting') {
+        status = 'reinstalling';
+      } else if (mappedStatus === 'pending') {
+        status = 'pending';
+      } else if (mappedStatus === 'deleted') {
+        status = 'stopped'; // Deletado mostra como parado na UI
+      } else {
+        status = mappedStatus as 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
+      }
       
       // Usar métricas em tempo real se disponíveis, senão usar valores da API
       // IMPORTANTE: cpuUsagePercent já vem normalizado (0-100%) do backend, não precisa recalcular
@@ -376,15 +392,32 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'active':
+      case 'running':
         return <Badge className="bg-green-100 dark:bg-green-950 text-green-800 dark:text-green-300 border-green-200 dark:border-green-800">Ativo</Badge>;
       case 'stopped':
+      case 'deleted':
         return <Badge variant="secondary">Parado</Badge>;
       case 'reinstalling':
-        return <Badge className="bg-yellow-100 dark:bg-yellow-950 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">Reinstalando</Badge>;
+      case 'restarting':
+      case 'starting':
+      case 'stopping':
+        return <Badge className="bg-yellow-100 dark:bg-yellow-950 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">Reiniciando</Badge>;
+      case 'pending':
+        return <Badge className="bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-800">Pendente</Badge>;
+      case 'error':
+      case 'failed':
+        return <Badge variant="destructive">Erro</Badge>;
       default:
-        return <Badge variant="outline">Desconhecido</Badge>;
+        // Tentar exibir o status original se não for reconhecido
+        if (status) {
+          const upperStatus = status.toUpperCase();
+          if (['PENDING', 'ACTIVE', 'STOPPED', 'DELETED', 'ERROR'].includes(upperStatus)) {
+            return <Badge variant="outline">{status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}</Badge>;
+          }
+        }
+        return <Badge variant="outline">{status || 'Desconhecido'}</Badge>;
     }
   };
 

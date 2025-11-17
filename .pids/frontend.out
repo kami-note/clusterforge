@@ -10,3 +10,565 @@
  ✓ Ready in 2.4s
    Reload env: .env.local
    Reload env: .env.local
+ ○ Compiling / ...
+ ✓ Compiled / in 9.4s
+ GET / 307 in 10658ms
+ ○ Compiling /auth/login ...
+ ✓ Compiled /auth/login in 1052ms
+ GET /auth/login 200 in 1334ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 758ms
+ ○ Compiling /admin/dashboard ...
+ ✓ Compiled /admin/dashboard in 1546ms
+ GET /admin/dashboard 200 in 1652ms
+ GET /admin/dashboard 200 in 1656ms
+ ○ Compiling /admin/clusters ...
+ ✓ Compiled /admin/clusters in 676ms
+ GET /admin/clusters 200 in 760ms
+ GET /admin/clusters 200 in 95ms
+ ○ Compiling /admin/clusters/[id] ...
+ ✓ Compiled /admin/clusters/[id] in 837ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 1300ms
+ GET /admin/clusters 200 in 207ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 287ms
+ GET /favicon.ico?favicon.0b3bf435.ico 200 in 271ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 435ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 196ms
+ GET /auth/login 200 in 40ms
+ GET /auth/login 200 in 200ms
+ GET /admin/dashboard 200 in 244ms
+ GET /auth/login 200 in 155ms
+ GET /admin/dashboard 200 in 140ms
+ GET /auth/login 200 in 166ms
+ GET /admin/dashboard 200 in 128ms
+ GET /auth/login 200 in 164ms
+ GET /admin/dashboard 200 in 162ms
+ GET /auth/login 200 in 172ms
+ GET /admin/dashboard 200 in 157ms
+ GET /auth/login 200 in 151ms
+ GET /admin/dashboard 200 in 84ms
+ GET /admin/dashboard 200 in 129ms
+ GET /admin/dashboard 200 in 96ms
+ GET /auth/login 200 in 110ms
+ GET /admin/dashboard 200 in 164ms
+ GET /auth/login 200 in 92ms
+ GET /admin/dashboard 200 in 110ms
+ GET /auth/login 200 in 237ms
+ GET /admin/dashboard 200 in 218ms
+ ○ Compiling /_not-found/page ...
+ ✓ Compiled /_not-found/page in 571ms
+ GET /auth/login 200 in 217ms
+ GET /admin/dashboard 200 in 147ms
+ GET /auth/login 200 in 140ms
+ GET /admin/dashboard 200 in 135ms
+ GET /auth/login 200 in 142ms
+ GET /admin/dashboard 200 in 408ms
+ GET /auth/login 200 in 134ms
+ GET /admin/dashboard 200 in 148ms
+ GET /auth/login 200 in 67ms
+ GET /admin/dashboard 200 in 100ms
+ GET /auth/login 200 in 72ms
+ GET /admin/dashboard 200 in 160ms
+ GET /auth/login 200 in 205ms
+ GET /admin/dashboard 200 in 165ms
+ GET /auth/login 200 in 149ms
+ GET /admin/dashboard 200 in 368ms
+ GET /auth/login 200 in 114ms
+ GET /admin/dashboard 200 in 140ms
+ GET /auth/login 200 in 120ms
+ GET /admin/dashboard 200 in 102ms
+ GET /auth/login 200 in 107ms
+ GET /admin/dashboard 200 in 168ms
+ GET /auth/login 200 in 118ms
+ GET /admin/dashboard 200 in 157ms
+ GET /auth/login 200 in 104ms
+ GET /admin/dashboard 200 in 144ms
+ GET /auth/login 200 in 106ms
+ GET /admin/dashboard 200 in 108ms
+ GET /auth/login 200 in 122ms
+ GET /admin/dashboard 200 in 121ms
+ GET /auth/login 200 in 101ms
+ GET /admin/dashboard 200 in 125ms
+ GET /auth/login 200 in 123ms
+ GET /admin/dashboard 200 in 101ms
+ GET /auth/login 200 in 145ms
+ GET /admin/dashboard 200 in 112ms
+ GET /auth/login 200 in 133ms
+ GET /admin/dashboard 200 in 271ms
+ GET /auth/login 200 in 116ms
+ GET /admin/dashboard 200 in 106ms
+ GET /auth/login 200 in 107ms
+ GET /admin/dashboard 200 in 153ms
+ GET /auth/login 200 in 120ms
+ GET /admin/dashboard 200 in 135ms
+ GET /auth/login 200 in 116ms
+ GET /admin/dashboard 200 in 149ms
+ GET /auth/login 200 in 100ms
+ GET /admin/dashboard 200 in 141ms
+ GET /auth/login 200 in 103ms
+ GET /admin/dashboard 200 in 217ms
+ GET /auth/login 200 in 93ms
+ GET /admin/dashboard 200 in 228ms
+ GET /auth/login 200 in 110ms
+ GET /admin/dashboard 200 in 110ms
+ GET /auth/login 200 in 118ms
+ GET /admin/dashboard 200 in 150ms
+ GET /auth/login 200 in 136ms
+ GET /admin/dashboard 200 in 159ms
+ GET /auth/login 200 in 200ms
+ GET /admin/dashboard 200 in 313ms
+ GET /auth/login 200 in 153ms
+ GET /admin/dashboard 200 in 185ms
+ GET /auth/login 200 in 223ms
+ GET /admin/dashboard 200 in 298ms
+ GET /auth/login 200 in 411ms
+ GET /admin/dashboard 200 in 259ms
+ GET /auth/login 200 in 144ms
+ GET /admin/dashboard 200 in 177ms
+ GET /auth/login 200 in 206ms
+ GET /admin/dashboard 200 in 308ms
+ GET /auth/login 200 in 400ms
+ GET /admin/dashboard 200 in 190ms
+ GET /auth/login 200 in 192ms
+ GET /admin/dashboard 200 in 243ms
+ GET /auth/login 200 in 138ms
+ GET /admin/dashboard 200 in 198ms
+ GET /auth/login 200 in 134ms
+ GET /admin/dashboard 200 in 158ms
+ GET /auth/login 200 in 142ms
+ GET /admin/dashboard 200 in 251ms
+ GET /auth/login 200 in 164ms
+ GET /admin/dashboard 200 in 287ms
+ GET /auth/login 200 in 129ms
+ GET /admin/dashboard 200 in 260ms
+ GET /auth/login 200 in 168ms
+ GET /admin/dashboard 200 in 187ms
+ GET /auth/login 200 in 187ms
+ GET /admin/dashboard 200 in 215ms
+ GET /auth/login 200 in 144ms
+ GET /admin/dashboard 200 in 250ms
+ GET /auth/login 200 in 134ms
+ GET /admin/dashboard 200 in 238ms
+ GET /auth/login 200 in 270ms
+ GET /admin/dashboard 200 in 342ms
+ GET /auth/login 200 in 1084ms
+ GET /auth/login 200 in 439ms
+ GET /auth/login 200 in 504ms
+ GET /auth/login 200 in 251ms
+ GET /auth/login 200 in 199ms
+ GET /auth/login 200 in 215ms
+ GET /auth/login 200 in 309ms
+ GET /auth/login 200 in 223ms
+ GET /auth/login 200 in 287ms
+ GET /auth/login 200 in 263ms
+ GET /auth/login 200 in 226ms
+ GET /auth/login 200 in 241ms
+ GET /auth/login 200 in 695ms
+ GET /auth/login 200 in 209ms
+ GET /auth/login 200 in 169ms
+ GET /auth/login 200 in 221ms
+ GET /auth/login 200 in 198ms
+ GET / 307 in 313ms
+ GET /auth/login 200 in 314ms
+ GET /auth/login 200 in 228ms
+ GET /auth/login 200 in 86ms
+ GET /auth/login 200 in 75ms
+ GET /auth/login 200 in 81ms
+ GET /auth/login 200 in 125ms
+ GET /auth/login 200 in 122ms
+ GET /auth/login 200 in 143ms
+ GET /auth/login 200 in 116ms
+ GET /auth/login 200 in 148ms
+ GET /auth/login 200 in 124ms
+ GET /auth/login 200 in 111ms
+ GET /auth/login 200 in 101ms
+ GET /auth/login 200 in 127ms
+ GET /auth/login 200 in 123ms
+ GET /auth/login 200 in 112ms
+ GET /auth/login 200 in 108ms
+ GET /auth/login 200 in 120ms
+ GET /auth/login 200 in 106ms
+ GET /auth/login 200 in 115ms
+ GET /auth/login 200 in 136ms
+ GET /auth/login 200 in 122ms
+ GET /auth/login 200 in 127ms
+ GET /auth/login 200 in 98ms
+ GET /auth/login 200 in 117ms
+ GET /auth/login 200 in 120ms
+ GET /auth/login 200 in 111ms
+ GET /auth/login 200 in 116ms
+ GET /auth/login 200 in 121ms
+ GET /auth/login 200 in 117ms
+ GET /auth/login 200 in 140ms
+ GET /auth/login 200 in 142ms
+ GET /auth/login 200 in 113ms
+ GET /auth/login 200 in 89ms
+ GET /auth/login 200 in 111ms
+ GET /auth/login 200 in 109ms
+ GET /auth/login 200 in 114ms
+ GET /auth/login 200 in 172ms
+ GET /auth/login 200 in 121ms
+ GET /auth/login 200 in 104ms
+ GET /auth/login 200 in 97ms
+ GET /auth/login 200 in 126ms
+ GET /auth/login 200 in 143ms
+ GET /auth/login 200 in 124ms
+ GET /auth/login 200 in 121ms
+ GET /auth/login 200 in 109ms
+ GET /auth/login 200 in 115ms
+ GET /auth/login 200 in 120ms
+ GET /auth/login 200 in 151ms
+ GET /auth/login 200 in 245ms
+ GET /auth/login 200 in 229ms
+ GET /auth/login 200 in 224ms
+ GET /auth/login 200 in 126ms
+ GET /auth/login 200 in 110ms
+ GET /auth/login 200 in 96ms
+ GET /auth/login 200 in 122ms
+ GET /auth/login 200 in 123ms
+ GET /auth/login 200 in 136ms
+ GET /auth/login 200 in 96ms
+ GET /auth/login 200 in 167ms
+ GET /auth/login 200 in 125ms
+ GET /auth/login 200 in 119ms
+ GET / 307 in 166ms
+ GET /auth/login 200 in 178ms
+ GET /auth/login 200 in 162ms
+ GET /auth/login 200 in 133ms
+ GET /auth/login 200 in 120ms
+ GET /auth/login 200 in 110ms
+ GET /auth/login 200 in 113ms
+ GET /auth/login 200 in 117ms
+ GET /auth/login 200 in 118ms
+ GET /auth/login 200 in 123ms
+ GET /auth/login 200 in 118ms
+ GET /auth/login 200 in 169ms
+ GET /auth/login 200 in 153ms
+ GET /auth/login 200 in 152ms
+ GET /auth/login 200 in 173ms
+ GET /auth/login 200 in 141ms
+ GET /auth/login 200 in 178ms
+ GET /auth/login 200 in 259ms
+ GET /auth/login 200 in 162ms
+ GET /auth/login 200 in 143ms
+ GET /auth/login 200 in 131ms
+ GET /auth/login 200 in 135ms
+ GET /auth/login 200 in 126ms
+ GET /auth/login 200 in 174ms
+ GET /auth/login 200 in 184ms
+ GET /auth/login 200 in 428ms
+ GET /auth/login 200 in 207ms
+ GET /auth/login 200 in 147ms
+ GET /auth/login 200 in 158ms
+ GET /auth/login 200 in 138ms
+ GET /auth/login 200 in 156ms
+ GET /auth/login 200 in 186ms
+ GET /auth/login 200 in 432ms
+ GET /auth/login 200 in 223ms
+ GET /auth/login 200 in 144ms
+ GET /auth/login 200 in 142ms
+ GET /auth/login 200 in 152ms
+ GET /auth/login 200 in 134ms
+ GET /auth/login 200 in 155ms
+ GET /auth/login 200 in 162ms
+ GET /auth/login 200 in 143ms
+ GET /auth/login 200 in 188ms
+ GET /auth/login 200 in 147ms
+ GET /auth/login 200 in 189ms
+ GET /auth/login 200 in 142ms
+ GET /auth/login 200 in 160ms
+ GET /auth/login 200 in 175ms
+ GET /auth/login 200 in 206ms
+ GET /auth/login 200 in 188ms
+ GET /auth/login 200 in 223ms
+ GET /auth/login 200 in 156ms
+ GET /auth/login 200 in 153ms
+ GET /auth/login 200 in 198ms
+ GET /auth/login 200 in 150ms
+ GET /auth/login 200 in 153ms
+ GET /auth/login 200 in 161ms
+ GET /auth/login 200 in 187ms
+ GET /auth/login 200 in 175ms
+ GET /auth/login 200 in 171ms
+ GET /auth/login 200 in 154ms
+ GET /auth/login 200 in 177ms
+ GET /auth/login 200 in 139ms
+ GET /auth/login 200 in 133ms
+ GET /auth/login 200 in 176ms
+ GET /auth/login 200 in 161ms
+ GET /auth/login 200 in 170ms
+ GET /auth/login 200 in 245ms
+ GET /auth/login 200 in 309ms
+ GET /auth/login 200 in 197ms
+ GET /auth/login 200 in 297ms
+ GET /auth/login 200 in 158ms
+ GET /auth/login 200 in 178ms
+ GET /auth/login 200 in 153ms
+ GET /auth/login 200 in 145ms
+ GET /auth/login 200 in 139ms
+ GET /auth/login 200 in 146ms
+ GET /auth/login 200 in 171ms
+ GET /auth/login 200 in 135ms
+ GET /auth/login 200 in 121ms
+ GET /auth/login 200 in 159ms
+ GET /auth/login 200 in 182ms
+ GET /auth/login 200 in 268ms
+ GET /auth/login 200 in 308ms
+ GET /auth/login 200 in 220ms
+ GET /auth/login 200 in 157ms
+ GET /auth/login 200 in 231ms
+ GET /auth/login 200 in 1224ms
+ GET /auth/login 200 in 399ms
+ GET /auth/login 200 in 189ms
+ GET /auth/login 200 in 853ms
+ GET /auth/login 200 in 252ms
+ GET /auth/login 200 in 195ms
+ GET /auth/login 200 in 1589ms
+ GET /auth/login 200 in 251ms
+ GET /auth/login 200 in 1396ms
+ GET /admin/dashboard 200 in 206ms
+ GET /admin/dashboard 200 in 232ms
+ GET /admin/clusters 200 in 55ms
+ GET /admin/clusters 200 in 82ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 111ms
+ GET /auth/login 200 in 175ms
+ GET /auth/login 200 in 164ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 401ms
+ GET /auth/login 200 in 1705ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 176ms
+ GET /auth/login 200 in 1241ms
+ GET /auth/login 200 in 90ms
+ GET /admin/dashboard 200 in 57ms
+ GET /admin/dashboard 200 in 108ms
+ GET /admin/clusters 200 in 42ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 90ms
+ GET /auth/login 200 in 33ms
+ GET /auth/login 200 in 130ms
+ ✓ Compiled /auth/register in 474ms
+ GET /auth/register 200 in 587ms
+ GET /auth/login 200 in 47ms
+ GET /admin/dashboard 200 in 67ms
+ GET /admin/dashboard 200 in 98ms
+ GET /admin/clusters 200 in 63ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 139ms
+ GET /auth/login 200 in 98ms
+ GET /auth/login 200 in 272ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 222ms
+ GET /auth/login 200 in 1190ms
+ GET /admin/dashboard 200 in 66ms
+ GET /admin/dashboard 200 in 126ms
+ GET /admin/clusters 200 in 58ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 165ms
+ GET /auth/login 200 in 53ms
+ GET /auth/login 200 in 192ms
+ GET /auth/login 200 in 315ms
+ GET /admin/dashboard 200 in 122ms
+ GET /admin/dashboard 200 in 169ms
+ GET /admin/clusters 200 in 112ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 99ms
+ GET /auth/login 200 in 304ms
+ GET /auth/login 200 in 142ms
+ GET /auth/login 200 in 287ms
+ GET /admin/dashboard 200 in 82ms
+ GET /admin/dashboard 200 in 164ms
+ GET /admin/clusters 200 in 65ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 124ms
+ GET /auth/login 200 in 66ms
+ GET /auth/login 200 in 169ms
+ GET /admin/dashboard 200 in 239ms
+ GET /admin/dashboard 200 in 297ms
+ GET /admin/clusters 200 in 61ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 100ms
+ GET /auth/login 200 in 141ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 143ms
+ GET /auth/login 200 in 1090ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 210ms
+ GET /auth/login 200 in 951ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 182ms
+ GET /auth/login 200 in 1077ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 315ms
+ GET /auth/login 200 in 1288ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 163ms
+ GET /auth/login 200 in 958ms
+ GET /auth/login 200 in 130ms
+ GET /admin/dashboard 200 in 73ms
+ GET /admin/dashboard 200 in 227ms
+ GET /admin/clusters 200 in 70ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 92ms
+ GET /auth/login 200 in 179ms
+ GET /auth/login 200 in 99ms
+ GET /admin/dashboard 200 in 76ms
+ GET /admin/dashboard 200 in 103ms
+ GET /admin/clusters 200 in 50ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 89ms
+ GET /auth/login 200 in 214ms
+ ✓ Compiled in 214ms
+ ⚠ Fast Refresh had to perform a full reload when ./src/lib/api-client.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ✓ Compiled in 160ms
+ GET /auth/login 200 in 1269ms
+ GET /auth/login 200 in 268ms
+ GET /admin/dashboard 200 in 89ms
+ GET /admin/dashboard 200 in 171ms
+ GET /admin/clusters 200 in 48ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 108ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 220ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 385ms
+ GET /admin/clusters 200 in 123ms
+ GET /admin/clusters 200 in 91ms
+ GET /admin/clusters 200 in 80ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 104ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 350ms
+ GET /admin/clusters 200 in 90ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 118ms
+ ✓ Compiled in 766ms
+ ✓ Compiled in 174ms
+ ✓ Compiled in 198ms
+ ✓ Compiled in 1017ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 541ms
+ GET /admin/clusters 200 in 34ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 111ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 193ms
+ GET /admin/clusters 200 in 50ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 150ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 195ms
+ ✓ Compiled in 146ms
+ ✓ Compiled in 267ms
+ ✓ Compiled in 387ms
+ ✓ Compiled in 154ms
+ ✓ Compiled in 178ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 423ms
+ GET /admin/clusters 200 in 145ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 92ms
+ GET /admin/clusters 200 in 47ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 98ms
+ ✓ Compiled in 339ms
+ ✓ Compiled in 124ms
+ ✓ Compiled in 186ms
+ ✓ Compiled in 226ms
+ GET /admin/clusters 200 in 71ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 200ms
+ GET /admin/clusters 200 in 50ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 98ms
+ ✓ Compiled in 199ms
+ ✓ Compiled in 173ms
+ ✓ Compiled in 406ms
+ ✓ Compiled in 128ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 625ms
+ GET /admin/clusters 200 in 61ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 105ms
+ GET /admin/clusters 200 in 54ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 100ms
+ ✓ Compiled in 312ms
+ ✓ Compiled in 128ms
+ ✓ Compiled in 161ms
+ ✓ Compiled in 192ms
+ ✓ Compiled in 474ms
+ GET /admin/clusters 200 in 109ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 151ms
+ GET /admin/clusters 200 in 70ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 99ms
+ ✓ Compiled in 142ms
+ ✓ Compiled in 171ms
+ ✓ Compiled in 172ms
+ ✓ Compiled in 198ms
+ ✓ Compiled /admin/clusters/[id] in 67ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 577ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 259ms
+ ✓ Compiled in 202ms
+ ✓ Compiled in 194ms
+ ✓ Compiled /admin/clusters in 14ms
+ GET /admin/clusters 200 in 104ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 145ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 825ms
+ GET /admin/clusters 200 in 30ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 111ms
+ GET /admin/clusters 200 in 51ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 82ms
+ ✓ Compiled in 266ms
+ ✓ Compiled in 131ms
+ ✓ Compiled in 178ms
+ ✓ Compiled in 164ms
+ GET /admin/clusters 200 in 130ms
+ ✓ Compiled in 200ms
+ ✓ Compiled in 200ms
+ GET /admin/clusters 200 in 888ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 203ms
+ GET /admin/clusters 200 in 41ms
+ GET /admin/clusters 200 in 113ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 104ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 365ms
+ ✓ Compiled in 330ms
+ ✓ Compiled in 158ms
+ ✓ Compiled in 198ms
+ ✓ Compiled in 235ms
+ ✓ Compiled in 179ms
+ ✓ Compiled in 168ms
+ ✓ Compiled in 195ms
+ ✓ Compiled in 188ms
+ ✓ Compiled in 170ms
+ ✓ Compiled in 189ms
+ ✓ Compiled in 184ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 446ms
+ ✓ Compiled in 185ms
+ ✓ Compiled in 396ms
+ ✓ Compiled in 274ms
+ ✓ Compiled in 239ms
+ ✓ Compiled in 198ms
+ ✓ Compiled in 341ms
+ ✓ Compiled in 148ms
+ ✓ Compiled in 285ms
+ ✓ Compiled in 315ms
+ ✓ Compiled in 585ms
+ ✓ Compiled in 276ms
+ GET /admin/clusters/a654e674-9552-4217-bba6-a6cfdf351cd9 200 in 473ms
+
+-----
+[1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /tmp/next-panic-448bb8e001983b25384c89df88d1f936.log.
+
+To help make Turbopack better, report this error by ]8;;https://github.com/vercel/next.js/discussions/new?category=turbopack-error-report&title=Turbopack%20Error%3A%20Next.js%20package%20not%20found&body=Turbopack%20version%3A%20%60bf45b786%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0ANext.js%20package%20not%20found%0A%0ADebug%20info%3A%0A-%20Execution%20of%20get_entrypoints_with_issues_operation%20failed%0A-%20Execution%20of%20EntrypointsOperation%3A%3Anew%20failed%0A-%20Execution%20of%20Project%3A%3Aentrypoints%20failed%0A-%20Execution%20of%20AppProject%3A%3Aroutes%20failed%0A-%20Execution%20of%20directory_tree_to_entrypoints_internal%20failed%0A-%20Execution%20of%20directory_tree_to_loader_tree%20failed%0A-%20Execution%20of%20get_next_package%20failed%0A-%20Next.js%20package%20not%20found%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+-----
+
+
+-----
+[1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /tmp/next-panic-448bb8e001983b25384c89df88d1f936.log.
+
+To help make Turbopack better, report this error by ]8;;https://github.com/vercel/next.js/discussions/new?category=turbopack-error-report&title=Turbopack%20Error%3A%20Next.js%20package%20not%20found&body=Turbopack%20version%3A%20%60bf45b786%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0ANext.js%20package%20not%20found%0A%0ADebug%20info%3A%0A-%20Execution%20of%20subscribe_issues_and_diags_operation%20failed%0A-%20Execution%20of%20endpoint_server_changed_operation%20failed%0A-%20Execution%20of%20pick_endpoint%20failed%0A-%20Execution%20of%20entrypoints_without_collectibles_operation%20failed%0A-%20Execution%20of%20Project%3A%3Aentrypoints%20failed%0A-%20Execution%20of%20AppProject%3A%3Aroutes%20failed%0A-%20Execution%20of%20directory_tree_to_entrypoints_internal%20failed%0A-%20Execution%20of%20directory_tree_to_loader_tree%20failed%0A-%20Execution%20of%20get_next_package%20failed%0A-%20Next.js%20package%20not%20found%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+-----
+
+
+-----
+[1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /tmp/next-panic-448bb8e001983b25384c89df88d1f936.log.
+
+To help make Turbopack better, report this error by ]8;;https://github.com/vercel/next.js/discussions/new?category=turbopack-error-report&title=Turbopack%20Error%3A%20Next.js%20package%20not%20found&body=Turbopack%20version%3A%20%60bf45b786%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0ANext.js%20package%20not%20found%0A%0ADebug%20info%3A%0A-%20Execution%20of%20subscribe_issues_and_diags_operation%20failed%0A-%20Execution%20of%20endpoint_server_changed_operation%20failed%0A-%20Execution%20of%20pick_endpoint%20failed%0A-%20Execution%20of%20entrypoints_without_collectibles_operation%20failed%0A-%20Execution%20of%20Project%3A%3Aentrypoints%20failed%0A-%20Execution%20of%20AppProject%3A%3Aroutes%20failed%0A-%20Execution%20of%20directory_tree_to_entrypoints_internal%20failed%0A-%20Execution%20of%20directory_tree_to_loader_tree%20failed%0A-%20Execution%20of%20get_next_package%20failed%0A-%20Next.js%20package%20not%20found%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+-----
+
+
+-----
+[1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /tmp/next-panic-448bb8e001983b25384c89df88d1f936.log.
+
+To help make Turbopack better, report this error by ]8;;https://github.com/vercel/next.js/discussions/new?category=turbopack-error-report&title=Turbopack%20Error%3A%20Next.js%20package%20not%20found&body=Turbopack%20version%3A%20%60bf45b786%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0ANext.js%20package%20not%20found%0A%0ADebug%20info%3A%0A-%20Execution%20of%20subscribe_issues_and_diags_operation%20failed%0A-%20Execution%20of%20endpoint_server_changed_operation%20failed%0A-%20Execution%20of%20pick_endpoint%20failed%0A-%20Execution%20of%20entrypoints_without_collectibles_operation%20failed%0A-%20Execution%20of%20Project%3A%3Aentrypoints%20failed%0A-%20Execution%20of%20AppProject%3A%3Aroutes%20failed%0A-%20Execution%20of%20directory_tree_to_entrypoints_internal%20failed%0A-%20Execution%20of%20directory_tree_to_loader_tree%20failed%0A-%20Execution%20of%20get_next_package%20failed%0A-%20Next.js%20package%20not%20found%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+-----
+
+Error [TurbopackInternalError]: Next.js package not found
+
+Debug info:
+- Execution of get_entrypoints_with_issues_operation failed
+- Execution of EntrypointsOperation::new failed
+- Execution of Project::entrypoints failed
+- Execution of AppProject::routes failed
+- Execution of directory_tree_to_entrypoints_internal failed
+- Execution of directory_tree_to_loader_tree failed
+- Execution of get_next_package failed
+- Next.js package not found
+    at <unknown> (TurbopackInternalError: Next.js package not found) {
+  location: undefined
+}
+[?25h

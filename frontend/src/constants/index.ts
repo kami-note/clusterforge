@@ -16,12 +16,19 @@ export const STORAGE_KEYS = {
 // ============================================
 // STATUS MAPPING
 // ============================================
-export const CLUSTER_STATUS_MAP: Record<string, 'running' | 'stopped' | 'restarting' | 'error'> = {
-  'CREATED': 'running',
+// Mapeia status do backend (enum ClusterStatus) para formato do frontend
+export const CLUSTER_STATUS_MAP: Record<string, 'running' | 'stopped' | 'restarting' | 'error' | 'pending'> = {
+  // Status do backend atual (ClusterStatus enum)
+  'PENDING': 'pending',
+  'ACTIVE': 'running',
+  'STOPPED': 'stopped',
+  'DELETED': 'stopped', // Deletado mostra como parado
+  'ERROR': 'error',
+  // Status legados (compatibilidade)
+  'CREATED': 'pending',
   'STARTING': 'restarting',
   'RUNNING': 'running',
   'STOPPING': 'restarting',
-  'STOPPED': 'stopped',
   'FAILED': 'error',
   'RESTARTING': 'restarting',
 } as const;

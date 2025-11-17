@@ -8,6 +8,8 @@ import { Cluster } from '@/types';
 import { mapClusterStatus, formatTemplateName } from '@/utils/cluster.utils';
 import { memoryMbToGb, cpuCoresToPercent } from '@/utils/cluster.utils';
 import { handleError, safeConsoleError } from '@/utils/error.utils';
+import { useAuth } from '@/hooks/useAuth';
+import { authService } from '@/services/auth.service';
 
 interface ClustersContextType {
   clusters: Cluster[];
@@ -69,9 +71,20 @@ const initialClusters: Cluster[] = [
 export function ClustersProvider({ children }: { children: ReactNode }) {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user, isLoading: authLoading } = useAuth();
 
   // Função para carregar clusters da API
   const loadClusters = useCallback(async () => {
+    // Não tentar carregar se não estiver autenticado
+    const token = authService.getToken();
+    const expiresAt = authService.getTokenExpiry();
+    
+    if (!token || (expiresAt && expiresAt <= Date.now())) {
+      setLoading(false);
+      setClusters([]);
+      return;
+    }
+
     try {
       setLoading(true);
       const apiClusters = await clusterService.listClusters();
@@ -130,12 +143,22 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]); // Depender de user para recarregar quando autenticação mudar
 
-  // Carregar clusters da API quando o componente montar
+  // Carregar clusters da API quando o componente montar E usuário estiver autenticado
   useEffect(() => {
-    loadClusters();
-  }, [loadClusters]);
+    // Aguardar verificação de autenticação terminar
+    if (authLoading) return;
+    
+    // Só carregar se estiver autenticado
+    if (user) {
+      loadClusters();
+    } else {
+      // Se não autenticado, limpar clusters
+      setClusters([]);
+      setLoading(false);
+    }
+  }, [loadClusters, user, authLoading]);
 
   // Removido polling periódico para evitar recarregamentos visíveis
 
@@ -192,6 +215,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         startupCommand: '',
         port: clusterDetails.port?.toString() || (clusterDetails.ports && clusterDetails.ports.length > 0 ? clusterDetails.ports[0].toString() : undefined),
         ftpPort: clusterDetails.ftpPort?.toString(),
+        containerId: clusterDetails.containerId, // Preservar containerId para SSE
       };
 
       return cluster;

@@ -32,5 +32,10 @@ public class AuthDtos {
 		String username,
 		String role
 	) {}
+
+	public record RefreshRequest(
+		@NotBlank(message = "token é obrigatório")
+		String token
+	) {}
 }
 
