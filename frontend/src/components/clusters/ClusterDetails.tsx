@@ -33,6 +33,11 @@ import { monitoringService, ClusterMetrics, ClusterHealthStatus } from '@/servic
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { ClusterFileManager } from '@/components/clusters/ClusterFileManager';
 import { config } from '@/lib/config';
+import { clusterService } from '@/services/cluster.service';
+import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Trash2 } from 'lucide-react';
 
 interface ClusterDetailsProps {
   clusterId: string;
@@ -74,7 +79,8 @@ const mockLogs = [
 ];
 
 export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
-  const { findClusterById, updateCluster, loading } = useClusters();
+  const router = useRouter();
+  const { findClusterById, updateCluster, deleteCluster, loading } = useClusters();
   const { metrics: realtimeMetrics, connected } = useRealtimeMetrics();
   const [cluster, setCluster] = useState<Cluster | null>(null);
   
@@ -919,9 +925,18 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return () => observer.disconnect();
   }, [oklchToHex, updateThemeColors]);
 
-  const handleAction = (action: 'start' | 'stop' | 'restart' | 'reinstall') => {
+  const handleAction = async (action: 'start' | 'stop' | 'restart' | 'reinstall' | 'delete') => {
+    if (!cluster) return;
+
+    if (action === 'delete') {
+      // A deleção será tratada pelo AlertDialog, apenas prevenir chamada direta
+      return;
+    }
+
     const newStatus = action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting';
     setStatus(newStatus);
+    
+    // Atualização otimista na UI
     if (cluster) {
       updateCluster(cluster.id, { status: newStatus });
     }
@@ -936,15 +951,75 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     const newLog = `[${new Date().toLocaleTimeString('pt-BR')} SYSTEM]: ${actionMessages[action]}`;
     setConsoleOutput(prev => prev + '\n' + newLog);
 
-    if (action === 'restart' || action === 'reinstall') {
-      setTimeout(() => {
-        setStatus('running');
-        if (cluster) {
-          updateCluster(cluster.id, { status: 'running' });
+    try {
+      if (action === 'start') {
+        const toastId = toast.loading('Iniciando cluster...');
+        await clusterService.startCluster(cluster.id);
+        toast.success('Cluster iniciado com sucesso!', { id: toastId });
+        // Recarregar dados do cluster
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
         }
-        const successLog = `[${new Date().toLocaleTimeString('pt-BR')} SYSTEM]: Servidor ${action === 'restart' ? 'reiniciado' : 'reinstalado'} com sucesso`;
-        setConsoleOutput(prev => prev + '\n' + successLog);
-      }, 3000);
+      } else if (action === 'stop') {
+        const toastId = toast.loading('Parando cluster...');
+        await clusterService.stopCluster(cluster.id);
+        toast.success('Cluster parado com sucesso!', { id: toastId });
+        // Recarregar dados do cluster
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
+        }
+      } else if (action === 'restart') {
+        const toastId = toast.loading('Reiniciando cluster...');
+        // Primeiro parar
+        await clusterService.stopCluster(cluster.id);
+        // Aguardar um pouco antes de iniciar
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Depois iniciar
+        await clusterService.startCluster(cluster.id);
+        toast.success('Cluster reiniciado com sucesso!', { id: toastId });
+        // Recarregar dados do cluster
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
+        }
+      } else if (action === 'reinstall') {
+        // Reinstalação é uma operação complexa que pode não estar disponível no backend atual
+        toast.info('Reinstalação não está disponível no momento.');
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      toast.error(`Erro ao executar ação: ${errorMessage}`);
+      // Reverter status em caso de erro
+      if (cluster) {
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
+        }
+      }
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!cluster) return;
+
+    const toastId = toast.loading('Excluindo cluster...');
+    
+    try {
+      await deleteCluster(cluster.id);
+      toast.success('Cluster excluído com sucesso!', { id: toastId });
+      // Voltar para a lista após excluir
+      setTimeout(() => {
+        onBack();
+      }, 1000);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro ao excluir cluster';
+      toast.error(errorMessage, { id: toastId });
     }
   };
 
@@ -1190,6 +1265,37 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                   <RefreshCw className="h-5 w-5 mr-2" />
                   Reinstalar
                 </Button>
+
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="h-12 px-6 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="h-5 w-5 mr-2" />
+                      Apagar
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Tem certeza que deseja excluir o cluster <strong>{cluster?.name}</strong>? 
+                        Esta ação não pode ser desfeita e todos os dados serão perdidos.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDelete}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Excluir
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </div>
           </div>

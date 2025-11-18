@@ -9,21 +9,34 @@ import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick, Plus,
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { useClusters } from '@/hooks/useClusters';
+import { clusterService } from '@/services/cluster.service';
 
 interface UsageData {
   name: string;
   value: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const performClusterAction = async (_clusterId: string, _action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
-  // In a real app, this would be an API call
-  // Parâmetros são necessários para compatibilidade com chamadas, mas não são usados nesta implementação mock
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve(true);
-    }, 800);
-  });
+const performClusterAction = async (clusterId: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
+  try {
+    if (action === 'start') {
+      await clusterService.startCluster(clusterId);
+      return true;
+    } else if (action === 'stop') {
+      await clusterService.stopCluster(clusterId);
+      return true;
+    } else if (action === 'restart') {
+      // Primeiro parar, depois iniciar
+      await clusterService.stopCluster(clusterId);
+      // Aguardar um pouco antes de iniciar
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await clusterService.startCluster(clusterId);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Erro ao executar ação no cluster:', error);
+    return false;
+  }
 };
 
 export function ClientDashboard() {
