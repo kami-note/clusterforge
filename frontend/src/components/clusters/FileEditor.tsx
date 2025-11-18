@@ -2,11 +2,25 @@
  * Componente de editor de arquivo
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
+import { AlertCircle, Save, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertCircle, Save, X, Loader2 } from "lucide-react";
 import { webDavService } from "@/services/webdav.service";
+import { githubDark } from "@uiw/codemirror-theme-github";
+import { javascript } from "@codemirror/lang-javascript";
+import { json } from "@codemirror/lang-json";
+import { html } from "@codemirror/lang-html";
+import { css } from "@codemirror/lang-css";
+import { yaml } from "@codemirror/lang-yaml";
+import { markdown } from "@codemirror/lang-markdown";
+import { python } from "@codemirror/lang-python";
+import { php } from "@codemirror/lang-php";
+
+const CodeMirror = dynamic(() => import("@uiw/react-codemirror").then(mod => mod.default), {
+  ssr: false,
+});
 
 interface FileEditorProps {
   filePath: string;
@@ -22,7 +36,6 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const loadFile = useCallback(async () => {
     setLoading(true);
@@ -94,8 +107,43 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
   if (!isOpen) return null;
 
   // Detectar extensão do arquivo para syntax highlighting básico
-  const extension = fileName.split('.').pop()?.toLowerCase() || '';
-  const isTextFile = !['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'zip', 'tar', 'gz'].includes(extension);
+  const extension = fileName.split(".").pop()?.toLowerCase() || "";
+  const isTextFile = !["jpg", "jpeg", "png", "gif", "webp", "pdf", "zip", "tar", "gz"].includes(extension);
+
+  const editorExtensions = useMemo(() => {
+    if (!extension) return [];
+
+    if (["js", "jsx", "ts", "tsx"].includes(extension)) {
+      return [javascript({ jsx: true, typescript: true })];
+    }
+    if (["json"].includes(extension)) {
+      return [json()];
+    }
+    if (["html"].includes(extension)) {
+      return [html()];
+    }
+    if (["css"].includes(extension)) {
+      return [css()];
+    }
+    if (["yml", "yaml"].includes(extension)) {
+      return [yaml()];
+    }
+    if (["md", "markdown"].includes(extension)) {
+      return [markdown()];
+    }
+    if (["py"].includes(extension)) {
+      return [python()];
+    }
+    if (["php"].includes(extension)) {
+      return [php()];
+    }
+    return [];
+  }, [extension]);
+
+  const lineCount = useMemo(() => {
+    if (!content) return 0;
+    return content.split(/\r?\n/).length;
+  }, [content]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -171,18 +219,22 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
             </div>
           ) : (
             <ScrollArea className="h-full">
-              <textarea
-                ref={textareaRef}
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="w-full h-full p-4 font-mono text-sm border-0 resize-none focus:outline-none bg-background"
-                style={{
-                  minHeight: '100%',
-                  fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-                }}
-                spellCheck={false}
-                placeholder="Carregando arquivo..."
-              />
+              <div className="min-h-full">
+                <CodeMirror
+                  value={content}
+                  height="100%"
+                  theme={githubDark}
+                  extensions={editorExtensions}
+                  basicSetup={{
+                    lineNumbers: true,
+                    highlightActiveLine: true,
+                    highlightActiveLineGutter: true,
+                  }}
+                  onChange={(value) => setContent(value)}
+                  editable={!saving}
+                  aria-label="Editor de código"
+                />
+              </div>
             </ScrollArea>
           )}
         </div>
@@ -195,9 +247,12 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
               <span className="text-orange-500">● Alterações não salvas</span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <kbd className="px-2 py-1 bg-background border rounded text-xs">Ctrl+S</kbd>
-            <span>para salvar</span>
+          <div className="flex items-center gap-4">
+            <span>{lineCount} linha{lineCount === 1 ? "" : "s"}</span>
+            <div className="flex items-center gap-2">
+              <kbd className="px-2 py-1 bg-background border rounded text-xs">Ctrl+S</kbd>
+              <span>para salvar</span>
+            </div>
           </div>
         </div>
       </div>

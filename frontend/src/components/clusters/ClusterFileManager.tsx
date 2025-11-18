@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Cloud,
   Columns3,
+  FilePlus,
   Folder,
   FolderKanban,
   FolderPlus,
@@ -186,6 +187,21 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     }
   }, [currentPath, loadDirectory]);
 
+  // Criar arquivo vazio
+  const handleCreateFile = useCallback(async () => {
+    const fileName = prompt("Nome do arquivo (ex: config.yaml):");
+    if (!fileName || !fileName.trim()) return;
+
+    const newPath = normalizePath(joinPath(currentPath, fileName.trim()));
+    try {
+      await webDavService.saveFileAsText(newPath, "");
+      loadDirectory(currentPath); // Recarregar lista
+      setEditingFile({ path: newPath, name: fileName.trim() });
+    } catch (err: any) {
+      setError(`Erro ao criar arquivo: ${err.message}`);
+    }
+  }, [currentPath, loadDirectory]);
+
   // Upload de arquivo
   const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -352,6 +368,15 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
           >
             <FolderPlus className="h-4 w-4 mr-2" />
             Nova pasta
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCreateFile}
+            disabled={!connected || loading}
+          >
+            <FilePlus className="h-4 w-4 mr-2" />
+            Novo arquivo
           </Button>
           <Button 
             variant="ghost" 

@@ -1306,9 +1306,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         <Card>
           <CardHeader>
             <CardTitle>Gerenciador de Arquivos</CardTitle>
-            <CardDescription>
-              Interface estilo Windows pronta para integração WebDAV do cluster
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <ClusterFileManager 
