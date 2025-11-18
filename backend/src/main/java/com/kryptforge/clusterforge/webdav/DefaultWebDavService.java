@@ -128,7 +128,7 @@ public class DefaultWebDavService implements WebDavService {
 		env.add("TZ=UTC");
 		
 		// Configurar CORS para permitir acesso direto do frontend
-		// A imagem hacdias/webdav usa arquivo de configuração YAML para CORS
+		// A imagem hacdias/webdav usa arquivo de configuração YAML para CORS e permissões (CRUD)
 		String corsOrigins = corsAllowedOrigins != null ? corsAllowedOrigins : 
 			"http://localhost:3000,http://localhost:3001,http://localhost:3002,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002";
 		
@@ -158,11 +158,11 @@ public class DefaultWebDavService implements WebDavService {
 		bindMounts.add(new Bind(volumePath, targetVolume, AccessMode.rw));
 		
 		// Montar arquivo de configuração no container
-		// A imagem espera o arquivo em /config.yaml ou via variável CONFIG
+		// A imagem procura automaticamente por /config.yaml, mas definir WD_CONFIG evita ambiguidades
 		if (Files.exists(configFile)) {
 			Volume configVolume = new Volume("/config.yaml");
 			bindMounts.add(new Bind(configFile.toString(), configVolume, AccessMode.ro));
-			env.add("CONFIG=/config.yaml");
+			env.add("WD_CONFIG=/config.yaml");
 		}
 
 		Ports ports = new Ports();
@@ -262,7 +262,7 @@ public class DefaultWebDavService implements WebDavService {
 	}
 	
 	/**
-	 * Constrói arquivo de configuração YAML para o servidor WebDAV com CORS habilitado
+	 * Constrói arquivo de configuração YAML para o servidor WebDAV com CORS habilitado e permissões CRUD.
 	 */
 	private String buildWebDavConfigYaml(String username, String password, String corsOrigins) {
 		// Parse das origens para formato de lista YAML
@@ -276,12 +276,13 @@ public class DefaultWebDavService implements WebDavService {
 		return String.format("""
 address: 0.0.0.0
 port: 80
-auth: true
+directory: /media
+permissions: CRUD
 users:
   - username: %s
     password: %s
-    scope: /media
-    modify: true
+    directory: /media
+    permissions: CRUD
 cors:
   enabled: true
   credentials: true

@@ -29,6 +29,33 @@ import { webDavService, WebDavFile } from "@/services/webdav.service";
 import { ClusterAccessInfo } from "@/types";
 import { FileEditor } from "./FileEditor";
 
+const ROOT_PATH = "/";
+
+const normalizePath = (path?: string): string => {
+  if (!path || path === ROOT_PATH) {
+    return ROOT_PATH;
+  }
+  let normalized = path.trim();
+  if (!normalized.startsWith(ROOT_PATH)) {
+    normalized = `${ROOT_PATH}${normalized}`;
+  }
+  normalized = normalized.replace(/\/{2,}/g, "/");
+  if (normalized.length > 1 && normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized || ROOT_PATH;
+};
+
+const joinPath = (base: string, segment: string): string => {
+  const cleanSegment = segment.replace(/^\/+/, "").trim();
+  if (!cleanSegment) {
+    return normalizePath(base);
+  }
+  const cleanBase = base === ROOT_PATH ? "" : normalizePath(base).slice(1);
+  const combined = [cleanBase, cleanSegment].filter(Boolean).join("/");
+  return normalizePath(`${ROOT_PATH}${combined}`);
+};
+
 interface FileNode {
   id: string;
   name: string;
@@ -72,9 +99,7 @@ const extensionIcon = (extension?: string) => {
 };
 
 export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, endpointHint }: ClusterFileManagerProps) {
-  // O WebDAV monta o volume em /media dentro do container
-  // Por isso começamos em /media ao invés de /
-  const [currentPath, setCurrentPath] = useState<string>("/media");
+  const [currentPath, setCurrentPath] = useState<string>(ROOT_PATH);
   const [files, setFiles] = useState<WebDavFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,11 +119,12 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     setLoading(true);
     setError(null);
     try {
-      const items = await webDavService.listDirectory(path);
+      const normalizedPath = normalizePath(path);
+      const items = await webDavService.listDirectory(normalizedPath);
       // Filtrar o próprio diretório (se aparecer na lista)
-      const filteredItems = items.filter(item => item.filename !== path || path === "/");
+      const filteredItems = items.filter(item => item.filename !== normalizedPath || normalizedPath === ROOT_PATH);
       setFiles(filteredItems);
-      setCurrentPath(path);
+      setCurrentPath(normalizedPath);
     } catch (err: any) {
       setError(`Erro ao carregar diretório: ${err.message}`);
       setFiles([]);
@@ -117,8 +143,9 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
           username: webDavCredentials.username,
           password: webDavCredentials.password,
         });
+        setCurrentPath(ROOT_PATH);
         setConnected(true);
-        loadDirectory(currentPath);
+        loadDirectory(ROOT_PATH);
       } catch (err: any) {
         setError(`Erro ao conectar ao WebDAV: ${err.message}`);
         setConnected(false);
@@ -131,7 +158,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     return () => {
       webDavService.disconnect();
     };
-  }, [clusterId, webDavCredentials, loadDirectory, currentPath]);
+  }, [clusterId, webDavCredentials, loadDirectory]);
 
   // Navegar para uma pasta
   const navigateToFolder = useCallback((path: string) => {
@@ -140,15 +167,9 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
 
   // Navegar para pasta pai
   const navigateUp = useCallback(() => {
-    // Não permitir navegar acima de /media
-    if (currentPath === "/media" || currentPath === "/") return;
-    const parentPath = currentPath.split("/").slice(0, -1).join("/") || "/media";
-    // Garantir que não vá abaixo de /media
-    if (!parentPath.startsWith("/media")) {
-      loadDirectory("/media");
-    } else {
-      loadDirectory(parentPath);
-    }
+    if (currentPath === ROOT_PATH) return;
+    const parentPath = currentPath.split("/").slice(0, -1).join("/") || ROOT_PATH;
+    loadDirectory(parentPath || ROOT_PATH);
   }, [currentPath, loadDirectory]);
 
   // Criar pasta
@@ -156,12 +177,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     const folderName = prompt("Nome da pasta:");
     if (!folderName || !folderName.trim()) return;
 
-    // Garantir que o caminho comece com /media
-    const basePath = currentPath.startsWith("/media") ? currentPath : "/media";
-    const newPath = basePath === "/media" 
-      ? `/media/${folderName.trim()}`
-      : `${basePath}/${folderName.trim()}`;
-
+    const newPath = joinPath(currentPath, folderName.trim());
     try {
       await webDavService.createDirectory(newPath);
       loadDirectory(currentPath); // Recarregar lista
@@ -175,11 +191,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Garantir que o caminho comece com /media
-    const basePath = currentPath.startsWith("/media") ? currentPath : "/media";
-    const remotePath = basePath === "/media" 
-      ? `/media/${file.name}`
-      : `${basePath}/${file.name}`;
+    const remotePath = joinPath(currentPath, file.name);
 
     try {
       await webDavService.uploadFile(remotePath, file);
@@ -203,10 +215,10 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
       return {
         id: file.filename,
         name: file.basename,
-        type: file.type,
+        type: file.type === "directory" ? "folder" : "file",
         size: file.type === "file" ? formatFileSize(file.size) : undefined,
         modifiedAt: file.lastmod ? new Date(file.lastmod).toLocaleString("pt-BR") : "",
-        path: file.filename,
+        path: normalizePath(file.filename),
         extension,
       };
     });
@@ -222,29 +234,22 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
 
   // Construir breadcrumb
   const breadcrumb = useMemo(() => {
-    // Garantir que o caminho comece com /media
-    const path = currentPath.startsWith("/media") ? currentPath : "/media";
+    const path = normalizePath(currentPath);
     
-    // Se o caminho é exatamente /media, retornar apenas o item raiz
-    if (path === "/media") {
+    if (path === ROOT_PATH) {
       return [
-        { id: "/media", name: "Raiz", type: "folder", modifiedAt: "", path: "/media" }
+        { id: ROOT_PATH, name: "Raiz", type: "folder", modifiedAt: "", path: ROOT_PATH }
       ];
     }
     
     const parts = path.split("/").filter(Boolean);
     const items: FileNode[] = [
-      { id: "/media", name: "Raiz", type: "folder", modifiedAt: "", path: "/media" }
+      { id: ROOT_PATH, name: "Raiz", type: "folder", modifiedAt: "", path: ROOT_PATH }
     ];
     
-    // Construir caminho incrementalmente, começando de /media
-    let current = "/media";
+    let current = ROOT_PATH;
     parts.forEach((part, index) => {
-      // Pular "media" se for o primeiro item (já está na raiz)
-      if (index === 0 && part === "media") {
-        return;
-      }
-      current += `/${part}`;
+      current = current === ROOT_PATH ? `/${part}` : `${current}/${part}`;
       items.push({
         id: current,
         name: part,
@@ -300,7 +305,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
             variant="outline" 
             size="icon"
             onClick={navigateUp}
-            disabled={currentPath === "/media" || currentPath === "/" || loading}
+            disabled={currentPath === ROOT_PATH || loading}
             title="Voltar"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -445,13 +450,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
                             onClick={(e) => {
                               e.stopPropagation();
                               // Usar o caminho completo do arquivo
-                              let filePath = item.path;
-                              // Garantir que comece com /media
-                              if (!filePath.startsWith("/media")) {
-                                filePath = currentPath === "/media" 
-                                  ? `/media/${item.name}`
-                                  : `${currentPath}/${item.name}`;
-                              }
+                              const filePath = item.path ? normalizePath(item.path) : joinPath(currentPath, item.name);
                               setEditingFile({ path: filePath, name: item.name });
                             }}
                             title="Editar arquivo"
@@ -504,7 +503,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
                           className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                           onClick={(e) => {
                             e.stopPropagation();
-                            const filePath = item.path.startsWith("/media") ? item.path : `/media/${item.name}`;
+                            const filePath = item.path ? normalizePath(item.path) : joinPath(currentPath, item.name);
                             setEditingFile({ path: filePath, name: item.name });
                           }}
                           title="Editar arquivo"

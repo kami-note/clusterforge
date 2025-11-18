@@ -77,7 +77,8 @@ class WebDavService {
     }
 
     try {
-      const items = await this.client.getDirectoryContents(path, {
+      const normalizedPath = this.normalizePath(path);
+      const items = await this.client.getDirectoryContents(normalizedPath, {
         deep: false,
       });
 
@@ -93,7 +94,7 @@ class WebDavService {
         mime: item.mime,
       }));
     } catch (error: any) {
-      throw new Error(`Erro ao listar diretório ${path}: ${error.message}`);
+      throw new Error(`Erro ao listar diretório ${this.normalizePath(path)}: ${error.message}`);
     }
   }
 
@@ -106,9 +107,10 @@ class WebDavService {
     }
 
     try {
-      await this.client.createDirectory(path);
+      const normalizedPath = this.normalizePath(path);
+      await this.client.createDirectory(normalizedPath);
     } catch (error: any) {
-      throw new Error(`Erro ao criar diretório ${path}: ${error.message}`);
+      throw new Error(`Erro ao criar diretório ${this.normalizePath(path)}: ${error.message}`);
     }
   }
 
@@ -122,9 +124,10 @@ class WebDavService {
 
     try {
       const buffer = await file.arrayBuffer();
-      await this.client.putFileContents(remotePath, buffer);
+      const normalizedPath = this.normalizePath(remotePath);
+      await this.client.putFileContents(normalizedPath, buffer);
     } catch (error: any) {
-      throw new Error(`Erro ao fazer upload de ${remotePath}: ${error.message}`);
+      throw new Error(`Erro ao fazer upload de ${this.normalizePath(remotePath)}: ${error.message}`);
     }
   }
 
@@ -137,12 +140,13 @@ class WebDavService {
     }
 
     try {
-      const buffer = await this.client.getFileContents(remotePath, {
+      const normalizedPath = this.normalizePath(remotePath);
+      const buffer = await this.client.getFileContents(normalizedPath, {
         format: 'binary',
       });
       return new Blob([buffer as ArrayBuffer]);
     } catch (error: any) {
-      throw new Error(`Erro ao fazer download de ${remotePath}: ${error.message}`);
+      throw new Error(`Erro ao fazer download de ${this.normalizePath(remotePath)}: ${error.message}`);
     }
   }
 
@@ -155,12 +159,13 @@ class WebDavService {
     }
 
     try {
-      const buffer = await this.client.getFileContents(remotePath, {
+      const normalizedPath = this.normalizePath(remotePath);
+      const buffer = await this.client.getFileContents(normalizedPath, {
         format: 'text',
       });
       return buffer as string;
     } catch (error: any) {
-      throw new Error(`Erro ao ler arquivo ${remotePath}: ${error.message}`);
+      throw new Error(`Erro ao ler arquivo ${this.normalizePath(remotePath)}: ${error.message}`);
     }
   }
 
@@ -173,23 +178,17 @@ class WebDavService {
     }
 
     try {
-      // Garantir que o caminho comece com /media
-      const normalizedPath = remotePath.startsWith('/media') ? remotePath : `/media/${remotePath.replace(/^\//, '')}`;
+      const normalizedPath = this.normalizePath(remotePath);
       
-      // Converter string para Buffer/ArrayBuffer
-      const encoder = new TextEncoder();
-      const buffer = encoder.encode(content);
-      
-      await this.client.putFileContents(normalizedPath, buffer, {
+      await this.client.putFileContents(normalizedPath, content, {
         overwrite: true,
-        contentLength: buffer.length,
       });
     } catch (error: any) {
       // Melhorar mensagem de erro
       const errorMessage = error.response?.status === 403 
         ? 'Permissão negada. Verifique se o usuário tem permissão de escrita.'
         : error.message;
-      throw new Error(`Erro ao salvar arquivo ${remotePath}: ${errorMessage}`);
+      throw new Error(`Erro ao salvar arquivo ${this.normalizePath(remotePath)}: ${errorMessage}`);
     }
   }
 
@@ -202,9 +201,10 @@ class WebDavService {
     }
 
     try {
-      await this.client.deleteFile(path);
+      const normalizedPath = this.normalizePath(path);
+      await this.client.deleteFile(normalizedPath);
     } catch (error: any) {
-      throw new Error(`Erro ao deletar ${path}: ${error.message}`);
+      throw new Error(`Erro ao deletar ${this.normalizePath(path)}: ${error.message}`);
     }
   }
 
@@ -217,9 +217,11 @@ class WebDavService {
     }
 
     try {
-      await this.client.moveFile(sourcePath, destinationPath);
+      const sourceNormalized = this.normalizePath(sourcePath);
+      const destinationNormalized = this.normalizePath(destinationPath);
+      await this.client.moveFile(sourceNormalized, destinationNormalized);
     } catch (error: any) {
-      throw new Error(`Erro ao mover ${sourcePath} para ${destinationPath}: ${error.message}`);
+      throw new Error(`Erro ao mover ${this.normalizePath(sourcePath)} para ${this.normalizePath(destinationPath)}: ${error.message}`);
     }
   }
 
@@ -232,10 +234,27 @@ class WebDavService {
     }
 
     try {
-      await this.client.copyFile(sourcePath, destinationPath);
+      const sourceNormalized = this.normalizePath(sourcePath);
+      const destinationNormalized = this.normalizePath(destinationPath);
+      await this.client.copyFile(sourceNormalized, destinationNormalized);
     } catch (error: any) {
-      throw new Error(`Erro ao copiar ${sourcePath} para ${destinationPath}: ${error.message}`);
+      throw new Error(`Erro ao copiar ${this.normalizePath(sourcePath)} para ${this.normalizePath(destinationPath)}: ${error.message}`);
     }
+  }
+
+  private normalizePath(path?: string): string {
+    if (!path || path === '/') {
+      return '/';
+    }
+    let normalized = path.trim();
+    if (!normalized.startsWith('/')) {
+      normalized = `/${normalized}`;
+    }
+    normalized = normalized.replace(/\/{2,}/g, '/');
+    if (normalized.length > 1 && normalized.endsWith('/')) {
+      normalized = normalized.slice(0, -1);
+    }
+    return normalized || '/';
   }
 }
 
