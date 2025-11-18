@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Skeleton from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -29,10 +29,10 @@ import {
 } from 'lucide-react';
 import { useClusters } from '@/hooks/useClusters';
 import { Cluster } from '@/types';
-import { clusterService, FtpCredentials } from '@/services/cluster.service';
 import { monitoringService, ClusterMetrics, ClusterHealthStatus } from '@/services/monitoring.service';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { ClusterFileManager } from '@/components/clusters/ClusterFileManager';
+import { config } from '@/lib/config';
 
 interface ClusterDetailsProps {
   clusterId: string;
@@ -47,6 +47,15 @@ interface ResourceDataPoint {
   disk: number;
   // network removido da UI (mantido no tipo original apenas localmente se necessário)
   network: number;
+}
+
+interface AccessCredentials {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  protocol: 'ftp' | 'webdav';
+  url: string;
 }
 
 const mockLogs = [
@@ -93,8 +102,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const consoleRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedInitialDataRef = useRef(false);
-  const [ftpCredentials, setFtpCredentials] = useState<FtpCredentials | null>(null);
-  const [ftpLoading, setFtpLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<'overview' | 'files'>('overview');
 
   // Função auxiliar para sanitizar valores numéricos
@@ -203,6 +210,54 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return [finalMin, finalMax];
   }, []);
 
+  const resolvedAccessHost = useMemo(() => {
+    if (config.access?.host) {
+      return config.access.host;
+    }
+    if (typeof window !== 'undefined' && window.location.hostname) {
+      return window.location.hostname;
+    }
+    try {
+      return new URL(config.api.baseUrl).hostname;
+    } catch {
+      return 'localhost';
+    }
+  }, []);
+
+  const buildAccessCredentials = useCallback(
+    (access: Cluster['ftp'], protocol: 'ftp' | 'webdav'): AccessCredentials | null => {
+      if (!access || !access.port || !access.username || !access.password) {
+        return null;
+      }
+      const proto =
+        protocol === 'webdav'
+          ? config.access?.webdavProtocol || config.access?.protocol || 'http'
+          : config.access?.ftpProtocol || 'ftp';
+      const url = `${proto}://${resolvedAccessHost}:${access.port}`;
+      return {
+        host: resolvedAccessHost,
+        port: access.port,
+        username: access.username,
+        password: access.password,
+        protocol,
+        url,
+      };
+    },
+    [resolvedAccessHost],
+  );
+
+  const ftpCredentials = useMemo(
+    () => buildAccessCredentials(cluster?.ftp, 'ftp'),
+    [cluster?.ftp, buildAccessCredentials],
+  );
+
+  const webDavCredentials = useMemo(
+    () => buildAccessCredentials(cluster?.webDav, 'webdav'),
+    [cluster?.webDav, buildAccessCredentials],
+  );
+
+  const accessLoading = !cluster;
+
   // Helper para converter oklch para hex (usando elemento temporário)
   // No tema escuro, prioriza cores mais brilhantes para melhor visibilidade
   const oklchToHex = useCallback((oklch: string, fallback: string = '#8884d8', preferFallback: boolean = false): string => {
@@ -295,7 +350,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           
           // SEMPRE usar o status da API como fonte primária inicial
           // O status da API é mais confiável no momento do carregamento
-          let initialStatus = clusterData.status;
+          const initialStatus = clusterData.status;
           
           // Buscar health status da API para ter informação mais atualizada
           // Endpoint pode não existir no backend (não crítico)
@@ -315,28 +370,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               if (process.env.NODE_ENV === 'development') {
                 console.debug("Failed to fetch health status from API, using cluster status:", error);
               }
-            }
-          }
-          
-          // Buscar credenciais FTP (endpoint pode não existir no backend)
-          try {
-            setFtpLoading(true);
-            const ftpCreds = await clusterService.getFtpCredentials(clusterId);
-            if (!isCancelled) {
-              setFtpCredentials(ftpCreds);
-            }
-          } catch (error: any) {
-            // Não logar se for 403/404 (endpoint não existe ou não autorizado)
-            // Isso é comportamento normal se o endpoint não estiver implementado
-            if (error?.status !== 403 && error?.status !== 404) {
-              if (process.env.NODE_ENV === 'development') {
-                console.debug("Failed to fetch FTP credentials:", error);
-              }
-            }
-            // Não definir credenciais se falhar (pode não estar configurado)
-          } finally {
-            if (!isCancelled) {
-              setFtpLoading(false);
             }
           }
           
@@ -1174,7 +1207,9 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           <CardContent>
             <ClusterFileManager 
               clusterName={cluster.name}
-              endpointHint={ftpCredentials?.host ? `webdav://${ftpCredentials.host}` : undefined}
+              clusterId={cluster.id}
+              webDavCredentials={cluster.webDav}
+              endpointHint={webDavCredentials?.url}
             />
           </CardContent>
         </Card>
@@ -1273,7 +1308,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                   <LineChart 
                     data={resourceData}
                     margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
-                    onMouseEnter={(e) => {
+                    onMouseEnter={() => {
                       // Debug: log dos dados quando hover
                       if (process.env.NODE_ENV === 'development') {
                         console.log('📊 Dados do gráfico:', resourceData.slice(-5), {
@@ -1467,12 +1502,12 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 <label className="text-sm text-muted-foreground">Endereço do Servidor</label>
                 <div className="flex items-center space-x-2 mt-1">
                   <code className="flex-1 p-2 bg-muted rounded text-sm">
-                    {cluster.port ? `localhost:${cluster.port}` : 'N/A'}
+                    {cluster.port ? `${resolvedAccessHost}:${cluster.port}` : 'N/A'}
                   </code>
                   <Button 
                     variant="outline" 
                     size="sm"
-                    onClick={() => copyToClipboard(cluster.port ? `localhost:${cluster.port}` : '')}
+                    onClick={() => copyToClipboard(cluster.port ? `${resolvedAccessHost}:${cluster.port}` : '')}
                   >
                     <Copy className="h-3 w-3" />
                   </Button>
@@ -1483,7 +1518,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
 
               <div>
                 <label className="text-sm text-muted-foreground">Acesso FTP/SFTP</label>
-                {ftpLoading ? (
+                {accessLoading ? (
                   <div className="mt-2 space-y-2">
                     <Skeleton className="h-8 w-full" />
                     <Skeleton className="h-8 w-full" />
@@ -1499,6 +1534,17 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                         variant="outline" 
                         size="sm"
                         onClick={() => copyToClipboard(ftpCredentials.host)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">URL:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.url}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(ftpCredentials.url)}
                       >
                         <Copy className="h-3 w-3" />
                       </Button>
@@ -1540,6 +1586,71 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 ) : (
                   <div className="mt-2 text-sm text-muted-foreground">
                     FTP não configurado para este cluster
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              <div>
+                <label className="text-sm text-muted-foreground">Acesso WebDAV</label>
+                {accessLoading ? (
+                  <div className="mt-2 space-y-2">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                  </div>
+                ) : webDavCredentials ? (
+                  <div className="space-y-2 mt-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">URL:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.url}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.url)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Usuário:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.username}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.username)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Senha:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.password}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.password)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Porta:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.port}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.port.toString())}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    WebDAV não configurado para este cluster
                   </div>
                 )}
               </div>

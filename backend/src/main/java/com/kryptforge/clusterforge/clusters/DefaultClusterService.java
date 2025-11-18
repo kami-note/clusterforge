@@ -17,6 +17,7 @@ import com.kryptforge.clusterforge.templates.TemplateService;
 import com.kryptforge.clusterforge.users.CurrentUser;
 import com.kryptforge.clusterforge.users.Role;
 import com.kryptforge.clusterforge.users.User;
+import com.kryptforge.clusterforge.webdav.WebDavService;
 
 @Service
 @Transactional
@@ -28,15 +29,17 @@ public class DefaultClusterService implements ClusterService {
 	private final PortManager portManager;
 	private final CurrentUser currentUser;
 	private final FtpService ftpService;
+	private final WebDavService webDavService;
 	private static final Logger log = LoggerFactory.getLogger(DefaultClusterService.class);
 
-	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager, CurrentUser currentUser, FtpService ftpService) {
+	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager, CurrentUser currentUser, FtpService ftpService, WebDavService webDavService) {
 		this.repository = repository;
 		this.templateService = templateService;
 		this.dockerEngineService = dockerEngineService;
 		this.portManager = portManager;
 		this.currentUser = currentUser;
 		this.ftpService = ftpService;
+		this.webDavService = webDavService;
 	}
 
 	@Override
@@ -154,6 +157,16 @@ public class DefaultClusterService implements ClusterService {
 		c.setFtpPort(ftpPort);
 		c.setFtpUser(ftpUser);
 		c.setFtpPassword(ftpPassword);
+		return repository.save(c);
+	}
+
+	@Override
+	public ClusterInstance updateWebDavInfo(UUID id, String webDavContainerId, Integer webDavPort, String webDavUser, String webDavPassword) {
+		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		c.setWebDavContainerId(webDavContainerId);
+		c.setWebDavPort(webDavPort);
+		c.setWebDavUser(webDavUser);
+		c.setWebDavPassword(webDavPassword);
 		return repository.save(c);
 	}
 
@@ -338,6 +351,22 @@ public class DefaultClusterService implements ClusterService {
 				}
 			}
 
+			// Remove servidor WebDAV associado
+			String webDavContainerId = instance.getWebDavContainerId();
+			Integer webDavPort = instance.getWebDavPort();
+			if (StringUtils.hasText(webDavContainerId)) {
+				try {
+					log.info("Removendo servidor WebDAV {} para instância '{}'", webDavContainerId, instance.getName());
+					webDavService.removeWebDavServer(webDavContainerId);
+					if (webDavPort != null) {
+						portManager.releasePort(webDavPort);
+						log.debug("Porta WebDAV {} liberada para instância '{}'", webDavPort, instance.getName());
+					}
+				} catch (Exception e) {
+					log.warn("Falha ao remover servidor WebDAV {}: {}", webDavContainerId, e.getMessage());
+				}
+			}
+
 			// Para o container antes de remover
 			try {
 				dockerEngineService.stopContainer(containerId, 10);
@@ -363,6 +392,10 @@ public class DefaultClusterService implements ClusterService {
 			instance.setFtpPort(null);
 			instance.setFtpUser(null);
 			instance.setFtpPassword(null);
+			instance.setWebDavContainerId(null);
+			instance.setWebDavPort(null);
+			instance.setWebDavUser(null);
+			instance.setWebDavPassword(null);
 			instance.setStatus(ClusterStatus.DELETED);
 			repository.save(instance);
 		} catch (Exception e) {

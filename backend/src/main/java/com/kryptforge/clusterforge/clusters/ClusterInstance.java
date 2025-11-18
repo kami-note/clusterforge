@@ -83,6 +83,18 @@ public class ClusterInstance {
 	@Column(name = "ftp_password", length = 128)
 	private String ftpPassword;
 
+	@Column(name = "webdav_container_id", length = 64)
+	private String webDavContainerId;
+
+	@Column(name = "webdav_port")
+	private Integer webDavPort;
+
+	@Column(name = "webdav_user", length = 64)
+	private String webDavUser;
+
+	@Column(name = "webdav_password", length = 128)
+	private String webDavPassword;
+
 	@PrePersist
 	void onCreate() {
 		this.createdAt = Instant.now();
@@ -201,6 +213,38 @@ public class ClusterInstance {
 
 	public void setFtpPassword(String ftpPassword) {
 		this.ftpPassword = ftpPassword;
+	}
+
+	public String getWebDavContainerId() {
+		return webDavContainerId;
+	}
+
+	public void setWebDavContainerId(String webDavContainerId) {
+		this.webDavContainerId = webDavContainerId;
+	}
+
+	public Integer getWebDavPort() {
+		return webDavPort;
+	}
+
+	public void setWebDavPort(Integer webDavPort) {
+		this.webDavPort = webDavPort;
+	}
+
+	public String getWebDavUser() {
+		return webDavUser;
+	}
+
+	public void setWebDavUser(String webDavUser) {
+		this.webDavUser = webDavUser;
+	}
+
+	public String getWebDavPassword() {
+		return webDavPassword;
+	}
+
+	public void setWebDavPassword(String webDavPassword) {
+		this.webDavPassword = webDavPassword;
 	}
 
 	public static class EnvConverter extends JsonAttributeConverter<Map<String,String>> {

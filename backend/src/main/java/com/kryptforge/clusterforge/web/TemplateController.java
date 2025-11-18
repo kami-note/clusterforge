@@ -142,6 +142,16 @@ public class TemplateController {
 				);
 			}
 
+			if (result.webDavInfo() != null) {
+				instance = clusterService.updateWebDavInfo(
+					instance.getId(),
+					result.webDavInfo().containerId(),
+					result.webDavInfo().hostPort(),
+					result.webDavInfo().username(),
+					result.webDavInfo().password()
+				);
+			}
+
 			return ResponseEntity.status(HttpStatus.CREATED)
 				.body(new TemplateInstantiateResponse(result.containerId(), request.name()));
 		} catch (IllegalArgumentException e) {

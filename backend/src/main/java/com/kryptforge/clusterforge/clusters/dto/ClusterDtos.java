@@ -48,23 +48,38 @@ public final class ClusterDtos {
 		Map<String,String> env,
 		List<Integer> ports,
 		List<String> volumes,
-		String containerId
+		String containerId,
+		AccessInfo ftp,
+		AccessInfo webDav
 	) {
 		public static ClusterResponse from(ClusterInstance c) {
+			return from(c, c.getStatus());
+		}
+
+		public static ClusterResponse from(ClusterInstance c, ClusterStatus status) {
 			return new ClusterResponse(
 				c.getId(),
 				c.getName(),
 				c.getTemplateName(),
-				c.getStatus(),
+				status,
 				c.getCreatedAt(),
 				c.getUpdatedAt(),
 				c.getEnv(),
 				c.getPorts(),
 				c.getVolumes(),
-				c.getContainerId()
+				c.getContainerId(),
+				new AccessInfo(c.getFtpContainerId(), c.getFtpPort(), c.getFtpUser(), c.getFtpPassword()),
+				new AccessInfo(c.getWebDavContainerId(), c.getWebDavPort(), c.getWebDavUser(), c.getWebDavPassword())
 			);
 		}
 	}
+
+	public record AccessInfo(
+		String containerId,
+		Integer port,
+		String username,
+		String password
+	) {}
 }
 
 

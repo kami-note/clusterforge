@@ -18,6 +18,7 @@ import com.kryptforge.clusterforge.clusters.ClusterStatus;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.templates.TemplateProperties;
+import com.kryptforge.clusterforge.webdav.WebDavService;
 
 /**
  * Serviço de recuperação que verifica periodicamente containers sem servidor FTP
@@ -36,6 +37,7 @@ public class FtpRecoveryService {
 	private final FtpService ftpService;
 	private final PortManager portManager;
 	private final TemplateProperties templateProperties;
+	private final WebDavService webDavService;
 	private final boolean enabled;
 
 	public FtpRecoveryService(
@@ -44,12 +46,14 @@ public class FtpRecoveryService {
 		FtpService ftpService,
 		PortManager portManager,
 		TemplateProperties templateProperties,
+		WebDavService webDavService,
 		@Value("${clusterforge.ftp.recovery.enabled:true}") boolean enabled) {
 		this.clusterRepository = Objects.requireNonNull(clusterRepository, "clusterRepository");
 		this.dockerEngineService = Objects.requireNonNull(dockerEngineService, "dockerEngineService");
 		this.ftpService = Objects.requireNonNull(ftpService, "ftpService");
 		this.portManager = Objects.requireNonNull(portManager, "portManager");
 		this.templateProperties = Objects.requireNonNull(templateProperties, "templateProperties");
+		this.webDavService = Objects.requireNonNull(webDavService, "webDavService");
 		this.enabled = enabled;
 		log.info("FtpRecoveryService inicializado (enabled: {})", enabled);
 	}
@@ -146,30 +150,31 @@ public class FtpRecoveryService {
 
 			if (clustersNeedingFtp.isEmpty()) {
 				log.debug("Nenhum container precisando de servidor FTP encontrado");
-				return;
-			}
+			} else {
+				log.info("Encontrados {} containers precisando de servidor FTP, iniciando recuperação", clustersNeedingFtp.size());
 
-			log.info("Encontrados {} containers precisando de servidor FTP, iniciando recuperação", clustersNeedingFtp.size());
+				int recovered = 0;
+				int failed = 0;
 
-			int recovered = 0;
-			int failed = 0;
-
-			for (ClusterInstance cluster : clustersNeedingFtp) {
-				try {
-					if (recoverFtpForCluster(cluster)) {
-						recovered++;
-					} else {
+				for (ClusterInstance cluster : clustersNeedingFtp) {
+					try {
+						if (recoverFtpForCluster(cluster)) {
+							recovered++;
+						} else {
+							failed++;
+						}
+					} catch (Exception e) {
+						log.error("Erro ao recuperar servidor FTP para cluster '{}': {}", cluster.getName(), e.getMessage(), e);
 						failed++;
 					}
-				} catch (Exception e) {
-					log.error("Erro ao recuperar servidor FTP para cluster '{}': {}", cluster.getName(), e.getMessage(), e);
-					failed++;
+				}
+
+				if (recovered > 0 || failed > 0) {
+					log.info("Recuperação de servidores FTP concluída: {} recuperados, {} falhas", recovered, failed);
 				}
 			}
 
-			if (recovered > 0 || failed > 0) {
-				log.info("Recuperação de servidores FTP concluída: {} recuperados, {} falhas", recovered, failed);
-			}
+			recoverMissingWebDavServers();
 		} catch (Exception e) {
 			log.error("Erro durante verificação de servidores FTP ausentes: {}", e.getMessage(), e);
 		}
@@ -292,6 +297,8 @@ public class FtpRecoveryService {
 			cluster.setFtpPassword(ftpInfo.ftpPassword());
 			clusterRepository.save(cluster);
 
+			createWebDavServer(cluster, volumePath, ftpInfo.ftpUser(), ftpInfo.ftpPassword());
+
 			log.info("Servidor FTP de recuperação criado com sucesso para cluster '{}': containerId={}, port={}", 
 				cluster.getName(), ftpInfo.containerId(), ftpInfo.hostPort());
 			return true;
@@ -370,6 +377,141 @@ public class FtpRecoveryService {
 		}
 		
 		return volumePath.toString();
+	}
+
+	private void recoverMissingWebDavServers() {
+		List<ClusterInstance> clustersNeedingWebDav = clusterRepository.findAll().stream()
+			.filter(cluster -> cluster.getContainerId() != null && !cluster.getContainerId().isBlank())
+			.filter(cluster -> {
+				ClusterStatus status = cluster.getStatus();
+				return status == ClusterStatus.ACTIVE || status == ClusterStatus.PENDING;
+			})
+			.filter(cluster -> cluster.getFtpContainerId() != null && !cluster.getFtpContainerId().isBlank())
+			.filter(this::shouldCreateWebDav)
+			.toList();
+
+		if (clustersNeedingWebDav.isEmpty()) {
+			return;
+		}
+
+		int created = 0;
+		for (ClusterInstance cluster : clustersNeedingWebDav) {
+			try {
+				var inspect = dockerEngineService.inspectContainer(cluster.getContainerId());
+				if (inspect == null) {
+					continue;
+				}
+				String volumePath = extractMainVolumePath(cluster, inspect);
+				if (volumePath == null) {
+					continue;
+				}
+				createWebDavServer(cluster, volumePath, cluster.getFtpUser(), cluster.getFtpPassword());
+				created++;
+			} catch (Exception e) {
+				log.error("Erro ao recuperar WebDAV para cluster '{}': {}", cluster.getName(), e.getMessage());
+			}
+		}
+
+		if (created > 0) {
+			log.info("Recuperação de servidores WebDAV concluída: {} criados/recriados", created);
+		}
+	}
+
+	private boolean shouldCreateWebDav(ClusterInstance cluster) {
+		String webDavContainerId = cluster.getWebDavContainerId();
+		if (webDavContainerId == null || webDavContainerId.isBlank()) {
+			return true;
+		}
+
+		if (webDavService.isWebDavServerRunning(webDavContainerId)) {
+			return false;
+		}
+
+		try {
+			var inspect = dockerEngineService.inspectContainer(webDavContainerId);
+			if (inspect != null && inspect.getState() != null) {
+				Boolean running = inspect.getState().getRunning();
+				if (running != null && !running) {
+					log.info("Container WebDAV {} do cluster '{}' está parado, tentando reiniciar",
+						webDavContainerId, cluster.getName());
+					try {
+						dockerEngineService.startContainer(webDavContainerId);
+						log.info("Container WebDAV {} reiniciado com sucesso", webDavContainerId);
+						return false;
+					} catch (Exception e) {
+						log.warn("Falha ao reiniciar container WebDAV {}: {}, será recriado",
+							webDavContainerId, e.getMessage());
+					}
+				}
+			}
+		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
+			log.debug("Container WebDAV {} não encontrado para cluster '{}', recriando",
+				webDavContainerId, cluster.getName());
+		} catch (Exception e) {
+			log.warn("Erro ao verificar container WebDAV {}: {}", webDavContainerId, e.getMessage());
+		}
+
+		Integer webDavPort = cluster.getWebDavPort();
+		if (webDavPort != null) {
+			try {
+				portManager.releasePort(webDavPort);
+			} catch (Exception e) {
+				log.debug("Falha ao liberar porta WebDAV {}: {}", webDavPort, e.getMessage());
+			}
+		}
+
+		cluster.setWebDavContainerId(null);
+		cluster.setWebDavPort(null);
+		cluster.setWebDavUser(null);
+		cluster.setWebDavPassword(null);
+		clusterRepository.save(cluster);
+
+		return true;
+	}
+
+	private void createWebDavServer(ClusterInstance cluster, String volumePath, String username, String password) {
+		if (!StringUtils.hasText(volumePath)) {
+			log.warn("Volume inválido para criação de WebDAV do cluster '{}'", cluster.getName());
+			return;
+		}
+
+		if (!StringUtils.hasText(username)) {
+			username = cluster.getWebDavUser();
+		}
+		if (!StringUtils.hasText(password)) {
+			password = cluster.getWebDavPassword();
+		}
+
+		int webDavPort = portManager.allocatePort();
+		if (webDavPort == -1) {
+			log.warn("Não foi possível alocar porta para WebDAV do cluster '{}'", cluster.getName());
+			return;
+		}
+
+		try {
+			var info = webDavService.createWebDavServer(
+				cluster.getName(),
+				volumePath,
+				webDavPort,
+				username,
+				password
+			);
+
+			cluster.setWebDavContainerId(info.containerId());
+			cluster.setWebDavPort(info.hostPort());
+			cluster.setWebDavUser(info.username());
+			cluster.setWebDavPassword(info.password());
+			clusterRepository.save(cluster);
+
+			log.info("Servidor WebDAV criado/atualizado para cluster '{}': {}", cluster.getName(), info.containerId());
+		} catch (Exception e) {
+			log.error("Falha ao criar servidor WebDAV para cluster '{}': {}", cluster.getName(), e.getMessage());
+			try {
+				portManager.releasePort(webDavPort);
+			} catch (Exception ex) {
+				log.warn("Falha ao liberar porta WebDAV {}: {}", webDavPort, ex.getMessage());
+			}
+		}
 	}
 }
 

@@ -14,8 +14,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.kryptforge.clusterforge.docker.ClusterUserManager;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
+import com.kryptforge.clusterforge.ftp.FtpService.FtpServerInfo;
+import com.kryptforge.clusterforge.webdav.WebDavService;
+import com.kryptforge.clusterforge.webdav.WebDavService.WebDavServerInfo;
 
 class TemplateInstantiationServiceTest {
 
@@ -26,6 +30,8 @@ class TemplateInstantiationServiceTest {
 	private DockerEngineService dockerEngineService;
 	private PortManager portManager;
 	private com.kryptforge.clusterforge.ftp.FtpService ftpService;
+	private WebDavService webDavService;
+	private ClusterUserManager userManager;
 	private TemplateInstantiationService service;
 
 	@BeforeEach
@@ -36,9 +42,14 @@ class TemplateInstantiationServiceTest {
 		dockerEngineService = mock(DockerEngineService.class);
 		portManager = mock(PortManager.class);
 		ftpService = mock(com.kryptforge.clusterforge.ftp.FtpService.class);
+		webDavService = mock(WebDavService.class);
+		userManager = mock(ClusterUserManager.class);
+		when(userManager.generateUid(anyString())).thenReturn(1000);
+		when(userManager.generateGid(anyString())).thenReturn(1000);
+		doNothing().when(userManager).adjustVolumePermissions(any(), anyInt(), anyInt());
 		when(portManager.mapPorts(anyList())).thenAnswer(inv -> inv.getArgument(0));
 		when(portManager.allocatePort()).thenReturn(-1); // Simula falha na alocação de porta FTP para não criar FTP nos testes unitários
-		service = new TemplateInstantiationService(templateProperties, dockerEngineService, portManager, ftpService);
+		service = new TemplateInstantiationService(templateProperties, dockerEngineService, portManager, ftpService, webDavService, userManager);
 	}
 
 	@Test
@@ -365,6 +376,38 @@ class TemplateInstantiationServiceTest {
 			anyList(),
 			anyString()
 		);
+	}
+
+	@Test
+	void instantiate_createsWebDavWhenFtpServerIsProvisioned() throws Exception {
+		Path templateDir = tempDir.resolve("ftp-webdav");
+		Path dataDir = templateDir.resolve("data");
+		Files.createDirectories(dataDir);
+		Files.writeString(templateDir.resolve("docker-compose.yml"),
+			"services:\n" +
+			"  app:\n" +
+			"    image: alpine:latest\n" +
+			"    command: [\"sh\", \"-c\", \"sleep 5\"]\n" +
+			"    volumes:\n" +
+			"      - ./data:/app\n");
+
+		when(portManager.allocatePort()).thenReturn(9000, 9100, -1);
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+			.thenReturn("cid");
+		doNothing().when(dockerEngineService).startContainer("cid");
+
+		FtpServerInfo ftpInfo = new FtpServerInfo("ftp-container", 9000, "ftpuser", "ftppass", dataDir.toString());
+		when(ftpService.createFtpServer(anyString(), anyString(), eq(9000), any(), any())).thenReturn(ftpInfo);
+
+		WebDavServerInfo webDavInfo = new WebDavServerInfo("webdav-container", 9100, "ftpuser", "ftppass", dataDir.toString());
+		when(webDavService.createWebDavServer(anyString(), anyString(), eq(9100), any(), any())).thenReturn(webDavInfo);
+
+		InstantiationResult result = service.instantiate("ftp-webdav", "instance", null, null, null);
+
+		assertNotNull(result.ftpInfo());
+		assertNotNull(result.webDavInfo());
+		assertEquals("webdav-container", result.webDavInfo().containerId());
+		verify(webDavService).createWebDavServer(eq("instance"), anyString(), eq(9100), eq("ftpuser"), eq("ftppass"));
 	}
 }
 

@@ -30,6 +30,17 @@ public interface ClusterService {
 	ClusterInstance updateFtpInfo(UUID id, String ftpContainerId, Integer ftpPort, String ftpUser, String ftpPassword);
 
 	/**
+	 * Atualiza informações do servidor WebDAV vinculado ao cluster.
+	 * @param id ID da instância
+	 * @param webDavContainerId ID do container WebDAV
+	 * @param webDavPort porta HTTP exposta
+	 * @param webDavUser usuário de acesso
+	 * @param webDavPassword senha de acesso
+	 * @return instância atualizada
+	 */
+	ClusterInstance updateWebDavInfo(UUID id, String webDavContainerId, Integer webDavPort, String webDavUser, String webDavPassword);
+
+	/**
 	 * Sincroniza o status da instância com o estado real do container Docker.
 	 * Verifica se o container existe e qual é seu estado atual.
 	 * @param id ID da instância

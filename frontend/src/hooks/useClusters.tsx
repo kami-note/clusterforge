@@ -109,7 +109,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               service: null,
               startupCommand: '',
               port: details.port?.toString() || (details.ports && details.ports.length > 0 ? details.ports[0].toString() : undefined) || details.rootPath,
-              ftpPort: details.ftpPort?.toString(),
+        ftp: details.ftp,
+        webDav: details.webDav,
             };
           } catch (error) {
             const message = handleError(error);
@@ -128,7 +129,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               service: null,
               startupCommand: '',
               port: cluster.port?.toString() || (cluster.ports && cluster.ports.length > 0 ? cluster.ports[0].toString() : undefined),
-              ftpPort: (cluster as any).ftpPort?.toString(),
+              ftp: cluster.ftp,
+              webDav: cluster.webDav,
             };
           }
         })
@@ -214,7 +216,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         service: null,
         startupCommand: '',
         port: clusterDetails.port?.toString() || (clusterDetails.ports && clusterDetails.ports.length > 0 ? clusterDetails.ports[0].toString() : undefined),
-        ftpPort: clusterDetails.ftpPort?.toString(),
+        ftp: clusterDetails.ftp,
+        webDav: clusterDetails.webDav,
         containerId: clusterDetails.containerId, // Preservar containerId para SSE
       };
 

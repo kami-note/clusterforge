@@ -59,35 +59,13 @@ public class ClusterController {
 					}
 					
 					// Cria resposta com status do Docker ao invés do banco
-					return new ClusterResponse(
-						instance.getId(),
-						instance.getName(),
-						instance.getTemplateName(),
-						dockerStatus, // Status do Docker
-						instance.getCreatedAt(),
-						instance.getUpdatedAt(),
-						instance.getEnv(),
-						instance.getPorts(),
-						instance.getVolumes(),
-						instance.getContainerId()
-					);
+					return ClusterResponse.from(instance, dockerStatus);
 				} catch (Exception e) {
 					// Em caso de erro ao buscar status, loga e retorna com status do banco
 					// Não quebra a listagem inteira por causa de um container problemático
 					log.warn("Erro ao obter status do Docker para container {}: {}", 
 						instance.getContainerId(), e.getMessage());
-					return new ClusterResponse(
-						instance.getId(),
-						instance.getName(),
-						instance.getTemplateName(),
-						instance.getStatus(), // Usa status do banco como fallback
-						instance.getCreatedAt(),
-						instance.getUpdatedAt(),
-						instance.getEnv(),
-						instance.getPorts(),
-						instance.getVolumes(),
-						instance.getContainerId()
-					);
+					return ClusterResponse.from(instance);
 				}
 			})
 			.filter(response -> response != null) // Remove containers deletados
@@ -137,18 +115,7 @@ public class ClusterController {
 			? getDockerStatus(instance.getContainerId())
 			: instance.getStatus();
 		
-		return new ClusterResponse(
-			instance.getId(),
-			instance.getName(),
-			instance.getTemplateName(),
-			status,
-			instance.getCreatedAt(),
-			instance.getUpdatedAt(),
-			instance.getEnv(),
-			instance.getPorts(),
-			instance.getVolumes(),
-			instance.getContainerId()
-		);
+		return ClusterResponse.from(instance, status);
 	}
 
 	@PatchMapping(path = "/{id}/status", consumes = MediaType.APPLICATION_JSON_VALUE)

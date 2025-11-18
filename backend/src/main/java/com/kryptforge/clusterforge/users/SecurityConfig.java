@@ -42,10 +42,13 @@ public class SecurityConfig {
 	public org.springframework.security.web.AuthenticationEntryPoint authenticationEntryPoint() {
 		return (request, response, authException) -> {
 			// Não fazer nada se a resposta já foi commitada (evita erro duplo)
-			// Isso pode acontecer quando o CORS já escreveu headers na resposta
 			if (response.isCommitted()) {
 				return;
 			}
+			
+			// Nota: Headers CORS para WebDAV não são mais necessários aqui,
+			// pois o frontend conecta diretamente ao servidor WebDAV
+			
 			response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
 			response.setContentType("application/json");
 			response.setCharacterEncoding("UTF-8");
@@ -61,21 +64,22 @@ public class SecurityConfig {
 	public org.springframework.security.web.access.AccessDeniedHandler accessDeniedHandler() {
 		return (request, response, accessDeniedException) -> {
 			// Não fazer nada se a resposta já foi commitada (evita erro duplo)
-			// Isso pode acontecer quando o CORS já escreveu headers na resposta
 			if (response.isCommitted()) {
-				// Log apenas em debug para não poluir os logs
 				org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecurityConfig.class);
 				log.debug("Tentativa de tratar AccessDeniedException para {} {}, mas resposta já foi commitada", 
 					request.getMethod(), request.getRequestURI());
 				return;
 			}
+			
+			// Nota: Headers CORS para WebDAV não são mais necessários aqui,
+			// pois o frontend conecta diretamente ao servidor WebDAV
+			
 			response.setStatus(HttpServletResponse.SC_FORBIDDEN);
 			response.setContentType("application/json");
 			response.setCharacterEncoding("UTF-8");
 			try {
 				response.getWriter().write("{\"error\":\"Acesso negado\",\"message\":\"Você não tem permissão para acessar este recurso\"}");
 			} catch (Exception e) {
-				// Ignorar se não conseguir escrever (resposta pode ter sido commitada durante a escrita)
 				org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecurityConfig.class);
 				log.debug("Erro ao escrever resposta de acesso negado para {} {}: {}", 
 					request.getMethod(), request.getRequestURI(), e.getMessage());
@@ -101,6 +105,8 @@ public class SecurityConfig {
 				.requestMatchers("/h2-console/**").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/templates").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/templates/**").permitAll()
+				// Nota: Requisições WebDAV não passam mais pelo backend,
+				// o frontend conecta diretamente ao servidor WebDAV
 				.anyRequest().authenticated()
 			)
 			.sessionManagement(session -> session
@@ -157,17 +163,20 @@ public class SecurityConfig {
 		
 		configuration.setAllowedOrigins(origins);
 		
-		// Métodos HTTP permitidos
+		// Métodos HTTP permitidos para a API REST
+		// Nota: Métodos WebDAV (PROPFIND, MKCOL, etc.) não são mais necessários aqui,
+		// pois o frontend conecta diretamente ao servidor WebDAV (que tem seu próprio CORS)
 		configuration.setAllowedMethods(Arrays.asList(
 			HttpMethod.GET.name(),
 			HttpMethod.POST.name(),
 			HttpMethod.PUT.name(),
 			HttpMethod.PATCH.name(),
 			HttpMethod.DELETE.name(),
-			HttpMethod.OPTIONS.name()
+			HttpMethod.OPTIONS.name(),
+			HttpMethod.HEAD.name()
 		));
 		
-		// Headers permitidos
+		// Headers permitidos para a API REST
 		configuration.setAllowedHeaders(Arrays.asList(
 			"Authorization",
 			"Content-Type",

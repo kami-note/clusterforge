@@ -20,10 +20,13 @@ import org.springframework.util.StringUtils;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 
+import com.kryptforge.clusterforge.docker.ClusterUserManager;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.ftp.FtpService;
 import com.kryptforge.clusterforge.ftp.FtpService.FtpServerInfo;
+import com.kryptforge.clusterforge.webdav.WebDavService;
+import com.kryptforge.clusterforge.webdav.WebDavService.WebDavServerInfo;
 
 /**
  * Serviço responsável por instanciar um template (docker-compose.yml simplificado)
@@ -40,16 +43,22 @@ public class TemplateInstantiationService {
 	private final DockerEngineService dockerEngineService;
 	private final PortManager portManager;
 	private final FtpService ftpService;
+	private final WebDavService webDavService;
+	private final ClusterUserManager userManager;
 	private static final Logger log = LoggerFactory.getLogger(TemplateInstantiationService.class);
 
 	public TemplateInstantiationService(TemplateProperties templateProperties,
 										DockerEngineService dockerEngineService,
 										PortManager portManager,
-										FtpService ftpService) {
+										FtpService ftpService,
+										WebDavService webDavService,
+										ClusterUserManager userManager) {
 		this.templateProperties = Objects.requireNonNull(templateProperties, "templateProperties");
 		this.dockerEngineService = Objects.requireNonNull(dockerEngineService, "dockerEngineService");
 		this.portManager = Objects.requireNonNull(portManager, "portManager");
 		this.ftpService = Objects.requireNonNull(ftpService, "ftpService");
+		this.webDavService = Objects.requireNonNull(webDavService, "webDavService");
+		this.userManager = Objects.requireNonNull(userManager, "userManager");
 	}
 
 	public InstantiationResult instantiate(String templateName,
@@ -158,8 +167,18 @@ public class TemplateInstantiationService {
 			log.warn("Falha ao fazer pull da imagem {}: {}", spec.image, e.getMessage());
 		}
 
-		// Identifica ou cria o volume principal para o servidor FTP
+		// Identifica ou cria o volume principal para o servidor FTP/WebDAV
+		// IMPORTANTE: O volume principal deve ser o mesmo que o container principal usa
+		// Se o template usa volumes relativos (./src), precisamos garantir que cada instância
+		// tenha seu próprio volume, não compartilhe o volume do template
 		String mainVolumePath = identifyOrCreateMainVolume(instanceName, binds);
+		
+		// Se o volume principal é do template (caminho relativo resolvido para o template),
+		// criar um volume específico da instância e copiar os arquivos do template
+		String instanceVolumePath = ensureInstanceSpecificVolume(instanceName, mainVolumePath, dir, spec.volumes);
+		
+		// Atualizar binds para usar o volume da instância ao invés do template
+		List<String> instanceBinds = updateBindsForInstance(binds, mainVolumePath, instanceVolumePath);
 
 		// cria e inicia container
 		String containerId = dockerEngineService.createContainer(
@@ -167,7 +186,7 @@ public class TemplateInstantiationService {
 			spec.command,
 			env,
 			ports,
-			binds,
+			instanceBinds,
 			instanceName
 		);
 		try {
@@ -177,8 +196,9 @@ public class TemplateInstantiationService {
 			throw e;
 		}
 
-		// Cria servidor FTP para o container
+		// Cria servidor FTP para o container usando o volume da instância
 		FtpServerInfo ftpInfo = null;
+		WebDavServerInfo webDavInfo = null;
 		int ftpPort = -1;
 		try {
 			ftpPort = portManager.allocatePort();
@@ -186,7 +206,7 @@ public class TemplateInstantiationService {
 				log.warn("Não foi possível alocar porta para servidor FTP do container {}", instanceName);
 			} else {
 				log.info("Criando servidor FTP para container {} na porta {}", instanceName, ftpPort);
-				ftpInfo = ftpService.createFtpServer(instanceName, mainVolumePath, ftpPort, null, null);
+				ftpInfo = ftpService.createFtpServer(instanceName, instanceVolumePath, ftpPort, null, null);
 				log.info("Servidor FTP criado com sucesso para container {}: containerId={}, port={}", 
 					instanceName, ftpInfo.containerId(), ftpInfo.hostPort());
 			}
@@ -204,7 +224,37 @@ public class TemplateInstantiationService {
 			// Não falha a instanciação se o FTP falhar, apenas registra o erro
 		}
 
-		return new InstantiationResult(containerId, ports, ftpInfo);
+		// Cria servidor WebDAV reutilizando as mesmas credenciais do FTP
+		// Usa o mesmo volume da instância que o container principal e o FTP usam
+		if (ftpInfo != null) {
+			int webDavPort = -1;
+			try {
+				webDavPort = portManager.allocatePort();
+				if (webDavPort == -1) {
+					log.warn("Não foi possível alocar porta para WebDAV de {}", instanceName);
+				} else {
+					log.info("Criando servidor WebDAV para container {} na porta {} com volume {}", instanceName, webDavPort, instanceVolumePath);
+					webDavInfo = webDavService.createWebDavServer(
+						instanceName,
+						instanceVolumePath,
+						webDavPort,
+						ftpInfo.ftpUser(),
+						ftpInfo.ftpPassword()
+					);
+				}
+			} catch (Exception e) {
+				log.error("Falha ao criar servidor WebDAV para container {}: {}", instanceName, e.getMessage(), e);
+				if (webDavPort != -1) {
+					try {
+						portManager.releasePort(webDavPort);
+					} catch (Exception ex) {
+						log.warn("Falha ao liberar porta WebDAV {}: {}", webDavPort, ex.getMessage());
+					}
+				}
+			}
+		}
+
+		return new InstantiationResult(containerId, ports, ftpInfo, webDavInfo);
 	}
 
 	private ComposeServiceSpec readFirstService(Path composeFile) throws IOException {
@@ -316,6 +366,169 @@ public class TemplateInstantiationService {
 		}
 		
 		return volumePath.toString();
+	}
+
+	/**
+	 * Garante que a instância tenha seu próprio volume, copiando arquivos do template se necessário.
+	 * Se o volume principal aponta para o diretório do template, cria um volume específico da instância.
+	 * 
+	 * @param instanceName nome da instância
+	 * @param mainVolumePath caminho do volume principal identificado
+	 * @param templateDir diretório do template
+	 * @param templateVolumes lista de volumes do template (para identificar qual é o volume de dados)
+	 * @return caminho do volume da instância (pode ser o mesmo se já for específico da instância)
+	 */
+	private String ensureInstanceSpecificVolume(String instanceName, String mainVolumePath, Path templateDir, List<String> templateVolumes) {
+		Path mainVolume = Path.of(mainVolumePath).toAbsolutePath().normalize();
+		Path templateDirAbs = templateDir.toAbsolutePath().normalize();
+		
+		// Se o volume principal está dentro do diretório do template, precisa criar volume específico
+		if (mainVolume.startsWith(templateDirAbs)) {
+			// Cria volume específico da instância
+			String volumesBasePath = templateProperties.getVolumesBasePath();
+			if (!StringUtils.hasText(volumesBasePath)) {
+				volumesBasePath = "./data/volumes";
+			}
+			Path instanceVolumePath = Path.of(volumesBasePath).toAbsolutePath().resolve(instanceName).normalize();
+			
+			try {
+				// Cria o diretório do volume da instância
+				Files.createDirectories(instanceVolumePath);
+				log.info("📦 Volume específico da instância criado: {}", instanceVolumePath);
+				
+				// Copia arquivos do template para o volume da instância
+				if (Files.exists(mainVolume) && Files.isDirectory(mainVolume)) {
+					// Verifica se há arquivos para copiar
+					boolean hasFiles = false;
+					try (var stream = Files.list(mainVolume)) {
+						hasFiles = stream.findAny().isPresent();
+					}
+					
+					if (hasFiles) {
+						copyDirectory(mainVolume, instanceVolumePath);
+						log.info("✅ Arquivos do template copiados de {} para {} ({} arquivos)", 
+							mainVolume, instanceVolumePath, countFiles(instanceVolumePath));
+					} else {
+						log.warn("⚠️ Diretório do template {} está vazio, nenhum arquivo para copiar", mainVolume);
+					}
+				} else {
+					log.warn("⚠️ Diretório do template {} não existe ou não é um diretório", mainVolume);
+				}
+				
+				// Ajustar permissões do volume para o UID/GID do cluster
+				int uid = userManager.generateUid(instanceName);
+				int gid = userManager.generateGid(instanceName);
+				userManager.adjustVolumePermissions(instanceVolumePath, uid, gid);
+				
+				return instanceVolumePath.toString();
+			} catch (Exception e) {
+				log.error("❌ Falha ao criar volume específico da instância {}: {}", instanceName, e.getMessage(), e);
+				// Retorna o volume original se falhar
+				return mainVolumePath;
+			}
+		}
+		
+		// Se o volume já é específico da instância (não está no template), verifica se tem arquivos
+		if (Files.exists(mainVolume) && Files.isDirectory(mainVolume)) {
+			try (var stream = Files.list(mainVolume)) {
+				long fileCount = stream.count();
+				log.info("📁 Volume da instância {} já existe com {} arquivos", mainVolume, fileCount);
+			} catch (Exception e) {
+				log.warn("Erro ao verificar arquivos no volume {}: {}", mainVolume, e.getMessage());
+			}
+		}
+		
+		return mainVolumePath;
+	}
+	
+	/**
+	 * Conta o número de arquivos em um diretório recursivamente.
+	 */
+	private long countFiles(Path directory) {
+		try {
+			return Files.walk(directory)
+				.filter(Files::isRegularFile)
+				.count();
+		} catch (IOException e) {
+			log.warn("Erro ao contar arquivos em {}: {}", directory, e.getMessage());
+			return 0;
+		}
+	}
+
+	/**
+	 * Atualiza os binds para usar o volume da instância ao invés do volume do template.
+	 * 
+	 * @param originalBinds binds originais
+	 * @param templateVolumePath caminho do volume do template
+	 * @param instanceVolumePath caminho do volume da instância
+	 * @return lista de binds atualizados
+	 */
+	private List<String> updateBindsForInstance(List<String> originalBinds, String templateVolumePath, String instanceVolumePath) {
+		// Se os volumes são iguais, não precisa atualizar
+		if (templateVolumePath.equals(instanceVolumePath)) {
+			return originalBinds;
+		}
+		
+		List<String> updatedBinds = new ArrayList<>();
+		Path templateVolume = Path.of(templateVolumePath).toAbsolutePath().normalize();
+		
+		for (String bind : originalBinds) {
+			if (!StringUtils.hasText(bind)) {
+				updatedBinds.add(bind);
+				continue;
+			}
+			
+			String[] parts = bind.split(":");
+			if (parts.length < 2) {
+				updatedBinds.add(bind);
+				continue;
+			}
+			
+			String hostPath = parts[0];
+			String containerPath = parts[1];
+			String mode = parts.length >= 3 ? ":" + parts[2] : "";
+			
+			// Se o hostPath aponta para o volume do template, substitui pelo volume da instância
+			Path hostPathAbs = Path.of(hostPath).toAbsolutePath().normalize();
+			if (hostPathAbs.startsWith(templateVolume)) {
+				// Substitui o caminho do template pelo caminho da instância
+				Path relativePath = templateVolume.relativize(hostPathAbs);
+				Path newHostPath = Path.of(instanceVolumePath).resolve(relativePath).normalize();
+				updatedBinds.add(newHostPath.toString() + ":" + containerPath + mode);
+				log.debug("Bind atualizado: {} -> {}", bind, newHostPath.toString() + ":" + containerPath + mode);
+			} else {
+				// Mantém o bind original se não aponta para o template
+				updatedBinds.add(bind);
+			}
+		}
+		
+		return updatedBinds;
+	}
+
+	/**
+	 * Copia recursivamente um diretório para outro.
+	 */
+	private void copyDirectory(Path source, Path target) throws IOException {
+		if (!Files.exists(target)) {
+			Files.createDirectories(target);
+		}
+		
+		try (var stream = Files.walk(source)) {
+			stream.forEach(sourcePath -> {
+				try {
+					Path targetPath = target.resolve(source.relativize(sourcePath));
+					if (Files.isDirectory(sourcePath)) {
+						if (!Files.exists(targetPath)) {
+							Files.createDirectories(targetPath);
+						}
+					} else {
+						Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+					}
+				} catch (IOException e) {
+					log.warn("Erro ao copiar {} para {}: {}", sourcePath, target, e.getMessage());
+				}
+			});
+		}
 	}
 
 	private static void requireText(String value, String name) {

@@ -21,6 +21,7 @@ import com.github.dockerjava.api.command.PullImageCmd;
 import com.github.dockerjava.api.command.RemoveContainerCmd;
 import com.github.dockerjava.api.command.StartContainerCmd;
 import com.github.dockerjava.api.command.StopContainerCmd;
+import com.kryptforge.clusterforge.docker.ClusterUserManager;
 import com.kryptforge.clusterforge.docker.DockerConnection;
 
 /**
@@ -34,6 +35,7 @@ class DefaultFtpServiceTest {
 	private DockerConnection dockerConnection;
 	private DockerClient dockerClient;
 	private DefaultFtpService ftpService;
+	private ClusterUserManager userManager;
 	private PullImageCmd pullImageCmd;
 	private CreateContainerCmd createContainerCmd;
 	private CreateContainerResponse createResponse;
@@ -55,6 +57,7 @@ class DefaultFtpServiceTest {
 		when(dockerConnection.getClient()).thenReturn(dockerClient);
 		when(dockerClient.pullImageCmd(anyString())).thenReturn(pullImageCmd);
 		when(dockerClient.createContainerCmd(anyString())).thenReturn(createContainerCmd);
+		when(createContainerCmd.withUser(anyString())).thenReturn(createContainerCmd);
 		when(dockerClient.startContainerCmd(anyString())).thenReturn(startContainerCmd);
 		when(dockerClient.inspectContainerCmd(anyString())).thenReturn(inspectContainerCmd);
 		when(dockerClient.removeContainerCmd(anyString())).thenReturn(mock(RemoveContainerCmd.class));
@@ -70,7 +73,13 @@ class DefaultFtpServiceTest {
 		when(inspectResponse.getState()).thenReturn(state);
 		when(state.getRunning()).thenReturn(true);
 
-		ftpService = new DefaultFtpService(dockerConnection);
+		userManager = mock(ClusterUserManager.class);
+		when(userManager.generateUid(anyString())).thenReturn(1000);
+		when(userManager.generateGid(anyString())).thenReturn(1000);
+		when(userManager.formatUserString(anyInt(), anyInt())).thenReturn("1000:1000");
+		doNothing().when(userManager).adjustVolumePermissions(any(), anyInt(), anyInt());
+
+		ftpService = new DefaultFtpService(dockerConnection, userManager);
 	}
 
 	@Test

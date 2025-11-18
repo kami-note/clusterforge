@@ -23,6 +23,8 @@ import com.kryptforge.clusterforge.clusters.ClusterStatus;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.templates.TemplateProperties;
+import com.kryptforge.clusterforge.webdav.WebDavService;
+import com.kryptforge.clusterforge.webdav.WebDavService.WebDavServerInfo;
 
 /**
  * Testes unitários para FtpRecoveryService.
@@ -37,6 +39,7 @@ class FtpRecoveryServiceTest {
 	private FtpService ftpService;
 	private PortManager portManager;
 	private TemplateProperties templateProperties;
+	private WebDavService webDavService;
 	private FtpRecoveryService recoveryService;
 
 	@BeforeEach
@@ -46,8 +49,12 @@ class FtpRecoveryServiceTest {
 		ftpService = mock(FtpService.class);
 		portManager = mock(PortManager.class);
 		templateProperties = mock(TemplateProperties.class);
+		webDavService = mock(WebDavService.class);
 
 		when(templateProperties.getVolumesBasePath()).thenReturn(tempDir.toString());
+		when(webDavService.createWebDavServer(anyString(), anyString(), anyInt(), anyString(), anyString()))
+			.thenReturn(new WebDavServerInfo("webdav-container", 9100, "webdav", "secret", tempDir.toString()));
+		when(webDavService.isWebDavServerRunning(anyString())).thenReturn(true);
 
 		recoveryService = new FtpRecoveryService(
 			clusterRepository,
@@ -55,6 +62,7 @@ class FtpRecoveryServiceTest {
 			ftpService,
 			portManager,
 			templateProperties,
+			webDavService,
 			true
 		);
 	}
@@ -158,7 +166,7 @@ class FtpRecoveryServiceTest {
 		// Primeira chamada no filtro, segunda no recoverFtpForCluster
 		// Usa thenAnswer para garantir que sempre retorna o inspect
 		when(dockerEngineService.inspectContainer("container-123")).thenAnswer(inv -> inspect);
-		when(portManager.allocatePort()).thenReturn(9000);
+		when(portManager.allocatePort()).thenReturn(9000, 9100);
 		when(clusterRepository.findAll()).thenReturn(List.of(cluster));
 		// Mock do save - pode ser chamado no filtro (se limpar FTP) ou no recoverFtpForCluster
 		when(clusterRepository.save(any(ClusterInstance.class))).thenAnswer(inv -> {
@@ -191,6 +199,13 @@ class FtpRecoveryServiceTest {
 			isNull(),
 			isNull()
 		);
+		verify(webDavService, times(1)).createWebDavServer(
+			eq("test"),
+			anyString(),
+			eq(9100),
+			any(),
+			any()
+		);
 		
 		// Verifica que o save foi chamado para salvar o cluster com informações do FTP
 		ArgumentCaptor<ClusterInstance> clusterCaptor = ArgumentCaptor.forClass(ClusterInstance.class);
@@ -204,6 +219,36 @@ class FtpRecoveryServiceTest {
 				&& "password123".equals(c.getFtpPassword()));
 		
 		assertTrue(foundFtpInfo, "Deveria ter salvo o cluster com informações do FTP");
+	}
+
+	@Test
+	@DisplayName("recoverMissingFtpServers deve criar WebDAV quando FTP existe mas WebDAV não")
+	void recoverMissingFtpServers_shouldCreateWebDavWhenMissing() {
+		Path volumePath = tempDir.resolve("volume-webdav");
+		assertDoesNotThrow(() -> Files.createDirectories(volumePath));
+
+		ClusterInstance cluster = createCluster("with-webdav", ClusterStatus.ACTIVE);
+		cluster.setContainerId("container-321");
+		cluster.setFtpContainerId("ftp-container-321");
+		cluster.setFtpUser("ftpuser");
+		cluster.setFtpPassword("ftppass");
+		cluster.setVolumes(List.of(volumePath.toString() + ":/data"));
+
+		InspectContainerResponse inspect = createInspectResponse(true, volumePath.toString());
+		when(dockerEngineService.inspectContainer("container-321")).thenAnswer(inv -> inspect);
+		when(ftpService.isFtpServerRunning("ftp-container-321")).thenReturn(true);
+		when(clusterRepository.findAll()).thenReturn(List.of(cluster));
+		when(portManager.allocatePort()).thenReturn(9100);
+
+		recoveryService.recoverMissingFtpServers();
+
+		verify(webDavService, atLeastOnce()).createWebDavServer(
+			eq("with-webdav"),
+			anyString(),
+			eq(9100),
+			eq("ftpuser"),
+			eq("ftppass")
+		);
 	}
 
 	@Test
@@ -285,6 +330,7 @@ class FtpRecoveryServiceTest {
 			ftpService,
 			portManager,
 			templateProperties,
+			webDavService,
 			false
 		);
 

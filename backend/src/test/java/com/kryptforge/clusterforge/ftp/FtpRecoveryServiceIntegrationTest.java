@@ -125,6 +125,8 @@ class FtpRecoveryServiceIntegrationTest {
 		assertNotNull(updatedCluster.getFtpPort());
 		assertNotNull(updatedCluster.getFtpUser());
 		assertNotNull(updatedCluster.getFtpPassword());
+		assertNotNull(updatedCluster.getWebDavContainerId(), "WebDAV deve ser provisionado junto com o FTP");
+		assertNotNull(updatedCluster.getWebDavPort());
 
 		// Verifica se o container FTP está rodando
 		assertTrue(ftpService.isFtpServerRunning(updatedCluster.getFtpContainerId()));

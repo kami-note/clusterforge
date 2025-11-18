@@ -23,6 +23,7 @@ import com.kryptforge.clusterforge.templates.dto.TemplateFileEntry;
 import com.kryptforge.clusterforge.users.CurrentUser;
 import com.kryptforge.clusterforge.users.Role;
 import com.kryptforge.clusterforge.users.User;
+import com.kryptforge.clusterforge.webdav.WebDavService;
 
 class DefaultClusterServiceTest {
 
@@ -32,6 +33,7 @@ class DefaultClusterServiceTest {
 	private PortManager portManager;
 	private CurrentUser currentUser;
 	private com.kryptforge.clusterforge.ftp.FtpService ftpService;
+	private WebDavService webDavService;
 	private DefaultClusterService service;
 	private User mockUser;
 
@@ -43,6 +45,7 @@ class DefaultClusterServiceTest {
 		portManager = mock(PortManager.class);
 		currentUser = mock(CurrentUser.class);
 		ftpService = mock(com.kryptforge.clusterforge.ftp.FtpService.class);
+		webDavService = mock(WebDavService.class);
 		
 		// Cria usuário mock para todos os testes
 		mockUser = new User();
@@ -60,7 +63,7 @@ class DefaultClusterServiceTest {
 		// Mock CurrentUser para retornar usuário autenticado
 		when(currentUser.getCurrentUser()).thenReturn(Optional.of(mockUser));
 		
-		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager, currentUser, ftpService);
+		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager, currentUser, ftpService, webDavService);
 	}
 
 	@Test

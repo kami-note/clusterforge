@@ -1,4 +1,4 @@
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,8 +20,14 @@ import {
   Search,
   Upload,
   FileText,
-  File
+  File,
+  Loader2,
+  AlertCircle,
+  Edit
 } from "lucide-react";
+import { webDavService, WebDavFile } from "@/services/webdav.service";
+import { ClusterAccessInfo } from "@/types";
+import { FileEditor } from "./FileEditor";
 
 interface FileNode {
   id: string;
@@ -29,106 +35,26 @@ interface FileNode {
   type: "folder" | "file";
   size?: string;
   modifiedAt: string;
+  path: string;
   children?: FileNode[];
   extension?: string;
 }
 
-const mockStructure: FileNode = {
-  id: "root",
-  name: "Este Computador",
-  type: "folder",
-  modifiedAt: "2025-11-14 09:12",
-  children: [
-    {
-      id: "cluster-drive",
-      name: "Cluster (C:)",
-      type: "folder",
-      modifiedAt: "2025-11-14 08:04",
-      children: [
-        {
-          id: "app",
-          name: "app",
-          type: "folder",
-          modifiedAt: "2025-11-14 07:55",
-          children: [
-            { id: "controllers", name: "controllers", type: "folder", modifiedAt: "2025-11-14 07:00", children: [] },
-            { id: "services", name: "services", type: "folder", modifiedAt: "2025-11-13 18:33", children: [] },
-            { id: "Dockerfile", name: "Dockerfile", type: "file", size: "2 KB", modifiedAt: "2025-11-12 22:10", extension: "docker" }
-          ]
-        },
-        {
-          id: "public",
-          name: "public",
-          type: "folder",
-          modifiedAt: "2025-11-12 11:22",
-          children: [
-            { id: "assets", name: "assets", type: "folder", modifiedAt: "2025-11-12 11:20", children: [] },
-            { id: "index.html", name: "index.html", type: "file", size: "6 KB", modifiedAt: "2025-11-10 21:18", extension: "html" },
-            { id: "favicon.ico", name: "favicon.ico", type: "file", size: "1 KB", modifiedAt: "2025-11-10 21:19", extension: "ico" }
-          ]
-        },
-        {
-          id: "storage",
-          name: "storage",
-          type: "folder",
-          modifiedAt: "2025-11-11 15:44",
-          children: [
-            { id: "logs", name: "logs", type: "folder", modifiedAt: "2025-11-11 15:40", children: [] },
-            { id: "backups", name: "backups", type: "folder", modifiedAt: "2025-11-11 15:41", children: [] }
-          ]
-        }
-      ]
-    },
-    {
-      id: "webdav-drive",
-      name: "WebDAV (W:)",
-      type: "folder",
-      modifiedAt: "2025-11-14 09:00",
-      children: [
-        {
-          id: "shared",
-          name: "shared",
-          type: "folder",
-          modifiedAt: "2025-11-13 13:00",
-          children: [
-            { id: "readme.txt", name: "readme.txt", type: "file", size: "1 KB", modifiedAt: "2025-11-13 12:45", extension: "txt" }
-          ]
-        }
-      ]
-    }
-  ]
-};
-
 interface ClusterFileManagerProps {
   clusterName: string;
+  clusterId: string;
+  webDavCredentials?: ClusterAccessInfo;
   endpointHint?: string;
 }
 
-const flattenNodes = (node: FileNode): Record<string, FileNode> => {
-  const map: Record<string, FileNode> = { [node.id]: node };
-  node.children?.forEach((child) => {
-    Object.assign(map, flattenNodes(child));
-  });
-  return map;
-};
 
-const buildBreadcrumb = (nodeMap: Record<string, FileNode>, nodeId: string): FileNode[] => {
-  const breadcrumb: FileNode[] = [];
-  let current: FileNode | undefined = nodeMap[nodeId];
-
-  while (current) {
-    breadcrumb.unshift(current);
-    const parent = Object.values(nodeMap).find((candidate) => candidate.children?.some((child) => child.id === current!.id));
-    current = parent;
-  }
-
-  return breadcrumb;
-};
-
-const getFolderChildren = (nodeMap: Record<string, FileNode>, nodeId: string): FileNode[] => {
-  const node = nodeMap[nodeId];
-  if (!node || node.type !== "folder") return [];
-  return node.children ?? [];
+// Função auxiliar para formatar tamanho de arquivo
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
 };
 
 const extensionIcon = (extension?: string) => {
@@ -145,18 +71,193 @@ const extensionIcon = (extension?: string) => {
   return <File className="h-4 w-4 text-blue-500" />;
 };
 
-export function ClusterFileManager({ clusterName, endpointHint }: ClusterFileManagerProps) {
-  const nodeMap = useMemo(() => flattenNodes(mockStructure), []);
-  const [selectedFolderId, setSelectedFolderId] = useState<string>("cluster-drive");
+export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, endpointHint }: ClusterFileManagerProps) {
+  // O WebDAV monta o volume em /media dentro do container
+  // Por isso começamos em /media ao invés de /
+  const [currentPath, setCurrentPath] = useState<string>("/media");
+  const [files, setFiles] = useState<WebDavFile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [searchTerm, setSearchTerm] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editingFile, setEditingFile] = useState<{ path: string; name: string } | null>(null);
 
-  const breadcrumb = buildBreadcrumb(nodeMap, selectedFolderId);
-  const children = getFolderChildren(nodeMap, selectedFolderId).filter((child) =>
-    child.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Carregar diretório
+  const loadDirectory = useCallback(async (path: string) => {
+    if (!webDavService.isConnected()) {
+      setError("WebDAV não está conectado");
+      return;
+    }
 
-  const statusText = `${children.length} item${children.length === 1 ? "" : "s"}`;
+    setLoading(true);
+    setError(null);
+    try {
+      const items = await webDavService.listDirectory(path);
+      // Filtrar o próprio diretório (se aparecer na lista)
+      const filteredItems = items.filter(item => item.filename !== path || path === "/");
+      setFiles(filteredItems);
+      setCurrentPath(path);
+    } catch (err: any) {
+      setError(`Erro ao carregar diretório: ${err.message}`);
+      setFiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Conectar ao WebDAV quando as credenciais estiverem disponíveis
+  useEffect(() => {
+    if (webDavCredentials?.username && webDavCredentials?.password && webDavCredentials?.port) {
+      try {
+        webDavService.connect({
+          clusterId,
+          port: webDavCredentials.port,
+          username: webDavCredentials.username,
+          password: webDavCredentials.password,
+        });
+        setConnected(true);
+        loadDirectory(currentPath);
+      } catch (err: any) {
+        setError(`Erro ao conectar ao WebDAV: ${err.message}`);
+        setConnected(false);
+      }
+    } else {
+      setError("Credenciais WebDAV não disponíveis");
+      setConnected(false);
+    }
+
+    return () => {
+      webDavService.disconnect();
+    };
+  }, [clusterId, webDavCredentials, loadDirectory, currentPath]);
+
+  // Navegar para uma pasta
+  const navigateToFolder = useCallback((path: string) => {
+    loadDirectory(path);
+  }, [loadDirectory]);
+
+  // Navegar para pasta pai
+  const navigateUp = useCallback(() => {
+    // Não permitir navegar acima de /media
+    if (currentPath === "/media" || currentPath === "/") return;
+    const parentPath = currentPath.split("/").slice(0, -1).join("/") || "/media";
+    // Garantir que não vá abaixo de /media
+    if (!parentPath.startsWith("/media")) {
+      loadDirectory("/media");
+    } else {
+      loadDirectory(parentPath);
+    }
+  }, [currentPath, loadDirectory]);
+
+  // Criar pasta
+  const handleCreateFolder = useCallback(async () => {
+    const folderName = prompt("Nome da pasta:");
+    if (!folderName || !folderName.trim()) return;
+
+    // Garantir que o caminho comece com /media
+    const basePath = currentPath.startsWith("/media") ? currentPath : "/media";
+    const newPath = basePath === "/media" 
+      ? `/media/${folderName.trim()}`
+      : `${basePath}/${folderName.trim()}`;
+
+    try {
+      await webDavService.createDirectory(newPath);
+      loadDirectory(currentPath); // Recarregar lista
+    } catch (err: any) {
+      setError(`Erro ao criar pasta: ${err.message}`);
+    }
+  }, [currentPath, loadDirectory]);
+
+  // Upload de arquivo
+  const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Garantir que o caminho comece com /media
+    const basePath = currentPath.startsWith("/media") ? currentPath : "/media";
+    const remotePath = basePath === "/media" 
+      ? `/media/${file.name}`
+      : `${basePath}/${file.name}`;
+
+    try {
+      await webDavService.uploadFile(remotePath, file);
+      loadDirectory(currentPath); // Recarregar lista
+    } catch (err: any) {
+      setError(`Erro ao fazer upload: ${err.message}`);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }, [currentPath, loadDirectory]);
+
+  // Converter WebDavFile para FileNode
+  const fileNodes: FileNode[] = useMemo(() => {
+    return files.map((file, index) => {
+      const extension = file.basename.includes(".") 
+        ? file.basename.split(".").pop()?.toLowerCase() 
+        : undefined;
+      
+      return {
+        id: file.filename,
+        name: file.basename,
+        type: file.type,
+        size: file.type === "file" ? formatFileSize(file.size) : undefined,
+        modifiedAt: file.lastmod ? new Date(file.lastmod).toLocaleString("pt-BR") : "",
+        path: file.filename,
+        extension,
+      };
+    });
+  }, [files]);
+
+  // Filtrar arquivos pela busca
+  const filteredFiles = useMemo(() => {
+    if (!searchTerm) return fileNodes;
+    return fileNodes.filter(file => 
+      file.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [fileNodes, searchTerm]);
+
+  // Construir breadcrumb
+  const breadcrumb = useMemo(() => {
+    // Garantir que o caminho comece com /media
+    const path = currentPath.startsWith("/media") ? currentPath : "/media";
+    
+    // Se o caminho é exatamente /media, retornar apenas o item raiz
+    if (path === "/media") {
+      return [
+        { id: "/media", name: "Raiz", type: "folder", modifiedAt: "", path: "/media" }
+      ];
+    }
+    
+    const parts = path.split("/").filter(Boolean);
+    const items: FileNode[] = [
+      { id: "/media", name: "Raiz", type: "folder", modifiedAt: "", path: "/media" }
+    ];
+    
+    // Construir caminho incrementalmente, começando de /media
+    let current = "/media";
+    parts.forEach((part, index) => {
+      // Pular "media" se for o primeiro item (já está na raiz)
+      if (index === 0 && part === "media") {
+        return;
+      }
+      current += `/${part}`;
+      items.push({
+        id: current,
+        name: part,
+        type: "folder",
+        modifiedAt: "",
+        path: current,
+      });
+    });
+
+    return items;
+  }, [currentPath]);
+
+  const statusText = `${filteredFiles.length} item${filteredFiles.length === 1 ? "" : "s"}`;
 
   return (
     <div className="space-y-4">
@@ -170,27 +271,42 @@ export function ClusterFileManager({ clusterName, endpointHint }: ClusterFileMan
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Sincronizar
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => loadDirectory(currentPath)}
+            disabled={loading || !connected}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Carregando..." : "Atualizar"}
           </Button>
-          <Button variant="outline" size="sm">
-            <Cloud className="h-4 w-4 mr-2" />
-            Conectar
-          </Button>
+          {connected ? (
+            <Badge variant="default" className="bg-green-500">
+              <Cloud className="h-3 w-3 mr-1" />
+              Conectado
+            </Badge>
+          ) : (
+            <Badge variant="destructive">
+              <AlertCircle className="h-3 w-3 mr-1" />
+              Desconectado
+            </Badge>
+          )}
         </div>
       </div>
 
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon">
+          <Button 
+            variant="outline" 
+            size="icon"
+            onClick={navigateUp}
+            disabled={currentPath === "/media" || currentPath === "/" || loading}
+            title="Voltar"
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon">
+          <Button variant="outline" size="icon" disabled title="Avançar">
             <ArrowRight className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="icon">
-            <ChevronsUpDown className="h-4 w-4" />
           </Button>
         </div>
         <div className="flex-1 flex items-center gap-2 bg-muted rounded-lg px-2 py-1 border">
@@ -200,7 +316,8 @@ export function ClusterFileManager({ clusterName, endpointHint }: ClusterFileMan
               <div key={node.id} className="flex items-center gap-1">
                 <button
                   className="hover:underline"
-                  onClick={() => node.type === "folder" && setSelectedFolderId(node.id)}
+                  onClick={() => node.type === "folder" && navigateToFolder(node.path)}
+                  disabled={loading}
                 >
                   {node.name}
                 </button>
@@ -222,19 +339,30 @@ export function ClusterFileManager({ clusterName, endpointHint }: ClusterFileMan
 
       <div className="flex justify-between items-center bg-muted rounded-lg px-3 py-2 border">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm">
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={handleCreateFolder}
+            disabled={!connected || loading}
+          >
             <FolderPlus className="h-4 w-4 mr-2" />
             Nova pasta
           </Button>
-          <Button variant="ghost" size="sm">
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!connected || loading}
+          >
             <Upload className="h-4 w-4 mr-2" />
             Upload
           </Button>
-          <Separator orientation="vertical" className="h-6" />
-          <Button variant="ghost" size="sm">
-            <FolderKanban className="h-4 w-4 mr-2" />
-            Mapear WebDAV
-          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleUpload}
+          />
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -254,20 +382,19 @@ export function ClusterFileManager({ clusterName, endpointHint }: ClusterFileMan
         </div>
       </div>
 
-      <div className="grid grid-cols-12 gap-4">
-        <CardLikePanel title="Pastas" className="col-span-3 min-h-[320px]">
-          <ScrollArea className="h-[260px] pr-2">
-            <TreeView
-              nodes={mockStructure.children ?? []}
-              selectedId={selectedFolderId}
-              onSelect={(id) => setSelectedFolderId(id)}
-            />
-          </ScrollArea>
-        </CardLikePanel>
+      {error && (
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            {error}
+          </p>
+        </div>
+      )}
 
-        <CardLikePanel
-          title={`Conteúdo de ${nodeMap[selectedFolderId]?.name ?? ""}`}
-          className="col-span-9 min-h-[320px]"
+      <div className="grid grid-cols-12 gap-4">
+        <CardLikePanel 
+          title={`Conteúdo de ${currentPath === "/" ? "Raiz" : currentPath.split("/").pop()}`}
+          className="col-span-12 min-h-[320px]"
         >
           {viewMode === "list" ? (
             <div className="rounded-lg border bg-background">
@@ -278,62 +405,124 @@ export function ClusterFileManager({ clusterName, endpointHint }: ClusterFileMan
                 <span className="col-span-2 text-right">Tamanho</span>
               </div>
               <ScrollArea className="h-[240px]">
-                {children.length === 0 && (
-                  <div className="text-sm text-muted-foreground px-4 py-6">
-                    Nenhum item encontrado. Utilize o botão Upload ou crie uma nova pasta.
+                {loading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                   </div>
+                ) : filteredFiles.length === 0 ? (
+                  <div className="text-sm text-muted-foreground px-4 py-6">
+                    {searchTerm 
+                      ? "Nenhum item encontrado com esse termo."
+                      : "Diretório vazio. Utilize o botão Upload ou crie uma nova pasta."}
+                  </div>
+                ) : (
+                  filteredFiles.map((item) => (
+                    <div
+                      key={item.id}
+                      className="grid grid-cols-12 items-center px-4 py-2 text-sm hover:bg-muted/70 group"
+                    >
+                      <button
+                        className="col-span-5 flex items-center gap-2 text-left"
+                        onClick={() => item.type === "folder" && navigateToFolder(item.path)}
+                        disabled={loading}
+                      >
+                        {item.type === "folder" ? (
+                          <Folder className="h-4 w-4 text-primary" />
+                        ) : (
+                          extensionIcon(item.extension)
+                        )}
+                        {item.name}
+                      </button>
+                      <span className="col-span-3">{item.type === "folder" ? "Pasta" : item.extension?.toUpperCase() || "Arquivo"}</span>
+                      <span className="col-span-2">{item.modifiedAt || "-"}</span>
+                      <div className="col-span-2 flex items-center justify-end gap-2">
+                        <span className="text-right">{item.type === "folder" ? "-" : item.size ?? "-"}</span>
+                        {item.type === "file" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Usar o caminho completo do arquivo
+                              let filePath = item.path;
+                              // Garantir que comece com /media
+                              if (!filePath.startsWith("/media")) {
+                                filePath = currentPath === "/media" 
+                                  ? `/media/${item.name}`
+                                  : `${currentPath}/${item.name}`;
+                              }
+                              setEditingFile({ path: filePath, name: item.name });
+                            }}
+                            title="Editar arquivo"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))
                 )}
-                {children.map((item) => (
-                  <button
-                    key={item.id}
-                    className="grid grid-cols-12 items-center px-4 py-2 text-sm w-full text-left hover:bg-muted/70"
-                    onClick={() => item.type === "folder" && setSelectedFolderId(item.id)}
-                  >
-                    <span className="col-span-5 flex items-center gap-2">
-                      {item.type === "folder" ? (
-                        <Folder className="h-4 w-4 text-primary" />
-                      ) : (
-                        extensionIcon(item.extension)
-                      )}
-                      {item.name}
-                    </span>
-                    <span className="col-span-3">{item.type === "folder" ? "Pasta" : item.extension?.toUpperCase()}</span>
-                    <span className="col-span-2">{item.modifiedAt}</span>
-                    <span className="col-span-2 text-right">{item.type === "folder" ? "-" : item.size ?? "-"}</span>
-                  </button>
-                ))}
               </ScrollArea>
             </div>
           ) : (
             <ScrollArea className="h-[280px]">
-              <div className="grid grid-cols-3 gap-4 pr-2">
-                {children.map((item) => (
-                  <button
-                    key={item.id}
-                    className="border rounded-lg p-3 text-left hover:border-primary"
-                    onClick={() => item.type === "folder" && setSelectedFolderId(item.id)}
-                  >
-                    <div className="flex items-center gap-3">
-                      {item.type === "folder" ? (
-                        <Folder className="h-10 w-10 text-primary" />
-                      ) : (
-                        extensionIcon(item.extension)
+              {loading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-4 pr-2">
+                  {filteredFiles.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border rounded-lg p-3 text-left hover:border-primary relative group"
+                    >
+                      <button
+                        className="w-full"
+                        onClick={() => item.type === "folder" && navigateToFolder(item.path)}
+                        disabled={loading}
+                      >
+                        <div className="flex items-center gap-3">
+                          {item.type === "folder" ? (
+                            <Folder className="h-10 w-10 text-primary" />
+                          ) : (
+                            extensionIcon(item.extension)
+                          )}
+                          <div className="flex-1">
+                            <p className="font-medium">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {item.type === "folder" ? "Pasta" : `${item.extension?.toUpperCase() || "Arquivo"} • ${item.size || "-"}`}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                      {item.type === "file" && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const filePath = item.path.startsWith("/media") ? item.path : `/media/${item.name}`;
+                            setEditingFile({ path: filePath, name: item.name });
+                          }}
+                          title="Editar arquivo"
+                        >
+                          <Edit className="h-3 w-3" />
+                        </Button>
                       )}
-                      <div>
-                        <p className="font-medium">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {item.type === "folder" ? "Pasta" : `${item.extension?.toUpperCase()} • ${item.size}`}
-                        </p>
-                      </div>
                     </div>
-                  </button>
-                ))}
-                {children.length === 0 && (
-                  <div className="text-sm text-muted-foreground px-4 py-6 col-span-3">
-                    Nenhum item encontrado. Utilize o botão Upload ou crie uma nova pasta.
-                  </div>
-                )}
-              </div>
+                  ))}
+                  {filteredFiles.length === 0 && (
+                    <div className="text-sm text-muted-foreground px-4 py-6 col-span-3">
+                      {searchTerm 
+                        ? "Nenhum item encontrado com esse termo."
+                        : "Diretório vazio. Utilize o botão Upload ou crie uma nova pasta."}
+                    </div>
+                  )}
+                </div>
+              )}
             </ScrollArea>
           )}
         </CardLikePanel>
@@ -345,6 +534,20 @@ export function ClusterFileManager({ clusterName, endpointHint }: ClusterFileMan
           Conectado como <strong>{clusterName}</strong> via {endpointHint ?? "webdav://clusterforge.local"}
         </span>
       </div>
+
+      {/* Editor de Arquivo */}
+      {editingFile && (
+        <FileEditor
+          filePath={editingFile.path}
+          fileName={editingFile.name}
+          isOpen={!!editingFile}
+          onClose={() => setEditingFile(null)}
+          onSave={() => {
+            // Recarregar diretório após salvar
+            loadDirectory(currentPath);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -360,35 +563,5 @@ function CardLikePanel({ title, className, children }: { title: string; classNam
   );
 }
 
-interface TreeViewProps {
-  nodes: FileNode[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-}
-
-function TreeView({ nodes, selectedId, onSelect }: TreeViewProps) {
-  return (
-    <div className="space-y-1">
-      {nodes.map((node) => (
-        <div key={node.id}>
-          <button
-            className={`flex items-center gap-2 text-sm px-2 py-1 rounded w-full text-left ${
-              selectedId === node.id ? "bg-primary/10 text-primary" : "hover:bg-muted"
-            }`}
-            onClick={() => node.type === "folder" && onSelect(node.id)}
-          >
-            {node.type === "folder" ? <Folder className="h-4 w-4" /> : <File className="h-4 w-4" />}
-            {node.name}
-          </button>
-          {node.children && node.children.length > 0 && (
-            <div className="pl-4 border-l ml-2 mt-1">
-              <TreeView nodes={node.children} selectedId={selectedId} onSelect={onSelect} />
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 

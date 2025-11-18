@@ -60,6 +60,8 @@ class ClusterService {
         cpuLimit: c.cpuLimit,
         memoryLimit: c.memoryLimit,
         diskLimit: c.diskLimit,
+        ftp: c.ftp,
+        webDav: c.webDav,
       }));
     } catch (error) {
       // Se acesso negado ao endpoint administrativo, busca clusters do usuário logado
@@ -86,6 +88,8 @@ class ClusterService {
             cpuLimit: c.cpuLimit,
             memoryLimit: c.memoryLimit,
             diskLimit: c.diskLimit,
+            ftp: c.ftp,
+            webDav: c.webDav,
           }));
         }
         // Sem userId disponível, retorna vazio para evitar quebrar a UI
@@ -188,35 +192,6 @@ class ClusterService {
       60000
     );
   }
-
-  /**
-   * Obtém credenciais FTP de um cluster
-   * NOTA: Novo backend pode não ter este endpoint
-   */
-  async getFtpCredentials(clusterId: string | number): Promise<FtpCredentials> {
-    try {
-      return await httpClient.get<FtpCredentials>(`/clusters/${clusterId}/ftp-credentials`);
-    } catch (error: any) {
-      // Se endpoint não existir ou acesso negado, retornar valores padrão ou vazios (não crítico)
-      // 401 também pode ocorrer se o endpoint não existir e requerer autenticação
-      if (error?.status === 404 || error?.status === 403 || error?.status === 401) {
-        return {
-          host: '',
-          port: 21,
-          username: '',
-          password: '',
-        };
-      }
-      throw error;
-    }
-  }
-}
-
-export interface FtpCredentials {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
 }
 
 export const clusterService = new ClusterService();

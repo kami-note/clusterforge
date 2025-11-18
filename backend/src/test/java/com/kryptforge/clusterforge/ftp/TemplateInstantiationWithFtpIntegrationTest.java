@@ -126,6 +126,8 @@ class TemplateInstantiationWithFtpIntegrationTest {
 		assertTrue(result.ftpInfo().hostPort() > 0);
 		assertNotNull(result.ftpInfo().ftpUser());
 		assertNotNull(result.ftpInfo().ftpPassword());
+		assertNotNull(result.webDavInfo(), "Servidor WebDAV deve ser criado automaticamente");
+		assertTrue(result.webDavInfo().hostPort() > 0);
 
 		// Verifica se o container FTP está rodando
 		assertTrue(ftpService.isFtpServerRunning(result.ftpInfo().containerId()));

@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.RestartPolicy;
+import com.kryptforge.clusterforge.docker.ClusterUserManager;
 import com.kryptforge.clusterforge.docker.DockerConnection;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
@@ -38,9 +39,11 @@ public class DefaultFtpService implements FtpService {
 
 	private final DockerClient dockerClient;
 	private final SecureRandom random = new SecureRandom();
+	private final ClusterUserManager userManager;
 
-	public DefaultFtpService(DockerConnection connection) {
+	public DefaultFtpService(DockerConnection connection, ClusterUserManager userManager) {
 		this.dockerClient = Objects.requireNonNull(connection, "connection").getClient();
+		this.userManager = Objects.requireNonNull(userManager, "userManager");
 	}
 
 	@Override
@@ -72,6 +75,13 @@ public class DefaultFtpService implements FtpService {
 				throw new IllegalStateException("Não foi possível criar diretório de volume: " + volumePath, e);
 			}
 		}
+		
+		// Gerar UID/GID específico para este cluster
+		int uid = userManager.generateUid(containerName);
+		int gid = userManager.generateGid(containerName);
+		
+		// Ajustar permissões do volume para o UID/GID do cluster
+		userManager.adjustVolumePermissions(volume, uid, gid);
 
 		// Nome do container FTP
 		String ftpContainerName = containerName + "-ftp";
@@ -130,9 +140,10 @@ public class DefaultFtpService implements FtpService {
 			.withPortBindings(ports)
 			.withRestartPolicy(RestartPolicy.alwaysRestart());
 
-		// Cria o container FTP
+		// Cria o container FTP com UID/GID específico do cluster
 		CreateContainerResponse response = dockerClient.createContainerCmd(FTP_IMAGE)
 			.withName(ftpContainerName)
+			.withUser(userManager.formatUserString(uid, gid))
 			.withHostConfig(hostConfig)
 			.withExposedPorts(ftpExposedPort)
 			.withEnv(envList)

@@ -34,6 +34,13 @@ export interface RegisterRequest {
 // ============================================
 export type ClusterStatus = 'running' | 'stopped' | 'restarting' | 'error' | 'pending' | 'active' | 'deleted';
 
+export interface ClusterAccessInfo {
+  containerId?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+}
+
 export interface Cluster {
   id: string;
   name: string;
@@ -47,7 +54,8 @@ export interface Cluster {
   service: ServiceTemplate | null;
   startupCommand: string;
   port?: string;
-  ftpPort?: string;
+  ftp?: ClusterAccessInfo;
+  webDav?: ClusterAccessInfo;
   containerId?: string; // ID do container Docker para SSE
 }
 
@@ -182,7 +190,6 @@ export interface ClusterListItem {
   name: string;
   status?: string;
   port?: number;
-  ftpPort?: number;
   rootPath?: string;
   userId?: number;
   owner?: {
@@ -198,6 +205,8 @@ export interface ClusterListItem {
   ports?: number[];
   volumes?: string[];
   containerId?: string; // ID do container Docker para SSE
+  ftp?: ClusterAccessInfo;
+  webDav?: ClusterAccessInfo;
 }
 
 export interface ClusterDetailsResponse {
@@ -224,6 +233,8 @@ export interface ClusterDetailsResponse {
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;
+  ftp?: ClusterAccessInfo;
+  webDav?: ClusterAccessInfo;
 }
 
 export interface CreateClusterRequest {
