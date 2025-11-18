@@ -34,6 +34,19 @@ export interface UpdateClusterLimitsRequest {
 
 class ClusterService {
   /**
+   * Garante que o cluster possui um containerId disponível para operações Docker.
+   */
+  private async ensureClusterContainer(
+    clusterId: string | number
+  ): Promise<{ cluster: ClusterDetailsResponse; containerId: string }> {
+    const cluster = await this.getCluster(clusterId);
+    if (!cluster?.containerId) {
+      throw new Error('Cluster não possui containerId ativo. Sincronize ou reinstale o servidor.');
+    }
+    return { cluster, containerId: cluster.containerId };
+  }
+
+  /**
    * Lista todos os clusters
    * Admin: vê todos os clusters
    * User: vê apenas seus clusters
@@ -166,31 +179,29 @@ class ClusterService {
   /**
    * Inicia um cluster
    * Usa timeout maior (60s) pois operações de start podem demorar
-   * NOVO BACKEND: Atualiza status via PATCH /clusters/{id}/status
    */
   async startCluster(clusterId: string | number): Promise<ClusterDetailsResponse> {
-    // Novo backend não tem endpoint específico de start/stop
-    // Usa updateStatus para ACTIVE
-    return httpClient.patch<ClusterDetailsResponse>(
-      `/clusters/${clusterId}/status`, 
-      { status: 'ACTIVE' }, 
+    const { containerId } = await this.ensureClusterContainer(clusterId);
+    await httpClient.post<void>(
+      `/docker/containers/${containerId}/start`,
+      undefined,
       60000
     );
+    return this.getCluster(clusterId);
   }
 
   /**
    * Para um cluster
    * Usa timeout maior (60s) pois operações de stop podem demorar
-   * NOVO BACKEND: Atualiza status via PATCH /clusters/{id}/status
    */
-  async stopCluster(clusterId: string | number): Promise<ClusterDetailsResponse> {
-    // Novo backend não tem endpoint específico de start/stop
-    // Usa updateStatus para STOPPED
-    return httpClient.patch<ClusterDetailsResponse>(
-      `/clusters/${clusterId}/status`, 
-      { status: 'STOPPED' }, 
+  async stopCluster(clusterId: string | number, timeoutSeconds: number = 10): Promise<ClusterDetailsResponse> {
+    const { containerId } = await this.ensureClusterContainer(clusterId);
+    await httpClient.post<void>(
+      `/docker/containers/${containerId}/stop?timeout=${encodeURIComponent(timeoutSeconds)}`,
+      undefined,
       60000
     );
+    return this.getCluster(clusterId);
   }
 }
 
