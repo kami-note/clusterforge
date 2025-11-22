@@ -24,6 +24,7 @@ import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.api.model.Ports.Binding;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.InternetProtocol;
+import com.github.dockerjava.api.model.RestartPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,7 +64,11 @@ public class DefaultDockerEngineService implements DockerEngineService {
 								  Map<String, String> environment,
 								  List<String> portBindings,
 								  List<String> bindMounts,
-								  String name) {
+								  String name,
+								  String workingDir,
+								  Boolean stdinOpen,
+								  Boolean tty,
+								  String restart) {
 		requireText(image, "image");
 
 		List<Bind> binds = new ArrayList<>();
@@ -116,6 +121,14 @@ public class DefaultDockerEngineService implements DockerEngineService {
 			.withBinds(binds)
 			.withPortBindings(ports);
 
+		// Configura restart policy se especificado
+		if (StringUtils.hasText(restart)) {
+			RestartPolicy restartPolicy = parseRestartPolicy(restart);
+			if (restartPolicy != null) {
+				hostConfig = hostConfig.withRestartPolicy(restartPolicy);
+			}
+		}
+
 		var createCmd = dockerClient.createContainerCmd(image)
 			.withHostConfig(hostConfig);
 
@@ -129,6 +142,15 @@ public class DefaultDockerEngineService implements DockerEngineService {
 		}
 		if (StringUtils.hasText(name)) {
 			createCmd.withName(name);
+		}
+		if (StringUtils.hasText(workingDir)) {
+			createCmd.withWorkingDir(workingDir);
+		}
+		if (stdinOpen != null) {
+			createCmd.withStdinOpen(stdinOpen);
+		}
+		if (tty != null) {
+			createCmd.withTty(tty);
 		}
 		if (!CollectionUtils.isEmpty(environment)) {
 			List<String> envList = environment.entrySet().stream()
@@ -235,6 +257,29 @@ public class DefaultDockerEngineService implements DockerEngineService {
 			throw new IllegalStateException("Falha ao executar comando no container " + containerId, e);
 		}
 		return sb.toString();
+	}
+
+	private static RestartPolicy parseRestartPolicy(String restart) {
+		if (restart == null || restart.trim().isEmpty()) {
+			return null;
+		}
+		String r = restart.trim().toLowerCase();
+		switch (r) {
+			case "no":
+			case "false":
+				return RestartPolicy.noRestart();
+			case "always":
+				return RestartPolicy.alwaysRestart();
+			case "on-failure":
+			case "on_failure":
+				return RestartPolicy.onFailureRestart(0);
+			case "unless-stopped":
+			case "unless_stopped":
+				return RestartPolicy.unlessStoppedRestart();
+			default:
+				log.warn("Política de restart desconhecida: '{}', usando 'no'", restart);
+				return RestartPolicy.noRestart();
+		}
 	}
 
 	private static void requireText(String value, String name) {

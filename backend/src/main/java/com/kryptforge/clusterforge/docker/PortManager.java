@@ -11,9 +11,13 @@ import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.kryptforge.clusterforge.clusters.ClusterInstance;
+import com.kryptforge.clusterforge.clusters.ClusterRepository;
+
 /**
  * Gerencia alocação dinâmica de portas para containers Docker.
  * Verifica disponibilidade e aloca portas de um range configurável.
+ * Considera portas alocadas no banco de dados (incluindo clusters desligados).
  */
 @Component
 public class PortManager {
@@ -22,12 +26,15 @@ public class PortManager {
 	private final int portRangeStart;
 	private final int portRangeEnd;
 	private final Set<Integer> allocatedPorts = new HashSet<>();
+	private final ClusterRepository clusterRepository;
 
 	public PortManager(
 		@Value("${clusterforge.ports.range.start:9000}") int portRangeStart,
-		@Value("${clusterforge.ports.range.end:9999}") int portRangeEnd) {
+		@Value("${clusterforge.ports.range.end:9999}") int portRangeEnd,
+		ClusterRepository clusterRepository) {
 		this.portRangeStart = portRangeStart;
 		this.portRangeEnd = portRangeEnd;
+		this.clusterRepository = clusterRepository;
 		
 		if (portRangeStart < 1024 || portRangeStart > 65535) {
 			throw new IllegalArgumentException("portRangeStart deve estar entre 1024 e 65535");
@@ -76,6 +83,7 @@ public class PortManager {
 
 	/**
 	 * Verifica se uma porta específica está disponível.
+	 * Considera portas alocadas em memória, portas no banco de dados e portas em uso no sistema.
 	 * @param port porta a verificar
 	 * @return true se disponível, false caso contrário
 	 */
@@ -83,7 +91,13 @@ public class PortManager {
 		if (port < 1024 || port > 65535) {
 			return false;
 		}
+		// Verifica se está alocada em memória
 		if (allocatedPorts.contains(port)) {
+			return false;
+		}
+		// Verifica se está sendo usada no banco de dados (incluindo clusters desligados)
+		if (isPortUsedInDatabase(port)) {
+			log.debug("Porta {} está sendo usada no banco de dados", port);
 			return false;
 		}
 		// Verifica se a porta está realmente livre no sistema
@@ -92,6 +106,60 @@ public class PortManager {
 		} catch (Exception e) {
 			return false;
 		}
+	}
+
+	/**
+	 * Verifica se uma porta está sendo usada por algum cluster no banco de dados.
+	 * Busca em todos os clusters, independente do status (incluindo desligados).
+	 * @param port porta a verificar
+	 * @return true se a porta está sendo usada, false caso contrário
+	 */
+	private boolean isPortUsedInDatabase(int port) {
+		try {
+			Set<Integer> usedPorts = getAllUsedPortsFromDatabase();
+			return usedPorts.contains(port);
+		} catch (Exception e) {
+			log.warn("Erro ao verificar portas no banco de dados: {}", e.getMessage());
+			// Em caso de erro, retorna false (porta não está em uso no banco)
+			// O erro será logado e a verificação do sistema operacional ainda será feita
+			return false;
+		}
+	}
+
+	/**
+	 * Busca todas as portas usadas no banco de dados.
+	 * Inclui portas do container principal (ports), portas FTP (ftpPort) e portas WebDAV (webDavPort).
+	 * @return conjunto de portas usadas no banco de dados
+	 */
+	private Set<Integer> getAllUsedPortsFromDatabase() {
+		Set<Integer> usedPorts = new HashSet<>();
+		
+		try {
+			List<ClusterInstance> allClusters = clusterRepository.findAll();
+			
+			for (ClusterInstance cluster : allClusters) {
+				// Adiciona portas do container principal
+				if (cluster.getPorts() != null) {
+					usedPorts.addAll(cluster.getPorts());
+				}
+				
+				// Adiciona porta FTP se existir
+				if (cluster.getFtpPort() != null) {
+					usedPorts.add(cluster.getFtpPort());
+				}
+				
+				// Adiciona porta WebDAV se existir
+				if (cluster.getWebDavPort() != null) {
+					usedPorts.add(cluster.getWebDavPort());
+				}
+			}
+			
+			log.debug("Portas encontradas no banco de dados: {}", usedPorts.size());
+		} catch (Exception e) {
+			log.error("Erro ao buscar portas do banco de dados: {}", e.getMessage(), e);
+		}
+		
+		return usedPorts;
 	}
 
 	/**

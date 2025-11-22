@@ -25,7 +25,11 @@ public interface DockerEngineService {
 						   Map<String, String> environment,
 						   List<String> portBindings,
 						   List<String> bindMounts,
-						   String name);
+						   String name,
+						   String workingDir,
+						   Boolean stdinOpen,
+						   Boolean tty,
+						   String restart);
 	void startContainer(String containerId);
 	void stopContainer(String containerId, int timeoutSeconds);
 	void removeContainer(String containerId, boolean force, boolean removeVolumes);

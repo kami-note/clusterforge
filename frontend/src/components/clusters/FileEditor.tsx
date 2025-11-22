@@ -50,13 +50,13 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
 
   const hasChanges = content !== originalContent;
 
   const handleSave = useCallback(async () => {
     if (content === originalContent) {
-      // Nenhuma alteração
       onClose();
       return;
     }

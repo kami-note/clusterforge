@@ -69,7 +69,11 @@ class FtpRecoveryServiceIntegrationTest {
 			java.util.Map.of(),
 			java.util.List.of(),
 			java.util.List.of(),
-			"test-recovery-" + System.currentTimeMillis()
+			"test-recovery-" + System.currentTimeMillis(),
+			null,
+			null,
+			null,
+			null
 		);
 		dockerEngineService.startContainer(testContainerId);
 

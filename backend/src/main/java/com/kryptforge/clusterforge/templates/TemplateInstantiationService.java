@@ -187,7 +187,11 @@ public class TemplateInstantiationService {
 			env,
 			ports,
 			instanceBinds,
-			instanceName
+			instanceName,
+			spec.workingDir,
+			spec.stdinOpen,
+			spec.tty,
+			spec.restart
 		);
 		try {
 			dockerEngineService.startContainer(containerId);
@@ -288,12 +292,26 @@ public class TemplateInstantiationService {
 			spec.environment = asStringMap(svc.get("environment"));
 			spec.ports = asStringList(svc.get("ports"));
 			spec.volumes = asStringList(svc.get("volumes"));
+			spec.workingDir = asText(svc.get("working_dir"));
+			spec.stdinOpen = asBoolean(svc.get("stdin_open"));
+			spec.tty = asBoolean(svc.get("tty"));
+			spec.restart = asText(svc.get("restart"));
 			return spec;
 		}
 	}
 
 	private static String asText(Object o) {
 		return o == null ? null : String.valueOf(o);
+	}
+
+	private static Boolean asBoolean(Object o) {
+		if (o == null) return null;
+		if (o instanceof Boolean) return (Boolean) o;
+		if (o instanceof String) {
+			String s = ((String) o).trim().toLowerCase();
+			return "true".equals(s) || "1".equals(s) || "yes".equals(s);
+		}
+		return null;
 	}
 
 	private static Map<String, String> asStringMap(Object o) {
@@ -543,6 +561,10 @@ public class TemplateInstantiationService {
 		Map<String, String> environment = new LinkedHashMap<>();
 		List<String> ports = new ArrayList<>();
 		List<String> volumes = new ArrayList<>();
+		String workingDir;
+		Boolean stdinOpen;
+		Boolean tty;
+		String restart;
 	}
 }
 

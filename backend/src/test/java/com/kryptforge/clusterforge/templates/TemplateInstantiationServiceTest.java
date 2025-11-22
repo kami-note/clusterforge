@@ -68,7 +68,11 @@ class TemplateInstantiationServiceTest {
 			anyMap(),
 			anyList(),
 			anyList(),
-			eq("my-instance")
+			eq("my-instance"),
+			any(),
+			any(),
+			any(),
+			any()
 		)).thenReturn("container-id-123");
 		doNothing().when(dockerEngineService).startContainer("container-id-123");
 
@@ -82,7 +86,11 @@ class TemplateInstantiationServiceTest {
 			anyMap(),
 			anyList(),
 			anyList(),
-			eq("my-instance")
+			eq("my-instance"),
+			any(),
+			any(),
+			any(),
+			any()
 		);
 		verify(dockerEngineService).startContainer("container-id-123");
 	}
@@ -99,7 +107,7 @@ class TemplateInstantiationServiceTest {
 			"      VAR1: value1\n" +
 			"      VAR2: value2\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
@@ -117,7 +125,11 @@ class TemplateInstantiationServiceTest {
 			}),
 			anyList(),
 			anyList(),
-			anyString()
+			anyString(),
+			any(),
+			any(),
+			any(),
+			any()
 		);
 	}
 
@@ -133,7 +145,7 @@ class TemplateInstantiationServiceTest {
 			"    volumes:\n" +
 			"      - ./src:/var/www/html:ro\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
@@ -148,7 +160,11 @@ class TemplateInstantiationServiceTest {
 				List<String> b = (List<String>) binds;
 				return b.size() == 1 && b.get(0).contains("src") && b.get(0).endsWith(":ro");
 			}),
-			anyString()
+			anyString(),
+			any(),
+			any(),
+			any(),
+			any()
 		);
 	}
 
@@ -163,7 +179,7 @@ class TemplateInstantiationServiceTest {
 			"    volumes:\n" +
 			"      - data:/var/data\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
@@ -178,7 +194,11 @@ class TemplateInstantiationServiceTest {
 				List<String> b = (List<String>) binds;
 				return b.size() == 1 && b.get(0).contains("volumes");
 			}),
-			anyString()
+			anyString(),
+			any(),
+			any(),
+			any(),
+			any()
 		);
 	}
 
@@ -195,7 +215,7 @@ class TemplateInstantiationServiceTest {
 			"    volumes:\n" +
 			"      - ./old:/old\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
@@ -210,7 +230,11 @@ class TemplateInstantiationServiceTest {
 			anyMap(),
 			eq(overridePorts),
 			eq(overrideBinds),
-			anyString()
+			anyString(),
+			any(),
+			any(),
+			any(),
+			any()
 		);
 	}
 
@@ -226,7 +250,7 @@ class TemplateInstantiationServiceTest {
 			"      - KEY1=value1\n" +
 			"      - KEY2=value2\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
@@ -241,7 +265,11 @@ class TemplateInstantiationServiceTest {
 			}),
 			anyList(),
 			anyList(),
-			anyString()
+			anyString(),
+			any(),
+			any(),
+			any(),
+			any()
 		);
 	}
 
@@ -320,7 +348,7 @@ class TemplateInstantiationServiceTest {
 			"    image: nginx:latest\n");
 
 		doThrow(new RuntimeException("Network error")).when(dockerEngineService).pullImage(anyString());
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
@@ -328,7 +356,7 @@ class TemplateInstantiationServiceTest {
 		InstantiationResult result = service.instantiate("app", "instance", null, null, null);
 		assertEquals("cid", result.containerId());
 		verify(dockerEngineService).pullImage("nginx:latest");
-		verify(dockerEngineService).createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString());
+		verify(dockerEngineService).createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any());
 	}
 
 	@Test
@@ -340,7 +368,7 @@ class TemplateInstantiationServiceTest {
 			"  app:\n" +
 			"    image: nginx:latest\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doThrow(new RuntimeException("Start failed")).when(dockerEngineService).startContainer("cid");
 
@@ -359,7 +387,7 @@ class TemplateInstantiationServiceTest {
 			"    image: nginx:latest\n" +
 			"    command: [\"nginx\", \"-g\", \"daemon off;\"]\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
@@ -374,7 +402,11 @@ class TemplateInstantiationServiceTest {
 			anyMap(),
 			anyList(),
 			anyList(),
-			anyString()
+			anyString(),
+			any(),
+			any(),
+			any(),
+			any()
 		);
 	}
 
@@ -392,7 +424,7 @@ class TemplateInstantiationServiceTest {
 			"      - ./data:/app\n");
 
 		when(portManager.allocatePort()).thenReturn(9000, 9100, -1);
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer("cid");
 

@@ -180,14 +180,99 @@ class WebDavService {
     try {
       const normalizedPath = this.normalizePath(remotePath);
       
-      await this.client.putFileContents(normalizedPath, content, {
-        overwrite: true,
-      });
+      // Verificar se o arquivo existe primeiro (para arquivos existentes, não precisamos criar diretório pai)
+      let fileExists = false;
+      try {
+        await this.client.stat(normalizedPath);
+        fileExists = true;
+      } catch (statError: any) {
+        // Arquivo não existe, precisamos garantir que o diretório pai existe
+        fileExists = false;
+        
+        // Garantir que o diretório pai existe antes de salvar (apenas para novos arquivos)
+        const lastSlashIndex = normalizedPath.lastIndexOf('/');
+        if (lastSlashIndex > 0) {
+          const parentDir = normalizedPath.substring(0, lastSlashIndex);
+          if (parentDir && parentDir !== '/') {
+            try {
+              await this.client.stat(parentDir);
+            } catch (parentStatError: any) {
+              // Se o diretório pai não existir, criá-lo recursivamente
+              if (parentStatError.response?.status === 404) {
+                const segments = parentDir.split('/').filter(Boolean);
+                let currentPath = '';
+                for (const segment of segments) {
+                  currentPath += `/${segment}`;
+                  try {
+                    await this.client.stat(currentPath);
+                  } catch (e: any) {
+                    if (e.response?.status === 404) {
+                      await this.client.createDirectory(currentPath);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // O servidor WebDAV (hacdias/webdav) parece ter uma limitação que impede PUT direto
+      // em arquivos existentes. A estratégia DELETE+PUT funciona como workaround.
+      if (fileExists) {
+        await this.client.deleteFile(normalizedPath);
+        // Aguardar um pouco para garantir que o DELETE foi processado
+        await new Promise(resolve => setTimeout(resolve, 100));
+        // Agora fazer PUT
+        await this.client.putFileContents(normalizedPath, content);
+      } else {
+        // Para novos arquivos, tentar PUT direto primeiro
+        try {
+          await this.client.putFileContents(normalizedPath, content, {
+            overwrite: true,
+          });
+        } catch (putError: any) {
+          // Se falhar, pode ser que o arquivo tenha sido criado entre a verificação e o PUT
+          // Tentar DELETE+PUT como fallback
+          if (putError.response?.status === 404 || putError.response?.status === 409) {
+            try {
+              await this.client.deleteFile(normalizedPath);
+            } catch (deleteError: any) {
+              // Ignorar erro se o arquivo não existir
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+            await this.client.putFileContents(normalizedPath, content);
+          } else {
+            throw putError;
+          }
+        }
+      }
     } catch (error: any) {
-      // Melhorar mensagem de erro
-      const errorMessage = error.response?.status === 403 
-        ? 'Permissão negada. Verifique se o usuário tem permissão de escrita.'
-        : error.message;
+      // Melhorar mensagem de erro com mais detalhes
+      let errorMessage = error.message || 'Erro desconhecido';
+      
+      if (error.response) {
+        const status = error.response.status;
+        if (status === 403) {
+          errorMessage = 'Permissão negada. Verifique se o usuário tem permissão de escrita.';
+        } else if (status === 404) {
+          errorMessage = `Arquivo não encontrado no servidor WebDAV: ${remotePath}. Verifique se o caminho está correto.`;
+        } else if (status === 409) {
+          errorMessage = 'Conflito ao salvar arquivo. O recurso pode estar bloqueado ou em uso.';
+        } else if (status === 507) {
+          errorMessage = 'Espaço insuficiente no servidor.';
+        } else {
+          errorMessage = `Erro HTTP ${status}: ${error.response.statusText || error.message}`;
+        }
+      } else {
+        // Erro não relacionado a HTTP (pode ser erro de validação ou tipo)
+        if (error.message?.includes('Cannot calculate data length') || error.message?.includes('Invalid type')) {
+          errorMessage = `Tipo de dado inválido: ${error.message}. Verifique se o conteúdo está em um formato válido.`;
+        } else if (error.message?.includes('404') || error.message?.includes('Not Found')) {
+          errorMessage = `Arquivo não encontrado: ${remotePath}. Verifique se o caminho está correto.`;
+        }
+      }
+      
       throw new Error(`Erro ao salvar arquivo ${this.normalizePath(remotePath)}: ${errorMessage}`);
     }
   }
