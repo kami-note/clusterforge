@@ -46,6 +46,9 @@ class ClusterServiceIntegrationTest {
 	private ClusterService clusterService;
 
 	@Autowired
+	private ClusterRepository clusterRepository;
+
+	@Autowired
 	private DockerEngineService dockerEngineService;
 
 	@Autowired
@@ -174,8 +177,9 @@ class ClusterServiceIntegrationTest {
 				.toList();
 		}
 
-		// Atualiza instância com containerId e portas
-		instance = clusterService.updateContainerId(instance.getId(), result.containerId());
+		// Atualiza instância com containerId e portas (diretamente via repositório, apenas para uso interno)
+		instance.setContainerId(result.containerId());
+		instance = clusterRepository.save(instance);
 		instance = clusterService.updateParams(instance.getId(), 
 			new ClusterService.ClusterParams(
 				Map.of("VAR1", "value1"),

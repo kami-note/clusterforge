@@ -44,6 +44,9 @@ public class DefaultWebDavService implements WebDavService {
 	
 	@Value("${clusterforge.cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://localhost:3002,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002}")
 	private String corsAllowedOrigins;
+	
+	@Value("${clusterforge.webdav.cors.allow-all:true}")
+	private boolean corsAllowAll;
 
 	public DefaultWebDavService(DockerConnection connection, WebDavProperties properties, ClusterUserManager userManager) {
 		this.dockerClient = Objects.requireNonNull(connection, "connection").getClient();
@@ -129,7 +132,7 @@ public class DefaultWebDavService implements WebDavService {
 		
 		// Configurar CORS para permitir acesso direto do frontend
 		// A imagem hacdias/webdav usa arquivo de configuração YAML para CORS e permissões (CRUD)
-		String corsOrigins = corsAllowedOrigins != null ? corsAllowedOrigins : 
+		String corsOrigins = corsAllowedOrigins != null && !corsAllowedOrigins.trim().isEmpty() ? corsAllowedOrigins : 
 			"http://localhost:3000,http://localhost:3001,http://localhost:3002,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002";
 		
 		// Criar diretório para arquivo de configuração WebDAV
@@ -137,6 +140,7 @@ public class DefaultWebDavService implements WebDavService {
 		if (!Files.exists(configDir)) {
 			try {
 				Files.createDirectories(configDir);
+				log.info("Diretório de configuração WebDAV criado: {}", configDir);
 			} catch (Exception e) {
 				log.warn("Não foi possível criar diretório de configuração WebDAV: {}", e.getMessage());
 			}
@@ -145,11 +149,14 @@ public class DefaultWebDavService implements WebDavService {
 		// Criar arquivo de configuração YAML para CORS
 		Path configFile = configDir.resolve(containerName + "-webdav-config.yaml");
 		try {
-			String yamlConfig = buildWebDavConfigYaml(username, password, corsOrigins);
-			Files.writeString(configFile, yamlConfig);
-			log.info("Arquivo de configuração WebDAV criado: {}", configFile);
+			// Se permitir todas as origens, usar wildcard
+			String corsOriginsForConfig = corsAllowAll ? "*" : corsOrigins;
+			String yamlConfig = buildWebDavConfigYaml(username, password, corsOriginsForConfig);
+			Files.writeString(configFile, yamlConfig, java.nio.charset.StandardCharsets.UTF_8);
+			log.info("Arquivo de configuração WebDAV criado: {} (CORS: {})", configFile, 
+				corsAllowAll ? "todas as origens permitidas" : corsOrigins);
 		} catch (Exception e) {
-			log.warn("Não foi possível criar arquivo de configuração WebDAV: {}", e.getMessage());
+			log.error("Não foi possível criar arquivo de configuração WebDAV: {}", e.getMessage(), e);
 		}
 		
 		// Montar volumes: dados e arquivo de configuração
@@ -263,26 +270,42 @@ public class DefaultWebDavService implements WebDavService {
 	
 	/**
 	 * Constrói arquivo de configuração YAML para o servidor WebDAV com CORS habilitado e permissões CRUD.
+	 * Suporta tanto allowed_hosts quanto allowed_origins para compatibilidade com diferentes versões.
 	 */
 	private String buildWebDavConfigYaml(String username, String password, String corsOrigins) {
 		// Parse das origens para formato de lista YAML
 		String[] origins = corsOrigins.split(",");
 		java.util.List<String> originList = new java.util.ArrayList<>();
+		boolean allowAllOrigins = false;
+		
 		for (String origin : origins) {
-			originList.add("    - " + origin.trim());
+			String trimmed = origin.trim();
+			// Permite todas as origens se configurado explicitamente
+			if (trimmed.equals("*") || trimmed.isEmpty()) {
+				allowAllOrigins = true;
+				break;
+			}
+			originList.add("    - " + trimmed);
 		}
+		
 		String originsYaml = String.join("\n", originList);
 		
-		return String.format("""
-address: 0.0.0.0
-port: 80
-directory: /media
-permissions: CRUD
-users:
-  - username: %s
-    password: %s
-    directory: /media
-    permissions: CRUD
+		// Se não houver origens específicas e não for para permitir todas, usar localhost padrão
+		if (originList.isEmpty() && !allowAllOrigins) {
+			originsYaml = """
+    - http://localhost:3000
+    - http://localhost:3001
+    - http://localhost:3002
+    - http://127.0.0.1:3000
+    - http://127.0.0.1:3001
+    - http://127.0.0.1:3002""";
+		}
+		
+		// Construir seção CORS - tentar ambos os formatos para compatibilidade
+		String corsSection;
+		if (allowAllOrigins) {
+			// Permitir todas as origens usando wildcard
+			corsSection = """
 cors:
   enabled: true
   credentials: true
@@ -294,6 +317,50 @@ cors:
     - Destination
     - Origin
     - X-Requested-With
+    - Overwrite
+    - If
+    - Lock-Token
+    - Timeout
+  allowed_hosts:
+    - '*'
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - OPTIONS
+    - PROPFIND
+    - MKCOL
+    - MOVE
+    - COPY
+    - HEAD
+    - PATCH
+    - LOCK
+    - UNLOCK
+  exposed_headers:
+    - Content-Length
+    - Content-Range
+    - Content-Type
+    - DAV
+    - ETag
+    - Location""";
+		} else {
+			corsSection = String.format("""
+cors:
+  enabled: true
+  credentials: true
+  allowed_headers:
+    - Depth
+    - Authorization
+    - Content-Type
+    - Accept
+    - Destination
+    - Origin
+    - X-Requested-With
+    - Overwrite
+    - If
+    - Lock-Token
+    - Timeout
   allowed_hosts:
 %s
   allowed_methods:
@@ -308,11 +375,29 @@ cors:
     - COPY
     - HEAD
     - PATCH
+    - LOCK
+    - UNLOCK
   exposed_headers:
     - Content-Length
     - Content-Range
     - Content-Type
-""", username, password, originsYaml);
+    - DAV
+    - ETag
+    - Location""", originsYaml);
+		}
+		
+		return String.format("""
+address: 0.0.0.0
+port: 80
+directory: /media
+permissions: CRUD
+users:
+  - username: %s
+    password: %s
+    directory: /media
+    permissions: CRUD
+%s
+""", username, password, corsSection);
 	}
 }
 

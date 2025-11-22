@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.github.dockerjava.api.model.Container;
 import com.kryptforge.clusterforge.clusters.ClusterService;
+import com.kryptforge.clusterforge.clusters.ClusterRepository;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.templates.TemplateInstantiationService;
 import com.kryptforge.clusterforge.templates.TemplateService;
@@ -34,6 +35,7 @@ class TemplateControllerTest {
 	private TemplateInstantiationService instantiationService;
 	private DockerEngineService dockerEngineService;
 	private ClusterService clusterService;
+	private ClusterRepository clusterRepository;
 	private TemplateController controller;
 
 	@BeforeEach
@@ -42,7 +44,8 @@ class TemplateControllerTest {
 		instantiationService = mock(TemplateInstantiationService.class);
 		dockerEngineService = mock(DockerEngineService.class);
 		clusterService = mock(ClusterService.class);
-		controller = new TemplateController(templateService, instantiationService, dockerEngineService, clusterService);
+		clusterRepository = mock(ClusterRepository.class);
+		controller = new TemplateController(templateService, instantiationService, dockerEngineService, clusterService, clusterRepository);
 	}
 
 	@Test
@@ -127,11 +130,11 @@ class TemplateControllerTest {
 			any()
 		)).thenReturn(new InstantiationResult("container-id-123", List.of("9000:80")));
 		
-		// Mock do ClusterService
+		// Mock do ClusterService e ClusterRepository
 		com.kryptforge.clusterforge.clusters.ClusterInstance mockInstance = new com.kryptforge.clusterforge.clusters.ClusterInstance();
 		mockInstance.setName("my-instance");
 		when(clusterService.create(anyString(), anyString(), any())).thenReturn(mockInstance);
-		when(clusterService.updateContainerId(any(), anyString())).thenReturn(mockInstance);
+		when(clusterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 		when(clusterService.updateStatus(any(), any())).thenReturn(mockInstance);
 
 		ResponseEntity<TemplateInstantiateResponse> response = controller.instantiate("template1", request);
@@ -235,11 +238,11 @@ class TemplateControllerTest {
 		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any()))
 			.thenReturn(new InstantiationResult("cid", List.of()));
 		
-		// Mock do ClusterService
+		// Mock do ClusterService e ClusterRepository
 		com.kryptforge.clusterforge.clusters.ClusterInstance mockInstance = new com.kryptforge.clusterforge.clusters.ClusterInstance();
 		mockInstance.setName("my-instance");
 		when(clusterService.create(anyString(), anyString(), any())).thenReturn(mockInstance);
-		when(clusterService.updateContainerId(any(), anyString())).thenReturn(mockInstance);
+		when(clusterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 		when(clusterService.updateStatus(any(), any())).thenReturn(mockInstance);
 		when(clusterService.list()).thenReturn(List.of());
 

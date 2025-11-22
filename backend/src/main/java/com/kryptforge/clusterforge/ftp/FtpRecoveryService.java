@@ -297,7 +297,33 @@ public class FtpRecoveryService {
 			cluster.setFtpPassword(ftpInfo.ftpPassword());
 			clusterRepository.save(cluster);
 
-			createWebDavServer(cluster, volumePath, ftpInfo.ftpUser(), ftpInfo.ftpPassword());
+			// Tenta criar o servidor WebDAV
+			// Se falhar, libera a porta FTP e remove o container FTP criado
+			boolean webDavCreated = createWebDavServer(cluster, volumePath, ftpInfo.ftpUser(), ftpInfo.ftpPassword());
+			if (!webDavCreated) {
+				log.warn("Falha ao criar servidor WebDAV para cluster '{}'. Removendo servidor FTP criado e liberando porta.", cluster.getName());
+				// Remove o container FTP criado
+				try {
+					ftpService.removeFtpServer(ftpInfo.containerId());
+					log.debug("Container FTP {} removido após falha na criação do WebDAV", ftpInfo.containerId());
+				} catch (Exception ex) {
+					log.warn("Falha ao remover container FTP {} após falha na criação do WebDAV: {}", ftpInfo.containerId(), ex.getMessage());
+				}
+				// Limpa as informações do FTP do cluster
+				cluster.setFtpContainerId(null);
+				cluster.setFtpPort(null);
+				cluster.setFtpUser(null);
+				cluster.setFtpPassword(null);
+				clusterRepository.save(cluster);
+				// Libera a porta FTP
+				try {
+					portManager.releasePort(ftpPort);
+					log.debug("Porta FTP {} liberada após falha na criação do WebDAV", ftpPort);
+				} catch (Exception ex) {
+					log.warn("Falha ao liberar porta FTP {}: {}", ftpPort, ex.getMessage());
+				}
+				return false;
+			}
 
 			log.info("Servidor FTP de recuperação criado com sucesso para cluster '{}': containerId={}, port={}", 
 				cluster.getName(), ftpInfo.containerId(), ftpInfo.hostPort());
@@ -405,8 +431,9 @@ public class FtpRecoveryService {
 				if (volumePath == null) {
 					continue;
 				}
-				createWebDavServer(cluster, volumePath, cluster.getFtpUser(), cluster.getFtpPassword());
-				created++;
+				if (createWebDavServer(cluster, volumePath, cluster.getFtpUser(), cluster.getFtpPassword())) {
+					created++;
+				}
 			} catch (Exception e) {
 				log.error("Erro ao recuperar WebDAV para cluster '{}': {}", cluster.getName(), e.getMessage());
 			}
@@ -469,10 +496,19 @@ public class FtpRecoveryService {
 		return true;
 	}
 
-	private void createWebDavServer(ClusterInstance cluster, String volumePath, String username, String password) {
+	/**
+	 * Cria um servidor WebDAV para o cluster.
+	 * 
+	 * @param cluster instância do cluster
+	 * @param volumePath caminho do volume
+	 * @param username nome de usuário (pode ser null para usar do cluster)
+	 * @param password senha (pode ser null para usar do cluster)
+	 * @return true se o servidor WebDAV foi criado com sucesso, false caso contrário
+	 */
+	private boolean createWebDavServer(ClusterInstance cluster, String volumePath, String username, String password) {
 		if (!StringUtils.hasText(volumePath)) {
 			log.warn("Volume inválido para criação de WebDAV do cluster '{}'", cluster.getName());
-			return;
+			return false;
 		}
 
 		if (!StringUtils.hasText(username)) {
@@ -485,7 +521,7 @@ public class FtpRecoveryService {
 		int webDavPort = portManager.allocatePort();
 		if (webDavPort == -1) {
 			log.warn("Não foi possível alocar porta para WebDAV do cluster '{}'", cluster.getName());
-			return;
+			return false;
 		}
 
 		try {
@@ -504,6 +540,7 @@ public class FtpRecoveryService {
 			clusterRepository.save(cluster);
 
 			log.info("Servidor WebDAV criado/atualizado para cluster '{}': {}", cluster.getName(), info.containerId());
+			return true;
 		} catch (Exception e) {
 			log.error("Falha ao criar servidor WebDAV para cluster '{}': {}", cluster.getName(), e.getMessage());
 			try {
@@ -511,6 +548,7 @@ public class FtpRecoveryService {
 			} catch (Exception ex) {
 				log.warn("Falha ao liberar porta WebDAV {}: {}", webDavPort, ex.getMessage());
 			}
+			return false;
 		}
 	}
 }

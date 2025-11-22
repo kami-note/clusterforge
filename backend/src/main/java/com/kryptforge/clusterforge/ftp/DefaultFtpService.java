@@ -141,11 +141,17 @@ public class DefaultFtpService implements FtpService {
 			.withRestartPolicy(RestartPolicy.alwaysRestart());
 
 		// Cria o container FTP com UID/GID específico do cluster
-		CreateContainerResponse response = dockerClient.createContainerCmd(FTP_IMAGE)
+		var createCmd = dockerClient.createContainerCmd(FTP_IMAGE)
 			.withName(ftpContainerName)
 			.withUser(userManager.formatUserString(uid, gid))
-			.withHostConfig(hostConfig)
-			.withExposedPorts(ftpExposedPort)
+			.withHostConfig(hostConfig);
+
+		// Expõe todas as portas (FTP principal e PASV) do objeto Ports
+		if (!ports.getBindings().isEmpty()) {
+			createCmd.withExposedPorts(ports.getBindings().keySet().toArray(new com.github.dockerjava.api.model.ExposedPort[0]));
+		}
+
+		CreateContainerResponse response = createCmd
 			.withEnv(envList)
 			.exec();
 

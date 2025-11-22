@@ -441,5 +441,43 @@ class TemplateInstantiationServiceTest {
 		assertEquals("webdav-container", result.webDavInfo().containerId());
 		verify(webDavService).createWebDavServer(eq("instance"), anyString(), eq(9100), eq("ftpuser"), eq("ftppass"));
 	}
+
+	@Test
+	void instantiate_stripsProtocolFromPortMappings() throws Exception {
+		Path templateDir = tempDir.resolve("protocol-ports");
+		Files.createDirectories(templateDir);
+		Files.writeString(templateDir.resolve("docker-compose.yml"),
+			"services:\n" +
+			"  app:\n" +
+			"    image: nginx:latest\n" +
+			"    ports:\n" +
+			"      - \"8080:80/tcp\"\n" +
+			"      - \"127.0.0.1:9090:443/tcp\"\n" +
+			"      - \"3000/udp\"\n");
+
+		when(portManager.mapPorts(anyList())).thenAnswer(inv -> {
+			List<String> ports = inv.getArgument(0);
+			// Verifica que as portas não contêm protocolo
+			for (String port : ports) {
+				assertFalse(port.contains("/"), "Porta não deve conter especificação de protocolo: " + port);
+			}
+			// Retorna portas mapeadas simuladas
+			return List.of("9000:80", "9001:443", "9002:3000");
+		});
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+			.thenReturn("cid");
+		doNothing().when(dockerEngineService).startContainer("cid");
+
+		service.instantiate("protocol-ports", "instance", null, null, null);
+
+		// Verifica que mapPorts foi chamado com portas sem protocolo
+		verify(portManager).mapPorts(argThat(ports -> {
+			List<String> p = (List<String>) ports;
+			return p.size() == 3 &&
+				   p.contains("80") &&
+				   p.contains("443") &&
+				   p.contains("3000");
+		}));
+	}
 }
 

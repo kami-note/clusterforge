@@ -143,32 +143,9 @@ public class DefaultClusterService implements ClusterService {
 		return repository.save(c);
 	}
 
-	@Override
-	public ClusterInstance updateContainerId(UUID id, String containerId) {
-		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
-		c.setContainerId(containerId);
-		return repository.save(c);
-	}
-
-	@Override
-	public ClusterInstance updateFtpInfo(UUID id, String ftpContainerId, Integer ftpPort, String ftpUser, String ftpPassword) {
-		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
-		c.setFtpContainerId(ftpContainerId);
-		c.setFtpPort(ftpPort);
-		c.setFtpUser(ftpUser);
-		c.setFtpPassword(ftpPassword);
-		return repository.save(c);
-	}
-
-	@Override
-	public ClusterInstance updateWebDavInfo(UUID id, String webDavContainerId, Integer webDavPort, String webDavUser, String webDavPassword) {
-		ClusterInstance c = repository.findById(id).orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
-		c.setWebDavContainerId(webDavContainerId);
-		c.setWebDavPort(webDavPort);
-		c.setWebDavUser(webDavUser);
-		c.setWebDavPassword(webDavPassword);
-		return repository.save(c);
-	}
+	// Métodos updateContainerId, updateFtpInfo e updateWebDavInfo removidos da interface pública
+	// Esses métodos são apenas para uso interno durante a instanciação de templates
+	// e não devem ser expostos via REST ou chamados diretamente por usuários
 
 	@Override
 	public ClusterInstance syncStatus(UUID id) {
@@ -406,8 +383,14 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public void deleteFromDatabase(UUID id) {
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+		
 		ClusterInstance instance = repository.findById(id)
 			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+		
+		// Verifica ownership antes de permitir exclusão
+		checkOwnership(user, instance);
 		
 		String name = instance.getName();
 		repository.deleteById(id);

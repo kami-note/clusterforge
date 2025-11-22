@@ -117,17 +117,21 @@ public class TemplateInstantiationService {
 				String[] parts = portMapping.split(":");
 				if (parts.length == 1) {
 					// Apenas porta do container especificada - passa direto
-					ports.add(parts[0].trim());
+					// Remove especificação de protocolo (ex: "80/tcp" -> "80")
+					String containerPort = stripProtocol(parts[0].trim());
+					ports.add(containerPort);
 				} else if (parts.length == 2) {
 					// Formato "hostPort:containerPort" - extrai apenas containerPort
-					String containerPort = parts[1].trim();
+					// Remove especificação de protocolo (ex: "8080:80/tcp" -> "80")
+					String containerPort = stripProtocol(parts[1].trim());
 					ports.add(containerPort);
 					log.debug("Template '{}' especifica porta do host no compose ({}), usando apenas porta do container ({}) para alocação automática", 
 						templateName, parts[0].trim(), containerPort);
 				} else if (parts.length == 3) {
 					// Formato "hostIp:hostPort:containerPort" - extrai apenas containerPort
-					// Exemplo: "127.0.0.1:8080:80" -> extrai "80"
-					String containerPort = parts[2].trim();
+					// Exemplo: "127.0.0.1:8080:80/tcp" -> extrai "80"
+					// Remove especificação de protocolo
+					String containerPort = stripProtocol(parts[2].trim());
 					ports.add(containerPort);
 					log.debug("Template '{}' especifica IP e porta do host no compose ({}:{}), usando apenas porta do container ({}) para alocação automática", 
 						templateName, parts[0].trim(), parts[1].trim(), containerPort);
@@ -141,10 +145,13 @@ public class TemplateInstantiationService {
 		
 		// Mapeia portas usando PortManager para alocar portas do host dinamicamente
 		// O PortManager sempre aloca portas do host automaticamente quando recebe apenas containerPort
+		List<Integer> allocatedHostPorts = new ArrayList<>();
 		if (!ports.isEmpty()) {
 			try {
 				ports = portManager.mapPorts(ports);
 				log.debug("Portas mapeadas para template '{}': {}", templateName, ports);
+				// Extrai portas do host alocadas para possível liberação em caso de falha
+				allocatedHostPorts = extractHostPorts(ports);
 			} catch (Exception e) {
 				log.error("Erro ao mapear portas para template '{}': {}", templateName, e.getMessage());
 				throw new IllegalStateException("Erro ao alocar portas: " + e.getMessage(), e);
@@ -195,22 +202,32 @@ public class TemplateInstantiationService {
 		List<String> instanceBinds = updateBindsForInstance(binds, mainVolumePath, instanceVolumePath);
 
 		// cria e inicia container
-		String containerId = dockerEngineService.createContainer(
-			spec.image,
-			spec.command,
-			env,
-			ports,
-			instanceBinds,
-			instanceName,
-			spec.workingDir,
-			spec.stdinOpen,
-			spec.tty,
-			spec.restart
-		);
+		String containerId = null;
 		try {
+			containerId = dockerEngineService.createContainer(
+				spec.image,
+				spec.command,
+				env,
+				ports,
+				instanceBinds,
+				instanceName,
+				spec.workingDir,
+				spec.stdinOpen,
+				spec.tty,
+				spec.restart
+			);
 			dockerEngineService.startContainer(containerId);
 		} catch (Exception e) {
-			log.warn("Falha ao iniciar container {}: {}", containerId, e.getMessage());
+			log.warn("Falha ao criar/iniciar container para template '{}': {}", templateName, e.getMessage());
+			// Libera portas alocadas antes de relançar a exceção
+			if (!allocatedHostPorts.isEmpty()) {
+				try {
+					portManager.releasePorts(allocatedHostPorts);
+					log.debug("Portas alocadas liberadas após falha na criação/inicialização do container: {}", allocatedHostPorts);
+				} catch (Exception releaseEx) {
+					log.warn("Falha ao liberar portas alocadas {}: {}", allocatedHostPorts, releaseEx.getMessage());
+				}
+			}
 			throw e;
 		}
 
@@ -561,6 +578,52 @@ public class TemplateInstantiationService {
 				}
 			});
 		}
+	}
+
+	/**
+	 * Remove a especificação de protocolo de uma porta (ex: "80/tcp" -> "80").
+	 * Docker Compose pode especificar protocolo após a porta (ex: "/tcp", "/udp").
+	 * 
+	 * @param portString string da porta que pode conter protocolo
+	 * @return string da porta sem especificação de protocolo
+	 */
+	private static String stripProtocol(String portString) {
+		if (portString == null || portString.isEmpty()) {
+			return portString;
+		}
+		// Remove tudo após "/" (protocolo)
+		int slashIndex = portString.indexOf('/');
+		if (slashIndex > 0) {
+			return portString.substring(0, slashIndex);
+		}
+		return portString;
+	}
+
+	/**
+	 * Extrai as portas do host de uma lista de mapeamentos de portas.
+	 * Formato esperado: "hostPort:containerPort"
+	 * 
+	 * @param mappedPorts lista de mapeamentos no formato "hostPort:containerPort"
+	 * @return lista de portas do host alocadas
+	 */
+	private static List<Integer> extractHostPorts(List<String> mappedPorts) {
+		List<Integer> hostPorts = new ArrayList<>();
+		for (String mapping : mappedPorts) {
+			if (mapping == null || mapping.trim().isEmpty()) {
+				continue;
+			}
+			String[] parts = mapping.split(":");
+			if (parts.length >= 1) {
+				try {
+					int hostPort = Integer.parseInt(parts[0].trim());
+					hostPorts.add(hostPort);
+				} catch (NumberFormatException e) {
+					// Ignora entradas inválidas
+					log.warn("Formato de porta inválido ao extrair porta do host: {}", mapping);
+				}
+			}
+		}
+		return hostPorts;
 	}
 
 	private static void requireText(String value, String name) {

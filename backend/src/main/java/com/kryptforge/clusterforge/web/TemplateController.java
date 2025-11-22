@@ -25,6 +25,7 @@ import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.clusters.ClusterService;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
 import com.kryptforge.clusterforge.clusters.ClusterStatus;
+import com.kryptforge.clusterforge.clusters.ClusterRepository;
 import com.kryptforge.clusterforge.templates.dto.TemplateDetail;
 import com.kryptforge.clusterforge.templates.dto.TemplateSummary;
 import com.kryptforge.clusterforge.templates.dto.TemplateInstantiateRequest;
@@ -39,12 +40,14 @@ public class TemplateController {
 	private final TemplateInstantiationService instantiationService;
 	private final DockerEngineService dockerEngineService;
 	private final ClusterService clusterService;
+	private final ClusterRepository clusterRepository;
 
-	public TemplateController(TemplateService templateService, TemplateInstantiationService instantiationService, DockerEngineService dockerEngineService, ClusterService clusterService) {
+	public TemplateController(TemplateService templateService, TemplateInstantiationService instantiationService, DockerEngineService dockerEngineService, ClusterService clusterService, ClusterRepository clusterRepository) {
 		this.templateService = templateService;
 		this.instantiationService = instantiationService;
 		this.dockerEngineService = dockerEngineService;
 		this.clusterService = clusterService;
+		this.clusterRepository = clusterRepository;
 	}
 
 	@GetMapping
@@ -128,28 +131,27 @@ public class TemplateController {
 			);
 
 			// atualiza com containerId e status ACTIVE após criação bem-sucedida
-			instance = clusterService.updateContainerId(instance.getId(), result.containerId());
+			// Nota: atualizamos diretamente via repositório durante a instanciação
+			// pois esses campos são apenas para uso interno e não devem ser editáveis via API
+			instance.setContainerId(result.containerId());
+			instance = clusterRepository.save(instance);
 			instance = clusterService.updateStatus(instance.getId(), ClusterStatus.ACTIVE);
 
 			// atualiza com informações do servidor FTP se foi criado
 			if (result.ftpInfo() != null) {
-				instance = clusterService.updateFtpInfo(
-					instance.getId(),
-					result.ftpInfo().containerId(),
-					result.ftpInfo().hostPort(),
-					result.ftpInfo().ftpUser(),
-					result.ftpInfo().ftpPassword()
-				);
+				instance.setFtpContainerId(result.ftpInfo().containerId());
+				instance.setFtpPort(result.ftpInfo().hostPort());
+				instance.setFtpUser(result.ftpInfo().ftpUser());
+				instance.setFtpPassword(result.ftpInfo().ftpPassword());
+				instance = clusterRepository.save(instance);
 			}
 
 			if (result.webDavInfo() != null) {
-				instance = clusterService.updateWebDavInfo(
-					instance.getId(),
-					result.webDavInfo().containerId(),
-					result.webDavInfo().hostPort(),
-					result.webDavInfo().username(),
-					result.webDavInfo().password()
-				);
+				instance.setWebDavContainerId(result.webDavInfo().containerId());
+				instance.setWebDavPort(result.webDavInfo().hostPort());
+				instance.setWebDavUser(result.webDavInfo().username());
+				instance.setWebDavPassword(result.webDavInfo().password());
+				instance = clusterRepository.save(instance);
 			}
 
 			return ResponseEntity.status(HttpStatus.CREATED)
