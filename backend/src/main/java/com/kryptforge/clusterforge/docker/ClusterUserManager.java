@@ -120,5 +120,3 @@ public class ClusterUserManager {
 		return uid + ":" + gid;
 	}
 }
-
-
