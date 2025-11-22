@@ -5,6 +5,7 @@ import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -54,8 +55,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 					request.getMethod(), request.getRequestURI(), token.length());
 				// Limpar contexto de segurança se houver autenticação inválida
 				SecurityContextHolder.clearContext();
-				filterChain.doFilter(request, response);
-				return;
+				// Lançar AccessDeniedException para retornar 403 (token inválido = tentou autenticar mas foi negado)
+				throw new AccessDeniedException("Token JWT inválido ou expirado");
 			}
 
 			String username = jwtService.extractUsername(token);
@@ -63,8 +64,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			if (username == null) {
 				log.warn("Não foi possível extrair username do token JWT");
 				SecurityContextHolder.clearContext();
-				filterChain.doFilter(request, response);
-				return;
+				// Lançar AccessDeniedException para retornar 403 (token malformado = tentou autenticar mas foi negado)
+				throw new AccessDeniedException("Token JWT malformado: não foi possível extrair username");
 			}
 			
 			// Se já existe autenticação, não sobrescrever (pode ser de outro filtro)
@@ -79,8 +80,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			if (user == null) {
 				log.warn("Usuário '{}' do token JWT não encontrado no banco de dados", username);
 				SecurityContextHolder.clearContext();
-				filterChain.doFilter(request, response);
-				return;
+				// Lançar AccessDeniedException para retornar 403 (usuário não existe = tentou autenticar mas foi negado)
+				throw new AccessDeniedException("Usuário do token não encontrado");
 			}
 			
 			// Verifica se o username do token corresponde ao usuário encontrado
@@ -88,8 +89,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				log.warn("Token JWT não corresponde ao usuário '{}'", username);
 				// Limpar contexto de segurança se houver autenticação inválida
 				SecurityContextHolder.clearContext();
-				filterChain.doFilter(request, response);
-				return;
+				// Lançar AccessDeniedException para retornar 403 (token não corresponde = tentou autenticar mas foi negado)
+				throw new AccessDeniedException("Token JWT não corresponde ao usuário");
 			}
 
 			// Verifica se a role no token corresponde à role do usuário
@@ -98,8 +99,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				log.warn("Role do token '{}' não corresponde à role do usuário '{}' para usuário '{}'", 
 					role, user.getRole(), username);
 				SecurityContextHolder.clearContext();
-				filterChain.doFilter(request, response);
-				return;
+				// Lançar AccessDeniedException para retornar 403 (role não corresponde = tentou autenticar mas foi negado)
+				throw new AccessDeniedException("Role do token não corresponde à role do usuário");
 			}
 
 			SimpleGrantedAuthority authority = new SimpleGrantedAuthority("ROLE_" + role);
@@ -114,11 +115,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			SecurityContextHolder.getContext().setAuthentication(authToken);
 			log.info("Autenticação JWT bem-sucedida para usuário '{}' com role '{}' na requisição {} {}", 
 				username, role, request.getMethod(), request.getRequestURI());
+		} catch (AccessDeniedException e) {
+			// Re-lançar AccessDeniedException para que o SecurityExceptionFilter possa tratá-la
+			throw e;
 		} catch (Exception e) {
 			log.warn("Erro ao processar token JWT para requisição {} {}: {}", 
 				request.getMethod(), request.getRequestURI(), e.getMessage());
 			// Limpar contexto de segurança em caso de erro
 			SecurityContextHolder.clearContext();
+			// Lançar AccessDeniedException para retornar 403 (erro ao processar token = tentou autenticar mas foi negado)
+			throw new AccessDeniedException("Erro ao processar token JWT: " + e.getMessage(), e);
 		}
 
 		// Sempre continuar a cadeia - o Spring Security tratará a autorização

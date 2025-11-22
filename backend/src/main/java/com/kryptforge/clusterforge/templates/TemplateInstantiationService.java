@@ -104,7 +104,10 @@ public class TemplateInstantiationService {
 			ports = new ArrayList<>(overridePorts);
 		} else if (!spec.ports.isEmpty()) {
 			// Extrai apenas as portas do container do docker-compose.yml
-			// Formato no compose pode ser "hostPort:containerPort" ou "containerPort"
+			// Formato no compose pode ser:
+			// - "containerPort" (1 parte)
+			// - "hostPort:containerPort" (2 partes)
+			// - "hostIp:hostPort:containerPort" (3 partes) - ex: "127.0.0.1:8080:80"
 			// Sempre passamos apenas containerPort para o PortManager alocar hostPort automaticamente
 			for (String portMapping : spec.ports) {
 				if (portMapping == null || portMapping.trim().isEmpty()) {
@@ -121,6 +124,17 @@ public class TemplateInstantiationService {
 					ports.add(containerPort);
 					log.debug("Template '{}' especifica porta do host no compose ({}), usando apenas porta do container ({}) para alocação automática", 
 						templateName, parts[0].trim(), containerPort);
+				} else if (parts.length == 3) {
+					// Formato "hostIp:hostPort:containerPort" - extrai apenas containerPort
+					// Exemplo: "127.0.0.1:8080:80" -> extrai "80"
+					String containerPort = parts[2].trim();
+					ports.add(containerPort);
+					log.debug("Template '{}' especifica IP e porta do host no compose ({}:{}), usando apenas porta do container ({}) para alocação automática", 
+						templateName, parts[0].trim(), parts[1].trim(), containerPort);
+				} else {
+					// Formato inválido ou não suportado
+					log.warn("Template '{}' possui mapeamento de porta em formato inválido ou não suportado: '{}'. Ignorando.", 
+						templateName, portMapping);
 				}
 			}
 		}

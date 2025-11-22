@@ -57,10 +57,10 @@ class JwtAuthenticationFilterIntegrationTest {
 	}
 
 	@Test
-	@DisplayName("requisição sem token deve retornar 403 para endpoint protegido")
-	void requestWithoutToken_shouldReturn403ForProtectedEndpoint() throws Exception {
+	@DisplayName("requisição sem token deve retornar 401 para endpoint protegido")
+	void requestWithoutToken_shouldReturn401ForProtectedEndpoint() throws Exception {
 		mockMvc.perform(get("/api/clusters"))
-			.andExpect(status().isForbidden());
+			.andExpect(status().isUnauthorized());
 	}
 
 	@Test
@@ -88,11 +88,11 @@ class JwtAuthenticationFilterIntegrationTest {
 	}
 
 	@Test
-	@DisplayName("requisição sem prefixo Bearer deve retornar 403")
-	void requestWithoutBearerPrefix_shouldReturn403() throws Exception {
+	@DisplayName("requisição sem prefixo Bearer deve retornar 401")
+	void requestWithoutBearerPrefix_shouldReturn401() throws Exception {
 		mockMvc.perform(get("/api/clusters")
 			.header("Authorization", validToken))
-			.andExpect(status().isForbidden());
+			.andExpect(status().isUnauthorized());
 	}
 
 	@Test

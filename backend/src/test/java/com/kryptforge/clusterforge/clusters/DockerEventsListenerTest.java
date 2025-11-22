@@ -29,9 +29,6 @@ class DockerEventsListenerTest {
 	private DockerConnection dockerConnection;
 
 	@Mock
-	private ClusterService clusterService;
-
-	@Mock
 	private ClusterRepository clusterRepository;
 
 	@Mock
@@ -44,7 +41,7 @@ class DockerEventsListenerTest {
 
 	@BeforeEach
 	void setup() {
-		listener = new DockerEventsListener(dockerConnection, clusterService, clusterRepository, true);
+		listener = new DockerEventsListener(dockerConnection, clusterRepository, true);
 	}
 
 	@Test
@@ -54,17 +51,14 @@ class DockerEventsListenerTest {
 		ClusterInstance instance = createInstance("test-instance", "container-id-123", ClusterStatus.STOPPED);
 		
 		when(clusterRepository.findByContainerId("container-id-123")).thenReturn(Optional.of(instance));
-		when(clusterService.updateStatus(any(), any())).thenAnswer(inv -> {
-			instance.setStatus(inv.getArgument(1));
-			return instance;
-		});
+		when(clusterRepository.save(any(ClusterInstance.class))).thenAnswer(inv -> inv.getArgument(0));
 		
 		// Simula evento sendo processado
 		simulateEvent(event);
 		
-		ArgumentCaptor<ClusterStatus> statusCaptor = ArgumentCaptor.forClass(ClusterStatus.class);
-		verify(clusterService).updateStatus(any(), statusCaptor.capture());
-		assertEquals(ClusterStatus.ACTIVE, statusCaptor.getValue());
+		ArgumentCaptor<ClusterInstance> instanceCaptor = ArgumentCaptor.forClass(ClusterInstance.class);
+		verify(clusterRepository).save(instanceCaptor.capture());
+		assertEquals(ClusterStatus.ACTIVE, instanceCaptor.getValue().getStatus());
 	}
 
 	@Test
@@ -74,16 +68,13 @@ class DockerEventsListenerTest {
 		ClusterInstance instance = createInstance("test-instance", "container-id-123", ClusterStatus.ACTIVE);
 		
 		when(clusterRepository.findByContainerId("container-id-123")).thenReturn(Optional.of(instance));
-		when(clusterService.updateStatus(any(), any())).thenAnswer(inv -> {
-			instance.setStatus(inv.getArgument(1));
-			return instance;
-		});
+		when(clusterRepository.save(any(ClusterInstance.class))).thenAnswer(inv -> inv.getArgument(0));
 		
 		simulateEvent(event);
 		
-		ArgumentCaptor<ClusterStatus> statusCaptor = ArgumentCaptor.forClass(ClusterStatus.class);
-		verify(clusterService).updateStatus(any(), statusCaptor.capture());
-		assertEquals(ClusterStatus.STOPPED, statusCaptor.getValue());
+		ArgumentCaptor<ClusterInstance> instanceCaptor = ArgumentCaptor.forClass(ClusterInstance.class);
+		verify(clusterRepository).save(instanceCaptor.capture());
+		assertEquals(ClusterStatus.STOPPED, instanceCaptor.getValue().getStatus());
 	}
 
 	@Test
@@ -93,16 +84,13 @@ class DockerEventsListenerTest {
 		ClusterInstance instance = createInstance("test-instance", "container-id-123", ClusterStatus.ACTIVE);
 		
 		when(clusterRepository.findByContainerId("container-id-123")).thenReturn(Optional.of(instance));
-		when(clusterService.updateStatus(any(), any())).thenAnswer(inv -> {
-			instance.setStatus(inv.getArgument(1));
-			return instance;
-		});
+		when(clusterRepository.save(any(ClusterInstance.class))).thenAnswer(inv -> inv.getArgument(0));
 		
 		simulateEvent(event);
 		
-		ArgumentCaptor<ClusterStatus> statusCaptor = ArgumentCaptor.forClass(ClusterStatus.class);
-		verify(clusterService).updateStatus(any(), statusCaptor.capture());
-		assertEquals(ClusterStatus.STOPPED, statusCaptor.getValue());
+		ArgumentCaptor<ClusterInstance> instanceCaptor = ArgumentCaptor.forClass(ClusterInstance.class);
+		verify(clusterRepository).save(instanceCaptor.capture());
+		assertEquals(ClusterStatus.STOPPED, instanceCaptor.getValue().getStatus());
 	}
 
 	@Test
@@ -116,7 +104,7 @@ class DockerEventsListenerTest {
 		simulateEvent(event);
 		
 		// Não deve atualizar se já está no mesmo status
-		verify(clusterService, never()).updateStatus(any(), any());
+		verify(clusterRepository, never()).save(any(ClusterInstance.class));
 	}
 
 	@Test
@@ -126,21 +114,15 @@ class DockerEventsListenerTest {
 		ClusterInstance instance = createInstance("test-instance", "container-id-123", ClusterStatus.STOPPED);
 		
 		when(clusterRepository.findByContainerId("container-id-123")).thenReturn(Optional.of(instance));
-		when(clusterService.updateStatus(any(), any())).thenAnswer(inv -> {
-			instance.setStatus(inv.getArgument(1));
-			return instance;
-		});
-		when(clusterService.updateContainerId(any(), isNull())).thenAnswer(inv -> {
-			instance.setContainerId(null);
-			return instance;
-		});
+		when(clusterRepository.save(any(ClusterInstance.class))).thenAnswer(inv -> inv.getArgument(0));
 		
 		simulateEvent(event);
 		
-		ArgumentCaptor<ClusterStatus> statusCaptor = ArgumentCaptor.forClass(ClusterStatus.class);
-		verify(clusterService).updateStatus(any(), statusCaptor.capture());
-		assertEquals(ClusterStatus.DELETED, statusCaptor.getValue());
-		verify(clusterService).updateContainerId(any(), isNull());
+		ArgumentCaptor<ClusterInstance> instanceCaptor = ArgumentCaptor.forClass(ClusterInstance.class);
+		verify(clusterRepository).save(instanceCaptor.capture());
+		ClusterInstance saved = instanceCaptor.getValue();
+		assertEquals(ClusterStatus.DELETED, saved.getStatus());
+		assertNull(saved.getContainerId(), "containerId deve ser limpo quando container é removido");
 	}
 
 	@Test
@@ -149,10 +131,11 @@ class DockerEventsListenerTest {
 		Event event = createEvent("unknown-container", "start", null);
 		
 		when(clusterRepository.findByContainerId("unknown-container")).thenReturn(Optional.empty());
+		when(clusterRepository.findAll()).thenReturn(java.util.List.of());
 		
 		simulateEvent(event);
 		
-		verify(clusterService, never()).updateStatus(any(), any());
+		verify(clusterRepository, never()).save(any(ClusterInstance.class));
 	}
 
 	@Test
@@ -163,7 +146,7 @@ class DockerEventsListenerTest {
 		simulateEvent(event);
 		
 		verify(clusterRepository, never()).findByContainerId(any());
-		verify(clusterService, never()).updateStatus(any(), any());
+		verify(clusterRepository, never()).save(any(ClusterInstance.class));
 	}
 
 	@Test
@@ -174,7 +157,7 @@ class DockerEventsListenerTest {
 		simulateEvent(event);
 		
 		verify(clusterRepository, never()).findByContainerId(any());
-		verify(clusterService, never()).updateStatus(any(), any());
+		verify(clusterRepository, never()).save(any(ClusterInstance.class));
 	}
 
 	@Test
@@ -187,7 +170,7 @@ class DockerEventsListenerTest {
 		
 		simulateEvent(event);
 		
-		verify(clusterService, never()).updateStatus(any(), any());
+		verify(clusterRepository, never()).save(any(ClusterInstance.class));
 	}
 
 	@Test
@@ -201,7 +184,7 @@ class DockerEventsListenerTest {
 		simulateEvent(event);
 		
 		// Não deve atualizar se já está no status correto
-		verify(clusterService, never()).updateStatus(any(), any());
+		verify(clusterRepository, never()).save(any(ClusterInstance.class));
 	}
 
 	// Métodos auxiliares

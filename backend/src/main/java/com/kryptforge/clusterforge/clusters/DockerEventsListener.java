@@ -26,18 +26,15 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 	private static final Logger log = LoggerFactory.getLogger(DockerEventsListener.class);
 	
 	private final DockerConnection dockerConnection;
-	private final ClusterService clusterService;
 	private final ClusterRepository clusterRepository;
 	private final boolean enabled;
 	private volatile boolean running = false;
 
 	public DockerEventsListener(
 		DockerConnection dockerConnection,
-		ClusterService clusterService,
 		ClusterRepository clusterRepository,
 		@Value("${clusterforge.events.listener.enabled:true}") boolean enabled) {
 		this.dockerConnection = dockerConnection;
-		this.clusterService = clusterService;
 		this.clusterRepository = clusterRepository;
 		this.enabled = enabled;
 		log.info("DockerEventsListener inicializado (enabled: {})", enabled);
@@ -123,6 +120,10 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 
 	/**
 	 * Processa um evento do Docker e atualiza o banco de dados.
+	 * 
+	 * IMPORTANTE: Este método roda em uma thread daemon sem SecurityContext.
+	 * Por isso, usa diretamente o ClusterRepository ao invés de ClusterService
+	 * para evitar problemas de autenticação.
 	 */
 	private void handleDockerEvent(Event event) {
 		String containerId = event.getId();
@@ -140,9 +141,12 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 		Optional<ClusterInstance> instanceOpt = clusterRepository.findByContainerId(containerId);
 		
 		// Se não encontrou com ID exato, tenta buscar por prefixo (ID curto)
+		// Busca diretamente no repositório para evitar problemas de autenticação em thread daemon
 		if (instanceOpt.isEmpty() && containerId.length() >= 12) {
 			String shortId = containerId.substring(0, 12);
-			instanceOpt = clusterService.list().stream()
+			// Busca todas as instâncias do repositório diretamente (sem filtro de usuário)
+			// pois estamos em contexto interno de sistema
+			instanceOpt = clusterRepository.findAll().stream()
 				.filter(inst -> {
 					String dbContainerId = inst.getContainerId();
 					if (dbContainerId == null || dbContainerId.isBlank()) {
@@ -163,13 +167,15 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 			if (newStatus != null && instance.getStatus() != newStatus) {
 				log.info("Atualizando status da instância '{}' baseado em evento Docker: {} -> {} (action: {})",
 					instance.getName(), instance.getStatus(), newStatus, action);
-				clusterService.updateStatus(instance.getId(), newStatus);
+				// Atualiza diretamente no repositório para evitar problemas de autenticação
+				instance.setStatus(newStatus);
 				
 				// Se container foi removido, limpa o containerId também
 				if (newStatus == ClusterStatus.DELETED) {
 					instance.setContainerId(null);
-					clusterService.updateContainerId(instance.getId(), null);
 				}
+				
+				clusterRepository.save(instance);
 			}
 		} else {
 			log.debug("Container {} não encontrado no banco de dados, ignorando evento", containerId);

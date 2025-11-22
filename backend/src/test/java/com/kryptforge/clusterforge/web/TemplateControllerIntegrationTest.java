@@ -152,7 +152,7 @@ class TemplateControllerIntegrationTest {
 		mockMvc.perform(post("/api/templates/test-template/instantiate")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(invalidRequest)))
-			.andExpect(status().isForbidden()); // Agora precisa de autenticação, retorna 403
+			.andExpect(status().isUnauthorized()); // Sem token, retorna 401
 	}
 
 	@Test
@@ -168,7 +168,7 @@ class TemplateControllerIntegrationTest {
 		mockMvc.perform(post("/api/templates/not-exists/instantiate")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request)))
-			.andExpect(status().isForbidden()); // Agora precisa de autenticação, retorna 403
+			.andExpect(status().isUnauthorized()); // Sem token, retorna 401
 	}
 
 	@Test
