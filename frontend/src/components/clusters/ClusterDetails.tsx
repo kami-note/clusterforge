@@ -33,7 +33,7 @@ import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { ClusterFileManager } from '@/components/clusters/ClusterFileManager';
 import { config } from '@/lib/config';
 import { clusterService } from '@/services/cluster.service';
-import { sseService } from '@/services/sse.service';
+import { sseService, type ContainerLogEventPayload } from '@/services/sse.service';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -93,6 +93,62 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const consoleRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedInitialDataRef = useRef(false);
   const [activeSection, setActiveSection] = useState<'overview' | 'files'>('overview');
+
+  const formatLogLine = useCallback((logEvent: ContainerLogEventPayload): string => {
+    if (!logEvent || !logEvent.message) {
+      return '';
+    }
+
+    // Determinar timestamp: se já temos string ISO, usar diretamente; senão, converter de epochSecond
+    let timestampLabel: string | undefined;
+    if (logEvent.timestamp) {
+      // timestamp já é uma string ISO, converter diretamente
+      try {
+        timestampLabel = new Date(logEvent.timestamp).toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+      } catch {
+        // Se falhar, tentar usar epochSecond como fallback
+        if (typeof logEvent.epochSecond === 'number' && Number.isFinite(logEvent.epochSecond)) {
+          timestampLabel = new Date(logEvent.epochSecond * 1000).toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+        }
+      }
+    } else if (typeof logEvent.epochSecond === 'number' && Number.isFinite(logEvent.epochSecond)) {
+      // Usar epochSecond diretamente
+      timestampLabel = new Date(logEvent.epochSecond * 1000).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    }
+
+    const streamLabel =
+      logEvent.stream && logEvent.stream !== 'STDOUT'
+        ? logEvent.stream
+        : undefined;
+
+    const prefixParts: string[] = [];
+    if (timestampLabel) {
+      prefixParts.push(`[${timestampLabel}]`);
+    }
+    if (streamLabel) {
+      prefixParts.push(`[${streamLabel}]`);
+    }
+
+    const normalizedMessage = logEvent.message.replace(/\r/g, '').replace(/\n+$/, '');
+    if (!normalizedMessage) {
+      return '';
+    }
+
+    const prefix = prefixParts.length > 0 ? `${prefixParts.join(' ')} ` : '';
+    return `${prefix}${normalizedMessage}\n`;
+  }, []);
 
   // Função auxiliar para sanitizar valores numéricos
   const sanitizeValue = useCallback((value: number | undefined | null): number => {
@@ -715,44 +771,68 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       return;
     }
 
-    let isInitialLoadComplete = false;
-    let sseLogsBuffer: string[] = [];
+    // Usar ref para evitar race condition com callback do SSE
+    const isInitialLoadCompleteRef = { current: false };
+    const sseLogsBufferRef = { current: [] as string[] };
+
+    const flushBufferedLogs = () => {
+      if (sseLogsBufferRef.current.length === 0) {
+        return;
+      }
+      const bufferedLogs = sseLogsBufferRef.current.join('');
+      setConsoleOutput(prev => {
+        if (!prev) {
+          return bufferedLogs;
+        }
+        const separator = prev.endsWith('\n') ? '' : '\n';
+        return prev + separator + bufferedLogs;
+      });
+      sseLogsBufferRef.current = [];
+    };
 
     // Carregar logs iniciais via REST ANTES de conectar SSE
-    const loadInitialLogs = async () => {
+    const loadInitialLogs = async (): Promise<number | undefined> => {
       try {
-        const logs = await clusterService.getContainerLogs(cluster.id, 100);
-        if (logs) {
-          setConsoleOutput(logs);
+        const response = await clusterService.getContainerLogs(cluster.id, 200);
+        if (response?.logs !== undefined && response.logs !== null) {
+          setConsoleOutput(response.logs);
+        } else {
+          setConsoleOutput('');
         }
-        isInitialLoadComplete = true;
-        
-        // Processa logs SSE que foram recebidos durante o carregamento inicial
-        if (sseLogsBuffer.length > 0) {
-          // Normaliza cada linha: remove quebras de linha no final e adiciona uma única
-          const bufferedLogs = sseLogsBuffer
-            .map(line => line.replace(/\n+$/, '') + '\n')
-            .join('');
-          setConsoleOutput(prev => {
-            if (!prev) {
-              return bufferedLogs;
-            }
-            // Se o conteúdo anterior não termina com quebra de linha, adiciona uma
-            const separator = prev.endsWith('\n') ? '' : '\n';
-            return prev + separator + bufferedLogs;
-          });
-          sseLogsBuffer = [];
-        }
-        
-        // Retorna timestamp atual para usar no SSE (evita duplicação)
-        return Math.floor(Date.now() / 1000);
+        isInitialLoadCompleteRef.current = true;
+        flushBufferedLogs();
+        return response?.lastTimestamp ?? undefined;
       } catch (error) {
         console.error('Erro ao carregar logs iniciais:', error);
         setConsoleOutput('Erro ao carregar logs do container. Verifique se o container está rodando.');
-        isInitialLoadComplete = true;
+        isInitialLoadCompleteRef.current = true;
+        flushBufferedLogs();
         return undefined;
       }
     };
+
+    // Callback para receber logs via SSE (registrado ANTES de conectar para evitar perder logs)
+    const unsubscribe = sseService.onLogs((receivedClusterId: string | number, logEvent: ContainerLogEventPayload) => {
+      if (receivedClusterId === cluster.id && logEvent?.message) {
+        const formattedLine = formatLogLine(logEvent);
+        if (!formattedLine) {
+          return;
+        }
+
+        if (!isInitialLoadCompleteRef.current) {
+          sseLogsBufferRef.current.push(formattedLine);
+        } else {
+          setConsoleOutput(prev => {
+            const previousValue = prev || '';
+            if (!previousValue) {
+              return formattedLine;
+            }
+            const separator = previousValue.endsWith('\n') ? '' : '\n';
+            return previousValue + separator + formattedLine;
+          });
+        }
+      }
+    });
 
     // Conectar SSE para logs em tempo real
     const containerId = cluster.containerId;
@@ -767,45 +847,15 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
 
       // Carrega logs iniciais primeiro, depois conecta SSE com since para evitar duplicação
       loadInitialLogs().then((sinceTimestamp) => {
-        if (sinceTimestamp !== undefined) {
-          // Usa since para evitar duplicação: SSE só enviará logs novos após o timestamp
-          connectLogs(sinceTimestamp);
-        } else {
-          // Fallback: se não conseguiu carregar logs iniciais, conecta sem since
-          connectLogs();
-        }
+        connectLogs(sinceTimestamp);
       });
     }
-
-    // Callback para receber logs via SSE
-    const unsubscribe = sseService.onLogs((receivedClusterId: string | number, logLine: string) => {
-      if (receivedClusterId === cluster.id && logLine) {
-        // Se o carregamento inicial ainda não terminou, bufferiza os logs SSE
-        if (!isInitialLoadComplete) {
-          sseLogsBuffer.push(logLine);
-        } else {
-          // Após o carregamento inicial, adiciona logs normalmente
-          setConsoleOutput(prev => {
-            // Normaliza a linha: remove quebras de linha no final e adiciona uma única
-            const normalizedLine = logLine.replace(/\n+$/, '') + '\n';
-            
-            if (!prev) {
-              return normalizedLine;
-            }
-            
-            // Se o conteúdo anterior não termina com quebra de linha, adiciona uma
-            const separator = prev.endsWith('\n') ? '' : '\n';
-            return prev + separator + normalizedLine;
-          });
-        }
-      }
-    });
 
     return () => {
       unsubscribe();
       sseService.disconnectLogs(cluster.id);
     };
-  }, [cluster, status, isLogsPaused]);
+  }, [cluster, status, isLogsPaused, formatLogLine]);
 
   // Auto-scroll do console
   useEffect(() => {

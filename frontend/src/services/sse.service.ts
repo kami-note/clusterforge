@@ -9,8 +9,16 @@ import { STORAGE_KEYS } from '@/constants';
 
 export type { ClusterMetrics };
 
+export interface ContainerLogEventPayload {
+  containerId: string;
+  stream?: string;
+  message: string;
+  timestamp?: string;
+  epochSecond?: number;
+}
+
 type MetricsCallback = (clusterId: string | number, metrics: ClusterMetrics) => void;
-type LogsCallback = (clusterId: string | number, logLine: string) => void;
+type LogsCallback = (clusterId: string | number, logEvent: ContainerLogEventPayload) => void;
 type ConnectionCallback = (clusterId: string | number, connected: boolean) => void;
 type AllClustersConnectionCallback = (connected: boolean) => void;
 
@@ -20,6 +28,11 @@ interface SseConnection {
   connected: boolean;
   reconnectAttempts: number;
   reconnectTimeout: NodeJS.Timeout | null;
+}
+
+interface LogsConnection extends SseConnection {
+  containerId: string;
+  lastTimestamp?: number;
 }
 
 interface AllClustersConnection {
@@ -55,7 +68,7 @@ const debugWarn = (...args: unknown[]): void => {
 
 class SseService {
   private connections: Map<string | number, SseConnection> = new Map();
-  private logConnections: Map<string | number, SseConnection> = new Map();
+  private logConnections: Map<string | number, LogsConnection> = new Map();
   private allClustersConnection: AllClustersConnection | null = null;
   private metricsCallbacks: Set<MetricsCallback> = new Set();
   private logsCallbacks: Set<LogsCallback> = new Set();
@@ -948,33 +961,35 @@ class SseService {
       return;
     }
 
+    const lastKnownTimestamp = sinceSeconds ?? existingConnection?.lastTimestamp;
+
     if (existingConnection) {
       this.disconnectLogs(clusterId);
       await new Promise(resolve => setTimeout(resolve, SSE_CONFIG.DISCONNECT_DELAY_MS));
     }
 
-    const connection: SseConnection = {
+    const connection: LogsConnection = {
       eventSource: null,
       clusterId,
       connected: false,
       reconnectAttempts: 0,
       reconnectTimeout: null,
+      containerId,
+      lastTimestamp: lastKnownTimestamp,
     };
 
-    (connection as any).containerId = containerId;
     this.logConnections.set(clusterId, connection);
 
     try {
-      // Se sinceSeconds foi fornecido, usa para evitar duplicação com logs iniciais
-      // Caso contrário, usa tail=100 para histórico inicial
       const params = new URLSearchParams({
-        timeoutMillis: SSE_CONFIG.STREAM_TIMEOUT_MS.toString()
+        timeoutMillis: SSE_CONFIG.STREAM_TIMEOUT_MS.toString(),
       });
-      if (sinceSeconds !== undefined) {
-        params.append('since', sinceSeconds.toString());
+      if (lastKnownTimestamp !== undefined && Number.isFinite(lastKnownTimestamp)) {
+        params.append('since', Math.max(0, Math.floor(lastKnownTimestamp)).toString());
       } else {
         params.append('tail', '100');
       }
+
       const url = `${config.api.baseUrl}/docker/containers/${containerId}/logs/stream?${params.toString()}`;
       const controller = new AbortController();
       connection.eventSource = controller;
@@ -982,8 +997,8 @@ class SseService {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'text/event-stream',
+          Authorization: `Bearer ${token}`,
+          Accept: 'text/event-stream',
         },
         signal: controller.signal,
       });
@@ -1003,7 +1018,7 @@ class SseService {
       }
       console.error(`❌ Erro ao conectar SSE de logs para cluster ${clusterId}:`, error);
       this.disconnectLogs(clusterId);
-      this.scheduleLogsReconnect(clusterId, containerId, connection);
+      this.scheduleLogsReconnect(clusterId, connection);
     }
   }
 
@@ -1030,7 +1045,7 @@ class SseService {
   private async processLogsStream(
     response: Response,
     clusterId: string | number,
-    connection: SseConnection,
+    connection: LogsConnection,
     containerId: string,
     signal: AbortSignal
   ): Promise<void> {
@@ -1045,6 +1060,15 @@ class SseService {
 
       let eventType = 'log';
       let data = '';
+      const emitLogEvent = (raw: string) => {
+        const logEvent = this.parseLogEvent(raw, containerId);
+        if (logEvent) {
+          if (typeof logEvent.epochSecond === 'number' && !Number.isNaN(logEvent.epochSecond)) {
+            connection.lastTimestamp = logEvent.epochSecond;
+          }
+          this.notifyLogsCallbacks(clusterId, logEvent);
+        }
+      };
 
       while (!signal.aborted) {
         const { done, value } = await reader.read();
@@ -1071,7 +1095,7 @@ class SseService {
           } else if (line === '' || line === '\r') {
             // Linha vazia indica fim de evento SSE
             if (data && eventType === 'log') {
-              this.notifyLogsCallbacks(clusterId, data);
+              emitLogEvent(data);
             }
             data = '';
             eventType = 'log';
@@ -1082,7 +1106,7 @@ class SseService {
         if (done) {
           // Se há dados acumulados mas não processados (sem linha vazia final)
           if (data && eventType === 'log') {
-            this.notifyLogsCallbacks(clusterId, data);
+            emitLogEvent(data);
             data = '';
           }
           
@@ -1092,11 +1116,11 @@ class SseService {
             if (buffer.startsWith('data:')) {
               const dataLine = buffer.substring(5).trim();
               if (dataLine) {
-                this.notifyLogsCallbacks(clusterId, dataLine);
+                emitLogEvent(dataLine);
               }
             } else if (buffer.trim() && !buffer.startsWith('event:')) {
               // Linha de dados sem prefixo 'data:' - trata como log direto
-              this.notifyLogsCallbacks(clusterId, buffer.trim());
+              emitLogEvent(buffer.trim());
             }
           }
           break;
@@ -1111,7 +1135,7 @@ class SseService {
     } finally {
       connection.connected = false;
       if (connection.reconnectAttempts < this.maxReconnectAttempts) {
-        this.scheduleLogsReconnect(clusterId, containerId, connection);
+        this.scheduleLogsReconnect(clusterId, connection);
       } else {
         this.disconnectLogs(clusterId);
       }
@@ -1123,11 +1147,18 @@ class SseService {
    */
   private scheduleLogsReconnect(
     clusterId: string | number,
-    containerId: string,
-    connection: SseConnection
+    connection: LogsConnection
   ): void {
     if (connection.reconnectTimeout) {
       clearTimeout(connection.reconnectTimeout);
+    }
+
+    // Guardar containerId antes de desconectar (pode ser perdido se conexão for deletada)
+    const containerId = connection.containerId;
+    if (!containerId) {
+      debugLog(`⚠️ Não é possível reconectar: containerId não disponível para cluster ${clusterId}`);
+      this.disconnectLogs(clusterId);
+      return;
     }
 
     connection.reconnectAttempts++;
@@ -1136,8 +1167,12 @@ class SseService {
     );
 
     connection.reconnectTimeout = setTimeout(() => {
+      const sinceSeconds = connection.lastTimestamp;
+      const nextSince = typeof sinceSeconds === 'number' && Number.isFinite(sinceSeconds)
+        ? sinceSeconds
+        : undefined;
       this.disconnectLogs(clusterId);
-      this.connectLogs(clusterId, containerId).catch((err) => {
+      this.connectLogs(clusterId, containerId, nextSince).catch((err) => {
         if (process.env.NODE_ENV === 'development') {
           console.error(`Erro ao reconectar SSE de logs para cluster ${clusterId}:`, err);
         }
@@ -1154,12 +1189,64 @@ class SseService {
   }
 
   /**
-   * Notifica callbacks de logs
+   * Parseia evento de log do SSE (JSON ou texto puro)
    */
-  private notifyLogsCallbacks(clusterId: string | number, logLine: string): void {
+  private parseLogEvent(rawData: string, containerId: string): ContainerLogEventPayload | null {
+    if (!rawData || !rawData.trim()) {
+      return null;
+    }
+
+    // Tentar parsear como JSON primeiro
+    try {
+      const parsed = JSON.parse(rawData) as ContainerLogEventPayload;
+      
+      // Se for um array (múltiplos eventos), pegar apenas o primeiro
+      if (Array.isArray(parsed)) {
+        if (parsed.length === 0) {
+          return null;
+        }
+        const firstEvent = parsed[0] as ContainerLogEventPayload;
+        return this.normalizeLogEvent(firstEvent, containerId);
+      }
+      
+      return this.normalizeLogEvent(parsed, containerId);
+    } catch (error) {
+      // Se não for JSON válido, tratar como texto puro
+      if (process.env.NODE_ENV === 'development') {
+        debugLog('Falha ao converter evento de log SSE. Usando fallback de texto puro.', error);
+      }
+      return {
+        containerId,
+        stream: 'STDOUT',
+        message: rawData.trim(),
+      };
+    }
+  }
+
+  /**
+   * Normaliza evento de log parseado
+   */
+  private normalizeLogEvent(parsed: ContainerLogEventPayload, containerId: string): ContainerLogEventPayload {
+    const epochSecond =
+      typeof parsed.epochSecond === 'number'
+        ? parsed.epochSecond
+        : typeof parsed.epochSecond === 'string'
+          ? Number(parsed.epochSecond)
+          : undefined;
+
+    return {
+      containerId: parsed.containerId ?? containerId,
+      stream: parsed.stream ?? 'STDOUT',
+      message: parsed.message ?? '',
+      timestamp: parsed.timestamp,
+      epochSecond: Number.isFinite(epochSecond) && !Number.isNaN(epochSecond) ? epochSecond : undefined,
+    };
+  }
+
+  private notifyLogsCallbacks(clusterId: string | number, logEvent: ContainerLogEventPayload): void {
     this.logsCallbacks.forEach((callback) => {
       try {
-        callback(clusterId, logLine);
+        callback(clusterId, logEvent);
       } catch (error) {
         console.error('Erro em callback de logs:', error);
       }

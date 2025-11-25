@@ -12,15 +12,15 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.nio.charset.StandardCharsets;
-
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Statistics;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
+import com.kryptforge.clusterforge.docker.dto.ContainerLogEvent;
 import com.kryptforge.clusterforge.docker.dto.ClusterMetricsEvent;
 import com.kryptforge.clusterforge.docker.dto.ContainerStats;
+import com.kryptforge.clusterforge.docker.util.ContainerLogParser;
 
 /**
  * Serviço para stream de métricas (stats) via SSE.
@@ -300,7 +300,7 @@ public class DockerStreamService {
 				var cmd = dockerClient.logContainerCmd(containerId)
 					.withStdOut(true)
 					.withStdErr(true)
-					.withTimestamps(false)
+					.withTimestamps(true)
 					.withFollowStream(true); // Segue logs em tempo real
 
 				if (tailLines != null) {
@@ -318,10 +318,12 @@ public class DockerStreamService {
 						if (closed) return;
 						try {
 							if (frame != null && frame.getPayload() != null) {
-								String logLine = new String(frame.getPayload(), StandardCharsets.UTF_8);
-								emitter.send(SseEmitter.event()
-									.name("log")
-									.data(logLine));
+								ContainerLogEvent event = ContainerLogParser.parseFrame(containerId, frame);
+								if (event != null) {
+									emitter.send(SseEmitter.event()
+										.name("log")
+										.data(event, MediaType.APPLICATION_JSON));
+								}
 							}
 						} catch (IOException e) {
 							try { emitter.completeWithError(e); } catch (Exception ignored) {}

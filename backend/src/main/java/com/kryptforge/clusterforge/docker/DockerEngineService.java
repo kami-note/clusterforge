@@ -6,6 +6,7 @@ import java.util.Map;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.Image;
+import com.kryptforge.clusterforge.docker.dto.ContainerLogsResponse;
 
 /**
  * Serviço de integração com a Docker Engine.
@@ -36,7 +37,7 @@ public interface DockerEngineService {
 	InspectContainerResponse inspectContainer(String containerId);
 
 	// Execução e logs
-	String getContainerLogs(String containerId, boolean stdout, boolean stderr, Integer tailLines, Integer sinceSeconds);
+	ContainerLogsResponse getContainerLogs(String containerId, boolean stdout, boolean stderr, Integer tailLines, Integer sinceSeconds);
 	String execInContainer(String containerId, List<String> command, boolean attachStdout, boolean attachStderr);
 }
 

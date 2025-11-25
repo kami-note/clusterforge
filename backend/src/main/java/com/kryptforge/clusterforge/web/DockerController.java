@@ -17,6 +17,7 @@ import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.DockerQueryService;
 import com.kryptforge.clusterforge.docker.DockerStreamService;
 import com.kryptforge.clusterforge.docker.dto.ContainerDetail;
+import com.kryptforge.clusterforge.docker.dto.ContainerLogsResponse;
 import com.kryptforge.clusterforge.docker.dto.ContainerSummary;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -69,17 +70,14 @@ public class DockerController {
 	}
 
 	@GetMapping("/containers/{id}/logs")
-	public ResponseEntity<Map<String, Object>> getContainerLogs(
+	public ResponseEntity<?> getContainerLogs(
 		@PathVariable("id") String id,
 		@RequestParam(name = "tail", required = false) Integer tailLines,
 		@RequestParam(name = "since", required = false) Integer sinceSeconds
 	) {
 		try {
-			String logs = dockerEngineService.getContainerLogs(id, true, true, tailLines, sinceSeconds);
-			return ResponseEntity.ok(Map.of(
-				"logs", logs != null ? logs : "",
-				"containerId", id
-			));
+			ContainerLogsResponse response = dockerEngineService.getContainerLogs(id, true, true, tailLines, sinceSeconds);
+			return ResponseEntity.ok(response);
 		} catch (Exception e) {
 			return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
 				.body(Map.of(

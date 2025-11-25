@@ -32,6 +32,12 @@ export interface UpdateClusterLimitsRequest {
   networkLimit?: number;
 }
 
+export interface ContainerLogsResponse {
+  containerId: string;
+  logs: string;
+  lastTimestamp?: number;
+}
+
 class ClusterService {
   /**
    * Garante que o cluster possui um containerId disponível para operações Docker.
@@ -216,7 +222,7 @@ class ClusterService {
     clusterId: string | number,
     tailLines?: number,
     sinceSeconds?: number
-  ): Promise<string> {
+  ): Promise<ContainerLogsResponse> {
     const { containerId } = await this.ensureClusterContainer(clusterId);
     const params = new URLSearchParams();
     if (tailLines !== undefined) {
@@ -227,8 +233,7 @@ class ClusterService {
     }
     const queryString = params.toString();
     const url = `/docker/containers/${containerId}/logs${queryString ? `?${queryString}` : ''}`;
-    const response = await httpClient.get<{ logs: string; containerId: string }>(url);
-    return response.logs || '';
+    return httpClient.get<ContainerLogsResponse>(url);
   }
 }
 

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -27,6 +28,9 @@ import com.github.dockerjava.api.model.InternetProtocol;
 import com.github.dockerjava.api.model.RestartPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.kryptforge.clusterforge.docker.dto.ContainerLogsResponse;
+import com.kryptforge.clusterforge.docker.util.ContainerLogParser;
 
 @Service
 public class DefaultDockerEngineService implements DockerEngineService {
@@ -193,18 +197,19 @@ public class DefaultDockerEngineService implements DockerEngineService {
 	}
 
 	@Override
-	public String getContainerLogs(String containerId,
-								   boolean stdout,
-								   boolean stderr,
-								   Integer tailLines,
-								   Integer sinceSeconds) {
+	public ContainerLogsResponse getContainerLogs(String containerId,
+												  boolean stdout,
+												  boolean stderr,
+												  Integer tailLines,
+												  Integer sinceSeconds) {
 		requireText(containerId, "containerId");
 		StringBuilder sb = new StringBuilder(4096);
+		AtomicReference<Long> lastTimestamp = new AtomicReference<>(null);
 		try {
 			var cmd = dockerClient.logContainerCmd(containerId)
 				.withStdOut(stdout)
 				.withStdErr(stderr)
-				.withTimestamps(false);
+				.withTimestamps(true);
 			if (tailLines != null) {
 				cmd.withTail(tailLines);
 			}
@@ -214,8 +219,14 @@ public class DefaultDockerEngineService implements DockerEngineService {
 			cmd.exec(new ResultCallback.Adapter<Frame>() {
 				@Override
 				public void onNext(Frame frame) {
-					if (frame != null && frame.getPayload() != null) {
-						sb.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+					var event = ContainerLogParser.parseFrame(containerId, frame);
+					if (event != null) {
+						sb.append(event.getMessage());
+						// Atualizar lastTimestamp apenas se o evento tiver timestamp válido
+						// (epochSecond sempre existe, mas pode ser baseado em Instant.now() se não houver timestamp no log)
+						if (event.getTimestamp() != null) {
+							lastTimestamp.set(event.getEpochSecond());
+						}
 					}
 				}
 			}).awaitCompletion();
@@ -224,7 +235,7 @@ public class DefaultDockerEngineService implements DockerEngineService {
 		} catch (Exception e) {
 			throw new IllegalStateException("Falha ao obter logs do container " + containerId, e);
 		}
-		return sb.toString();
+		return new ContainerLogsResponse(containerId, sb.toString(), lastTimestamp.get());
 	}
 
 	@Override
