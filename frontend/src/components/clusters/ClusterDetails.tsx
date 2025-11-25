@@ -1089,12 +1089,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         }
       } else if (action === 'restart') {
         const toastId = toast.loading('Reiniciando cluster...');
-        // Primeiro parar
-        await clusterService.stopCluster(cluster.id);
-        // Aguardar um pouco antes de iniciar
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        // Depois iniciar
-        await clusterService.startCluster(cluster.id);
+        await clusterService.restartCluster(cluster.id);
         toast.success('Cluster reiniciado com sucesso!', { id: toastId });
         // Recarregar dados do cluster
         const updated = await findClusterById(cluster.id);

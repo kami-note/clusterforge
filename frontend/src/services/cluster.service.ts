@@ -195,29 +195,40 @@ class ClusterService {
   /**
    * Inicia um cluster
    * Usa timeout maior (60s) pois operações de start podem demorar
+   * Agora usa o endpoint do ClusterController que atualiza o status imediatamente
    */
   async startCluster(clusterId: string | number): Promise<ClusterDetailsResponse> {
-    const { containerId } = await this.ensureClusterContainer(clusterId);
-    await httpClient.post<void>(
-      `/docker/containers/${containerId}/start`,
+    return httpClient.post<ClusterDetailsResponse>(
+      `/clusters/${clusterId}/start`,
       undefined,
       60000
     );
-    return this.getCluster(clusterId);
   }
 
   /**
    * Para um cluster
    * Usa timeout maior (60s) pois operações de stop podem demorar
+   * Agora usa o endpoint do ClusterController que atualiza o status imediatamente
    */
   async stopCluster(clusterId: string | number, timeoutSeconds: number = 10): Promise<ClusterDetailsResponse> {
-    const { containerId } = await this.ensureClusterContainer(clusterId);
-    await httpClient.post<void>(
-      `/docker/containers/${containerId}/stop?timeout=${encodeURIComponent(timeoutSeconds)}`,
+    return httpClient.post<ClusterDetailsResponse>(
+      `/clusters/${clusterId}/stop?timeout=${encodeURIComponent(timeoutSeconds)}`,
       undefined,
       60000
     );
-    return this.getCluster(clusterId);
+  }
+
+  /**
+   * Reinicia um cluster (para e inicia novamente)
+   * Usa timeout maior (90s) pois operações de restart podem demorar mais
+   * Agora usa o endpoint do ClusterController que atualiza o status imediatamente
+   */
+  async restartCluster(clusterId: string | number, timeoutSeconds: number = 10): Promise<ClusterDetailsResponse> {
+    return httpClient.post<ClusterDetailsResponse>(
+      `/clusters/${clusterId}/restart?timeout=${encodeURIComponent(timeoutSeconds)}`,
+      undefined,
+      90000
+    );
   }
 
   /**

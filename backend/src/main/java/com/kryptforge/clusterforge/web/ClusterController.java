@@ -10,8 +10,10 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -192,6 +194,33 @@ public class ClusterController {
 		} catch (IllegalArgumentException e) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
 		}
+	}
+
+	@PostMapping("/{id}/start")
+	public ClusterResponse startCluster(@PathVariable("id") UUID id) {
+		ClusterInstance updated = service.startContainer(id);
+		// Usa status do banco que foi atualizado pelo service (garante consistência imediata)
+		return ClusterResponse.from(updated, updated.getStatus(), resolveOwnerName(updated.getOwnerId()));
+	}
+
+	@PostMapping("/{id}/stop")
+	public ClusterResponse stopCluster(
+		@PathVariable("id") UUID id,
+		@RequestParam(name = "timeout", defaultValue = "10") int timeoutSeconds
+	) {
+		ClusterInstance updated = service.stopContainer(id, timeoutSeconds);
+		// Usa status do banco que foi atualizado pelo service (garante consistência imediata)
+		return ClusterResponse.from(updated, updated.getStatus(), resolveOwnerName(updated.getOwnerId()));
+	}
+
+	@PostMapping("/{id}/restart")
+	public ClusterResponse restartCluster(
+		@PathVariable("id") UUID id,
+		@RequestParam(name = "timeout", defaultValue = "10") int timeoutSeconds
+	) {
+		ClusterInstance updated = service.restartContainer(id, timeoutSeconds);
+		// Usa status do banco que foi atualizado pelo service (garante consistência imediata)
+		return ClusterResponse.from(updated, updated.getStatus(), resolveOwnerName(updated.getOwnerId()));
 	}
 
 	@DeleteMapping("/{id}")

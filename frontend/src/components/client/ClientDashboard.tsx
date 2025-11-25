@@ -34,11 +34,7 @@ const performClusterAction = async (clusterId: string, action: 'start' | 'stop' 
       await clusterService.stopCluster(clusterId);
       return true;
     } else if (action === 'restart') {
-      // Primeiro parar, depois iniciar
-      await clusterService.stopCluster(clusterId);
-      // Aguardar um pouco antes de iniciar
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await clusterService.startCluster(clusterId);
+      await clusterService.restartCluster(clusterId);
       return true;
     }
     return false;

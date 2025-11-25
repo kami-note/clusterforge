@@ -42,6 +42,14 @@ public interface ClusterService {
 	ClusterInstance stopContainer(UUID id, int timeoutSeconds);
 
 	/**
+	 * Reinicia o container Docker (para e inicia novamente).
+	 * @param id ID da instância
+	 * @param timeoutSeconds timeout em segundos para parar o container antes de reiniciar
+	 * @return instância atualizada
+	 */
+	ClusterInstance restartContainer(UUID id, int timeoutSeconds);
+
+	/**
 	 * Remove o container Docker e o registro do banco de dados.
 	 * @param id ID da instância
 	 */

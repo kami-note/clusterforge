@@ -875,35 +875,48 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         case 'restart': {
           const toastId = toast.loading('Reiniciando cluster em segundo plano...', { id: `action-${clusterId}` });
           
-          // Primeiro parar o cluster em background
-          stopClusterWithVerification(clusterId);
+          // Marcar como processando
+          setProcessingClusters(prev => new Set(prev).add(clusterId));
           
-          // Aguardar um tempo e depois iniciar (em background também)
-          setTimeout(() => {
-            toast.loading('Aguardando parada para reiniciar...', { id: toastId });
-            
-            // Verificar se parou antes de iniciar
-            const checkAndStart = async () => {
-              try {
-                const clusterDetails = await clusterService.getCluster(clusterId);
-                if (clusterDetails.status === 'STOPPED') {
-                  toast.loading('Reiniciando cluster...', { id: toastId });
-                  startClusterWithVerification(clusterId);
-                  // O sucesso será mostrado pela função startClusterWithVerification
-                } else {
-                  // Tentar novamente após mais alguns segundos
-                  setTimeout(checkAndStart, 3000);
-                }
-              } catch {
-                // Se erro, tenta iniciar mesmo assim
-                toast.loading('Reiniciando cluster...', { id: toastId });
-                startClusterWithVerification(clusterId);
+          // Usar o novo método de restart que faz tudo em uma chamada
+          clusterService.restartCluster(clusterId)
+            .then((restartResponse) => {
+              toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
+              
+              // Polling em background para verificar status
+              pollClusterStartStatus(clusterId, restartResponse, String(toastId));
+            })
+            .catch((error: unknown) => {
+              const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+              if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+                console.error('Erro ao reiniciar cluster:', error);
               }
-            };
-            
-            // Aguardar 3 segundos antes de verificar
-            setTimeout(checkAndStart, 3000);
-          }, 2000);
+              
+              const apiError = error as any;
+              if (apiError.name === 'TimeoutError') {
+                toast.warning(
+                  'A reinicialização do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
+                  { 
+                    id: String(toastId),
+                    duration: 5000 
+                  }
+                );
+                pollClusterStartStatus(clusterId, null, String(toastId));
+                return;
+              }
+              
+              const errorDetails = parseDockerError(errorMessage);
+              if (errorDetails) {
+                setClusterErrors(prev => ({ ...prev, [clusterId]: errorDetails }));
+              }
+              
+              toast.error(`Erro ao reiniciar cluster: ${errorMessage}`, { id: String(toastId) });
+              setProcessingClusters(prev => {
+                const next = new Set(prev);
+                next.delete(clusterId);
+                return next;
+              });
+            });
           
           break;
         }
