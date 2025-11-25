@@ -5,7 +5,14 @@ import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { 
+  ChartContainer, 
+  ChartTooltip, 
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent 
+} from '@/components/ui/chart';
 import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick, Plus, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -240,11 +247,18 @@ export function ClientDashboard() {
     }
   };
 
+  const chartConfig = {
+    value: {
+      label: "Uso (%)",
+      color: "#3b82f6",
+    },
+  };
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-8 p-6 lg:p-8">
       <div className="flex items-center justify-between">
-        <div>
-          <h1>Dashboard do Cliente</h1>
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold">Dashboard do Cliente</h1>
           <p className="text-muted-foreground">Visão geral dos seus serviços e clusters</p>
         </div>
         <Button className="flex items-center space-x-2" onClick={handleCreateCluster}>
@@ -254,48 +268,51 @@ export function ClientDashboard() {
       </div>
 
       {/* Resumo de Recursos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm">CPU Total</CardTitle>
+            <CardTitle className="text-sm font-medium">CPU Total</CardTitle>
             <Cpu className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{Math.round(aggregatedMetrics.cpuPercent)}%</div>
+            <div className="text-2xl font-bold">{Math.round(aggregatedMetrics.cpuPercent)}%</div>
             <Progress value={aggregatedMetrics.cpuPercent} className="mt-2" />
+            <p className="text-xs text-muted-foreground mt-2">utilização média</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm">Memória</CardTitle>
+            <CardTitle className="text-sm font-medium">Memória</CardTitle>
             <MemoryStick className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{Math.round(aggregatedMetrics.memoryPercent)}%</div>
+            <div className="text-2xl font-bold">{Math.round(aggregatedMetrics.memoryPercent)}%</div>
             <Progress value={aggregatedMetrics.memoryPercent} className="mt-2" />
+            <p className="text-xs text-muted-foreground mt-2">utilização média</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm">Armazenamento</CardTitle>
+            <CardTitle className="text-sm font-medium">Armazenamento</CardTitle>
             <HardDrive className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{Math.round(aggregatedMetrics.storagePercent)}%</div>
+            <div className="text-2xl font-bold">{Math.round(aggregatedMetrics.storagePercent)}%</div>
             <Progress value={aggregatedMetrics.storagePercent} className="mt-2" />
+            <p className="text-xs text-muted-foreground mt-2">utilização média</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm">Clusters Ativos</CardTitle>
+            <CardTitle className="text-sm font-medium">Clusters Ativos</CardTitle>
             <Server className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{clusters.filter(c => c.status === 'running').length}/{clusters.length}</div>
-            <p className="text-xs text-muted-foreground mt-2">clusters em execução</p>
+            <div className="text-2xl font-bold">{clusters.filter(c => c.status === 'running' || c.status === 'active').length}/{clusters.length}</div>
+            <p className="text-xs text-muted-foreground">clusters em execução</p>
           </CardContent>
         </Card>
       </div>
@@ -307,15 +324,15 @@ export function ClientDashboard() {
           <CardDescription>Utilização atual dos recursos do sistema</CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={200}>
+          <ChartContainer config={chartConfig} className="h-[200px] w-full">
             <BarChart data={usageData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="value" fill="hsl(var(--chart-1))" />
+              <YAxis domain={[0, 100]} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Bar dataKey="value" fill="var(--color-value)" />
             </BarChart>
-          </ResponsiveContainer>
+          </ChartContainer>
         </CardContent>
       </Card>
 
@@ -325,7 +342,7 @@ export function ClientDashboard() {
           <CardTitle>Seus Clusters</CardTitle>
           <CardDescription>Gerencie e monitore seus clusters</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           {clusters.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Server className="h-12 w-12 mx-auto mb-3 text-muted" />

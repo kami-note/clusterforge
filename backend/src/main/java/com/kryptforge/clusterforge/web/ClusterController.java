@@ -48,9 +48,12 @@ public class ClusterController {
 		org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ClusterController.class);
 		
 		return service.list().stream()
-			// Filtra apenas instâncias que têm containerId (têm container Docker)
-			.filter(instance -> instance.getContainerId() != null && !instance.getContainerId().isBlank())
 			.map(instance -> {
+				// Se não tem containerId, usa status do banco de dados
+				if (instance.getContainerId() == null || instance.getContainerId().isBlank()) {
+					return ClusterResponse.from(instance, instance.getStatus(), resolveOwnerName(instance.getOwnerId()));
+				}
+				
 				try {
 					// Busca status real do Docker
 					ClusterStatus dockerStatus = getDockerStatus(instance.getContainerId());
@@ -108,6 +111,40 @@ public class ClusterController {
 			return ClusterStatus.ERROR;
 		}
 		return ClusterStatus.ERROR;
+	}
+
+	@GetMapping("/user/{userId}")
+	public List<ClusterResponse> listByUser(@PathVariable("userId") UUID userId) {
+		org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ClusterController.class);
+		
+		// Retorna apenas clusters do usuário especificado
+		return service.list().stream()
+			.filter(instance -> userId.equals(instance.getOwnerId()))
+			.map(instance -> {
+				// Se não tem containerId, usa status do banco de dados
+				if (instance.getContainerId() == null || instance.getContainerId().isBlank()) {
+					return ClusterResponse.from(instance, instance.getStatus(), resolveOwnerName(instance.getOwnerId()));
+				}
+				
+				try {
+					// Busca status real do Docker
+					ClusterStatus dockerStatus = getDockerStatus(instance.getContainerId());
+					
+					// Se container foi deletado, filtra da listagem (não mostra)
+					if (dockerStatus == ClusterStatus.DELETED) {
+						log.debug("Container {} deletado, filtrando da listagem", instance.getContainerId());
+						return null;
+					}
+					
+					return ClusterResponse.from(instance, dockerStatus, resolveOwnerName(instance.getOwnerId()));
+				} catch (Exception e) {
+					log.warn("Erro ao obter status do Docker para container {}: {}", 
+						instance.getContainerId(), e.getMessage());
+					return ClusterResponse.from(instance, instance.getStatus(), resolveOwnerName(instance.getOwnerId()));
+				}
+			})
+			.filter(response -> response != null)
+			.toList();
 	}
 
 	@GetMapping("/{id}")
