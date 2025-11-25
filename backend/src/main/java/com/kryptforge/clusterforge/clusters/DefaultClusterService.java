@@ -17,6 +17,7 @@ import com.kryptforge.clusterforge.templates.TemplateService;
 import com.kryptforge.clusterforge.users.CurrentUser;
 import com.kryptforge.clusterforge.users.Role;
 import com.kryptforge.clusterforge.users.User;
+import com.kryptforge.clusterforge.users.UserRepository;
 import com.kryptforge.clusterforge.webdav.WebDavService;
 
 @Service
@@ -30,9 +31,10 @@ public class DefaultClusterService implements ClusterService {
 	private final CurrentUser currentUser;
 	private final FtpService ftpService;
 	private final WebDavService webDavService;
+	private final UserRepository userRepository;
 	private static final Logger log = LoggerFactory.getLogger(DefaultClusterService.class);
 
-	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager, CurrentUser currentUser, FtpService ftpService, WebDavService webDavService) {
+	public DefaultClusterService(ClusterRepository repository, TemplateService templateService, DockerEngineService dockerEngineService, PortManager portManager, CurrentUser currentUser, FtpService ftpService, WebDavService webDavService, UserRepository userRepository) {
 		this.repository = repository;
 		this.templateService = templateService;
 		this.dockerEngineService = dockerEngineService;
@@ -40,6 +42,7 @@ public class DefaultClusterService implements ClusterService {
 		this.currentUser = currentUser;
 		this.ftpService = ftpService;
 		this.webDavService = webDavService;
+		this.userRepository = userRepository;
 	}
 
 	@Override
@@ -141,6 +144,29 @@ public class DefaultClusterService implements ClusterService {
 			if (params.volumes() != null) c.setVolumes(params.volumes());
 		}
 		return repository.save(c);
+	}
+
+	@Override
+	public ClusterInstance updateOwner(UUID id, UUID ownerId) {
+		User user = currentUser.getCurrentUser()
+			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+
+		if (user.getRole() != Role.ADMIN) {
+			throw new IllegalArgumentException("apenas administradores podem alterar o proprietário de um cluster");
+		}
+
+		ClusterInstance cluster = repository.findById(id)
+			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+
+		if (ownerId == null) {
+			cluster.setOwnerId(null);
+		} else {
+			User newOwner = userRepository.findById(ownerId)
+				.orElseThrow(() -> new IllegalArgumentException("usuário não encontrado"));
+			cluster.setOwnerId(newOwner.getId());
+		}
+
+		return repository.save(cluster);
 	}
 
 	// Métodos updateContainerId, updateFtpInfo e updateWebDavInfo removidos da interface pública

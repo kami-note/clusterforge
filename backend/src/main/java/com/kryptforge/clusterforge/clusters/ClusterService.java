@@ -16,6 +16,8 @@ public interface ClusterService {
 
 	ClusterInstance updateParams(UUID id, ClusterParams params);
 
+	ClusterInstance updateOwner(UUID id, UUID ownerId);
+
 	/**
 	 * Sincroniza o status da instância com o estado real do container Docker.
 	 * Verifica se o container existe e qual é seu estado atual.

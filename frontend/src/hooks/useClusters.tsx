@@ -18,6 +18,7 @@ interface ClustersContextType {
   updateCluster: (id: string, updates: Partial<Cluster>) => Promise<void>;
   deleteCluster: (id: string) => Promise<void>;
   loading: boolean;
+  reloadClusters: () => Promise<void>;
 }
 
 const ClustersContext = createContext<ClustersContextType | undefined>(undefined);
@@ -104,7 +105,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               memory: details.memoryLimit ? memoryMbToGb(details.memoryLimit) : 0,
               storage: details.diskLimit || 0,
               lastUpdate: details.updatedAt || details.createdAt || 'desconhecido',
-              owner: details.user?.username || 'Desconhecido',
+              owner: details.ownerUsername || 'Não atribuído',
+              ownerId: details.ownerId || undefined,
               serviceType: formatTemplateName(details.templateName) || details.rootPath || 'Custom',
               service: null,
               startupCommand: '',
@@ -124,7 +126,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               memory: cluster.memoryLimit ? memoryMbToGb(cluster.memoryLimit) : 0,
               storage: cluster.diskLimit || 0,
               lastUpdate: cluster.updatedAt || cluster.createdAt || 'desconhecido',
-              owner: cluster.owner?.userId?.toString() || 'Desconhecido',
+              owner: cluster.ownerUsername || 'Desconhecido',
+              ownerId: cluster.ownerId,
               serviceType: formatTemplateName(cluster.templateName) || cluster.rootPath || 'Custom',
               service: null,
               startupCommand: '',
@@ -312,7 +315,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ClustersContext.Provider value={{ clusters, addCluster, findClusterById, updateCluster, deleteCluster, loading }}>
+    <ClustersContext.Provider value={{ clusters, addCluster, findClusterById, updateCluster, deleteCluster, loading, reloadClusters: loadClusters }}>
       {children}
     </ClustersContext.Provider>
   );

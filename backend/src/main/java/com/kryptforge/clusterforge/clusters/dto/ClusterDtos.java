@@ -50,13 +50,19 @@ public final class ClusterDtos {
 		List<String> volumes,
 		String containerId,
 		AccessInfo ftp,
-		AccessInfo webDav
+		AccessInfo webDav,
+		UUID ownerId,
+		String ownerUsername
 	) {
 		public static ClusterResponse from(ClusterInstance c) {
-			return from(c, c.getStatus());
+			return from(c, c.getStatus(), null);
 		}
 
 		public static ClusterResponse from(ClusterInstance c, ClusterStatus status) {
+			return from(c, status, null);
+		}
+
+		public static ClusterResponse from(ClusterInstance c, ClusterStatus status, String ownerUsername) {
 			return new ClusterResponse(
 				c.getId(),
 				c.getName(),
@@ -69,7 +75,9 @@ public final class ClusterDtos {
 				c.getVolumes(),
 				c.getContainerId(),
 				new AccessInfo(c.getFtpContainerId(), c.getFtpPort(), c.getFtpUser(), c.getFtpPassword()),
-				new AccessInfo(c.getWebDavContainerId(), c.getWebDavPort(), c.getWebDavUser(), c.getWebDavPassword())
+				new AccessInfo(c.getWebDavContainerId(), c.getWebDavPort(), c.getWebDavUser(), c.getWebDavPassword()),
+				c.getOwnerId(),
+				ownerUsername
 			);
 		}
 	}
@@ -79,6 +87,10 @@ public final class ClusterDtos {
 		Integer port,
 		String username,
 		String password
+	) {}
+
+	public record ClusterOwnerUpdateRequest(
+		String ownerId
 	) {}
 }
 

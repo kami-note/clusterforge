@@ -13,8 +13,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
-
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.templates.TemplateService;
@@ -23,6 +21,7 @@ import com.kryptforge.clusterforge.templates.dto.TemplateFileEntry;
 import com.kryptforge.clusterforge.users.CurrentUser;
 import com.kryptforge.clusterforge.users.Role;
 import com.kryptforge.clusterforge.users.User;
+import com.kryptforge.clusterforge.users.UserRepository;
 import com.kryptforge.clusterforge.webdav.WebDavService;
 
 class DefaultClusterServiceTest {
@@ -34,6 +33,7 @@ class DefaultClusterServiceTest {
 	private CurrentUser currentUser;
 	private com.kryptforge.clusterforge.ftp.FtpService ftpService;
 	private WebDavService webDavService;
+	private UserRepository userRepository;
 	private DefaultClusterService service;
 	private User mockUser;
 
@@ -46,6 +46,7 @@ class DefaultClusterServiceTest {
 		currentUser = mock(CurrentUser.class);
 		ftpService = mock(com.kryptforge.clusterforge.ftp.FtpService.class);
 		webDavService = mock(WebDavService.class);
+		userRepository = mock(UserRepository.class);
 		
 		// Cria usuário mock para todos os testes
 		mockUser = new User();
@@ -63,7 +64,7 @@ class DefaultClusterServiceTest {
 		// Mock CurrentUser para retornar usuário autenticado
 		when(currentUser.getCurrentUser()).thenReturn(Optional.of(mockUser));
 		
-		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager, currentUser, ftpService, webDavService);
+		service = new DefaultClusterService(repository, templateService, dockerEngineService, portManager, currentUser, ftpService, webDavService, userRepository);
 	}
 
 	@Test

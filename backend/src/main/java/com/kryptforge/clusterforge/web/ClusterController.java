@@ -21,7 +21,10 @@ import com.kryptforge.clusterforge.clusters.ClusterStatus;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterResponse;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterStatusUpdateRequest;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterUpdateParamsRequest;
+import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterOwnerUpdateRequest;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
+import com.kryptforge.clusterforge.users.UserRepository;
+import com.kryptforge.clusterforge.users.User;
 
 @RestController
 @RequestMapping(path = "/api/clusters", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -29,10 +32,12 @@ public class ClusterController {
 
 	private final ClusterService service;
 	private final DockerEngineService dockerEngineService;
+	private final UserRepository userRepository;
 
-	public ClusterController(ClusterService service, DockerEngineService dockerEngineService) {
+	public ClusterController(ClusterService service, DockerEngineService dockerEngineService, UserRepository userRepository) {
 		this.service = service;
 		this.dockerEngineService = dockerEngineService;
+		this.userRepository = userRepository;
 	}
 
 	// POST /api/clusters removido - use POST /api/templates/{name}/instantiate para criar clusters
@@ -59,13 +64,13 @@ public class ClusterController {
 					}
 					
 					// Cria resposta com status do Docker ao invés do banco
-					return ClusterResponse.from(instance, dockerStatus);
+					return ClusterResponse.from(instance, dockerStatus, resolveOwnerName(instance.getOwnerId()));
 				} catch (Exception e) {
 					// Em caso de erro ao buscar status, loga e retorna com status do banco
 					// Não quebra a listagem inteira por causa de um container problemático
 					log.warn("Erro ao obter status do Docker para container {}: {}", 
 						instance.getContainerId(), e.getMessage());
-					return ClusterResponse.from(instance);
+					return ClusterResponse.from(instance, instance.getStatus(), resolveOwnerName(instance.getOwnerId()));
 				}
 			})
 			.filter(response -> response != null) // Remove containers deletados
@@ -115,13 +120,14 @@ public class ClusterController {
 			? getDockerStatus(instance.getContainerId())
 			: instance.getStatus();
 		
-		return ClusterResponse.from(instance, status);
+		return ClusterResponse.from(instance, status, resolveOwnerName(instance.getOwnerId()));
 	}
 
 	@PatchMapping(path = "/{id}/status", consumes = MediaType.APPLICATION_JSON_VALUE)
 	public ClusterResponse updateStatus(@PathVariable("id") UUID id, @RequestBody ClusterStatusUpdateRequest req) {
 		try {
-			return ClusterResponse.from(service.updateStatus(id, req.status()));
+			ClusterInstance updated = service.updateStatus(id, req.status());
+			return ClusterResponse.from(updated, updated.getStatus(), resolveOwnerName(updated.getOwnerId()));
 		} catch (IllegalArgumentException e) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
 		}
@@ -130,7 +136,22 @@ public class ClusterController {
 	@PatchMapping(path = "/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
 	public ClusterResponse updateParams(@PathVariable("id") UUID id, @RequestBody ClusterUpdateParamsRequest req) {
 		try {
-			return ClusterResponse.from(service.updateParams(id, req.toParams()));
+			ClusterInstance updated = service.updateParams(id, req.toParams());
+			return ClusterResponse.from(updated, updated.getStatus(), resolveOwnerName(updated.getOwnerId()));
+		} catch (IllegalArgumentException e) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
+		}
+	}
+
+	@PatchMapping(path = "/{id}/owner", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public ClusterResponse updateOwner(@PathVariable("id") UUID id, @RequestBody ClusterOwnerUpdateRequest req) {
+		try {
+			UUID ownerId = (req.ownerId() == null || req.ownerId().isBlank()) ? null : UUID.fromString(req.ownerId());
+			ClusterInstance updated = service.updateOwner(id, ownerId);
+			ClusterStatus status = (updated.getContainerId() != null && !updated.getContainerId().isBlank())
+				? getDockerStatus(updated.getContainerId())
+				: updated.getStatus();
+			return ClusterResponse.from(updated, status, resolveOwnerName(updated.getOwnerId()));
 		} catch (IllegalArgumentException e) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
 		}
@@ -140,6 +161,15 @@ public class ClusterController {
 	public ResponseEntity<Void> delete(@PathVariable("id") UUID id) {
 		service.delete(id);
 		return ResponseEntity.noContent().build();
+	}
+
+	private String resolveOwnerName(UUID ownerId) {
+		if (ownerId == null) {
+			return null;
+		}
+		return userRepository.findById(ownerId)
+			.map(User::getUsername)
+			.orElse(null);
 	}
 }
 

@@ -76,6 +76,8 @@ class ClusterService {
         port: c.port ?? (c.ports && c.ports.length > 0 ? c.ports[0] : undefined),
         rootPath: c.rootPath,
         userId: c.userId,
+        ownerId: c.ownerId,
+        ownerUsername: c.ownerUsername,
         cpuLimit: c.cpuLimit,
         memoryLimit: c.memoryLimit,
         diskLimit: c.diskLimit,
@@ -104,6 +106,8 @@ class ClusterService {
             port: c.port ?? (c.ports && c.ports.length > 0 ? c.ports[0] : undefined),
             rootPath: c.rootPath,
             userId: c.userId,
+            ownerId: c.ownerId,
+            ownerUsername: c.ownerUsername,
             cpuLimit: c.cpuLimit,
             memoryLimit: c.memoryLimit,
             diskLimit: c.diskLimit,
@@ -180,6 +184,12 @@ class ClusterService {
    */
   async deleteCluster(clusterId: string | number): Promise<void> {
     return httpClient.delete(`/clusters/${clusterId}`, 60000);
+  }
+
+  async updateClusterOwner(clusterId: string | number, ownerId?: string | null): Promise<ClusterDetailsResponse> {
+    return httpClient.patch<ClusterDetailsResponse>(`/clusters/${clusterId}/owner`, {
+      ownerId: ownerId ?? null,
+    });
   }
 
   /**

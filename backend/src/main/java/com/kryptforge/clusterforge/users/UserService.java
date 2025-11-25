@@ -1,5 +1,6 @@
 package com.kryptforge.clusterforge.users;
 
+	import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -69,6 +70,11 @@ public class UserService {
 	@Transactional(readOnly = true)
 	public long count() {
 		return repository.count();
+	}
+
+	@Transactional(readOnly = true)
+	public List<User> listAll() {
+		return repository.findAll();
 	}
 
 	/**

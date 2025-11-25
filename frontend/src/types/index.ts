@@ -49,7 +49,8 @@ export interface Cluster {
   memory: number;
   storage: number;
   lastUpdate: string;
-  owner: string;
+  owner?: string;
+  ownerId?: string;
   serviceType: string;
   service: ServiceTemplate | null;
   startupCommand: string;
@@ -192,6 +193,8 @@ export interface ClusterListItem {
   port?: number;
   rootPath?: string;
   userId?: number;
+  ownerId?: string;
+  ownerUsername?: string;
   owner?: {
     userId: number;
   };
@@ -220,6 +223,8 @@ export interface ClusterDetailsResponse {
   ports?: number[];
   volumes?: string[];
   containerId?: string; // ID do container Docker para SSE
+  ownerId?: string;
+  ownerUsername?: string;
   // Campos opcionais que podem não estar presentes no novo backend
   port?: number;
   rootPath?: string;
