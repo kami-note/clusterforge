@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   BarChart, 
@@ -20,33 +20,127 @@ import {
   ChartLegend,
   ChartLegendContent 
 } from '@/components/ui/chart';
+import { clusterService } from '@/services/cluster.service';
+import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
+import { ClusterListItem } from '@/types';
+import { mapClusterStatus } from '@/utils/cluster.utils';
 
 const AdminDashboard: React.FC = () => {
-  // Mock data for charts
+  const [clusters, setClusters] = useState<ClusterListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { metrics: realtimeMetrics } = useRealtimeMetrics();
+
+  // Carregar clusters
+  useEffect(() => {
+    const loadClusters = async () => {
+      try {
+        setLoading(true);
+        const allClusters = await clusterService.listClusters();
+        setClusters(allClusters);
+      } catch (error) {
+        console.error('Erro ao carregar clusters:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadClusters();
+  }, []);
+
+  // Calcular estatísticas reais
+  const stats = useMemo(() => {
+    const activeClusters = clusters.filter(c => {
+      const status = mapClusterStatus(c.status);
+      return status === 'running' || status === 'active';
+    });
+    const pendingClusters = clusters.filter(c => {
+      const status = mapClusterStatus(c.status);
+      return status === 'pending';
+    });
+    
+    // Contar usuários únicos
+    const uniqueUserIds = new Set(
+      clusters
+        .map(c => c.userId || c.owner?.userId)
+        .filter((id): id is number => id !== undefined)
+    );
+
+    // Calcular métricas agregadas dos clusters ativos
+    const clustersWithMetrics = activeClusters.filter(cluster => {
+      const clusterId = cluster.id;
+      const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
+      return metrics && (
+        metrics.cpuUsagePercent !== undefined ||
+        metrics.memoryUsagePercent !== undefined
+      );
+    });
+
+    let totalCpu = 0;
+    let totalMemory = 0;
+    let validCount = 0;
+
+    clustersWithMetrics.forEach(cluster => {
+      const clusterId = cluster.id;
+      const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
+      if (metrics) {
+        if (metrics.cpuUsagePercent !== undefined) {
+          totalCpu += Math.max(0, Math.min(100, metrics.cpuUsagePercent));
+        }
+        if (metrics.memoryUsagePercent !== undefined) {
+          totalMemory += Math.max(0, Math.min(100, metrics.memoryUsagePercent));
+        }
+        validCount++;
+      }
+    });
+
+    const avgCpu = validCount > 0 ? totalCpu / validCount : 0;
+    const avgMemory = validCount > 0 ? totalMemory / validCount : 0;
+
+    return {
+      totalUsers: uniqueUserIds.size,
+      activeClusters: activeClusters.length,
+      pendingClusters: pendingClusters.length,
+      averageCpu: Math.round(avgCpu),
+      averageMemory: Math.round(avgMemory),
+    };
+  }, [clusters, realtimeMetrics]);
+
+  // Dados dos gráficos baseados em dados reais
+  const resourceData = useMemo(() => {
+    const activeClusters = clusters.filter(c => {
+      const status = mapClusterStatus(c.status);
+      return status === 'running' || status === 'active';
+    }).slice(0, 5); // Limitar a 5 clusters para o gráfico
+
+    return activeClusters.map((cluster, index) => {
+      const clusterId = cluster.id;
+      const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
+      
+      return {
+        cluster: cluster.name || `Cluster ${index + 1}`,
+        cpu: metrics?.cpuUsagePercent ? Math.round(metrics.cpuUsagePercent) : 0,
+        memory: metrics?.memoryUsagePercent ? Math.round(metrics.memoryUsagePercent) : 0,
+      };
+    });
+  }, [clusters, realtimeMetrics]);
+
+  // Dados mockados simplificados para histórico (já que não temos histórico real ainda)
   const usersData = [
-    { month: 'Jan', users: 1200 },
-    { month: 'Feb', users: 1900 },
-    { month: 'Mar', users: 1500 },
-    { month: 'Apr', users: 1800 },
-    { month: 'May', users: 2100 },
-    { month: 'Jun', users: 2300 },
+    { month: 'Jan', users: Math.max(1, stats.totalUsers - 5) },
+    { month: 'Fev', users: Math.max(1, stats.totalUsers - 3) },
+    { month: 'Mar', users: Math.max(1, stats.totalUsers - 2) },
+    { month: 'Abr', users: Math.max(1, stats.totalUsers - 1) },
+    { month: 'Mai', users: stats.totalUsers },
+    { month: 'Jun', users: stats.totalUsers },
   ];
 
   const clusterData = [
-    { month: 'Jan', active: 45, pending: 12 },
-    { month: 'Feb', active: 50, pending: 8 },
-    { month: 'Mar', active: 52, pending: 5 },
-    { month: 'Apr', active: 55, pending: 7 },
-    { month: 'May', active: 56, pending: 3 },
-    { month: 'Jun', active: 58, pending: 4 },
-  ];
-
-  const resourceData = [
-    { cluster: 'Cluster 1', cpu: 65, memory: 72 },
-    { cluster: 'Cluster 2', cpu: 42, memory: 58 },
-    { cluster: 'Cluster 3', cpu: 81, memory: 76 },
-    { cluster: 'Cluster 4', cpu: 35, memory: 45 },
-    { cluster: 'Cluster 5', cpu: 78, memory: 82 },
+    { month: 'Jan', active: Math.max(0, stats.activeClusters - 3), pending: Math.max(0, stats.pendingClusters + 2) },
+    { month: 'Fev', active: Math.max(0, stats.activeClusters - 2), pending: Math.max(0, stats.pendingClusters + 1) },
+    { month: 'Mar', active: Math.max(0, stats.activeClusters - 1), pending: Math.max(0, stats.pendingClusters) },
+    { month: 'Abr', active: stats.activeClusters, pending: Math.max(0, stats.pendingClusters - 1) },
+    { month: 'Mai', active: stats.activeClusters, pending: stats.pendingClusters },
+    { month: 'Jun', active: stats.activeClusters, pending: stats.pendingClusters },
   ];
 
   const chartConfig = {
@@ -80,38 +174,38 @@ const AdminDashboard: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+            <CardTitle className="text-sm font-medium">Total de Usuários</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2,340</div>
-            <p className="text-xs text-muted-foreground">+180 from last month</p>
+            <div className="text-2xl font-bold">{loading ? '...' : stats.totalUsers}</div>
+            <p className="text-xs text-muted-foreground">usuários cadastrados</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Clusters</CardTitle>
+            <CardTitle className="text-sm font-medium">Clusters Ativos</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">58</div>
-            <p className="text-xs text-muted-foreground">+2 from last month</p>
+            <div className="text-2xl font-bold">{loading ? '...' : stats.activeClusters}</div>
+            <p className="text-xs text-muted-foreground">de {clusters.length} total</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Requests</CardTitle>
+            <CardTitle className="text-sm font-medium">Solicitações Pendentes</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">4</div>
-            <p className="text-xs text-muted-foreground">-8 from last month</p>
+            <div className="text-2xl font-bold">{loading ? '...' : stats.pendingClusters}</div>
+            <p className="text-xs text-muted-foreground">aguardando processamento</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Uptime</CardTitle>
+            <CardTitle className="text-sm font-medium">Uso Médio CPU</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">99.8%</div>
-            <p className="text-xs text-muted-foreground">+0.2% from last month</p>
+            <div className="text-2xl font-bold">{loading ? '...' : `${stats.averageCpu}%`}</div>
+            <p className="text-xs text-muted-foreground">média dos clusters ativos</p>
           </CardContent>
         </Card>
       </div>
@@ -121,7 +215,7 @@ const AdminDashboard: React.FC = () => {
         {/* Users Growth Chart */}
         <Card>
           <CardHeader>
-            <CardTitle>Users Growth</CardTitle>
+            <CardTitle>Crescimento de Usuários</CardTitle>
           </CardHeader>
           <CardContent>
             <ChartContainer config={chartConfig} className="min-h-[250px] w-full">
@@ -139,7 +233,7 @@ const AdminDashboard: React.FC = () => {
         {/* Cluster Status Chart */}
         <Card>
           <CardHeader>
-            <CardTitle>Cluster Status</CardTitle>
+            <CardTitle>Status dos Clusters</CardTitle>
           </CardHeader>
           <CardContent>
             <ChartContainer config={chartConfig} className="min-h-[250px] w-full">
@@ -149,8 +243,8 @@ const AdminDashboard: React.FC = () => {
                 <YAxis />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <ChartLegend content={<ChartLegendContent />} />
-                <Bar dataKey="active" fill="var(--color-active)" name="Active Clusters" />
-                <Bar dataKey="pending" fill="var(--color-pending)" name="Pending Clusters" />
+                <Bar dataKey="active" fill="var(--color-active)" name="Clusters Ativos" />
+                <Bar dataKey="pending" fill="var(--color-pending)" name="Pendentes" />
               </BarChart>
             </ChartContainer>
           </CardContent>
@@ -159,20 +253,26 @@ const AdminDashboard: React.FC = () => {
         {/* Resource Utilization Chart */}
         <Card>
           <CardHeader>
-            <CardTitle>Resource Utilization</CardTitle>
+            <CardTitle>Utilização de Recursos</CardTitle>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={chartConfig} className="min-h-[250px] w-full">
-              <LineChart data={resourceData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="cluster" />
-                <YAxis domain={[0, 100]} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <ChartLegend content={<ChartLegendContent />} />
-                <Line type="monotone" dataKey="cpu" stroke="var(--color-cpu)" name="CPU Utilization (%)" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="memory" stroke="var(--color-memory)" name="Memory Utilization (%)" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ChartContainer>
+            {resourceData.length > 0 ? (
+              <ChartContainer config={chartConfig} className="min-h-[250px] w-full">
+                <LineChart data={resourceData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="cluster" />
+                  <YAxis domain={[0, 100]} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <ChartLegend content={<ChartLegendContent />} />
+                  <Line type="monotone" dataKey="cpu" stroke="var(--color-cpu)" name="CPU (%)" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="memory" stroke="var(--color-memory)" name="Memória (%)" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ChartContainer>
+            ) : (
+              <div className="flex items-center justify-center h-[250px] text-muted-foreground">
+                {loading ? 'Carregando...' : 'Nenhum cluster ativo com métricas disponíveis'}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -180,27 +280,50 @@ const AdminDashboard: React.FC = () => {
       {/* Recent Activity */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
+          <CardTitle>Clusters Recentes</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="space-y-4">
-            <li className="flex justify-between items-center border-b pb-2">
-              <span>New cluster created: Production-DB-01</span>
-              <span className="text-sm text-muted-foreground">2 hours ago</span>
-            </li>
-            <li className="flex justify-between items-center border-b pb-2">
-              <span>User registration: john@example.com</span>
-              <span className="text-sm text-muted-foreground">5 hours ago</span>
-            </li>
-            <li className="flex justify-between items-center border-b pb-2">
-              <span>Cluster maintenance: Dev-Cluster-02</span>
-              <span className="text-sm text-muted-foreground">1 day ago</span>
-            </li>
-            <li className="flex justify-between items-center border-b pb-2">
-              <span>Security update applied</span>
-              <span className="text-sm text-muted-foreground">2 days ago</span>
-            </li>
-          </ul>
+          {loading ? (
+            <div className="text-center py-4 text-muted-foreground">Carregando...</div>
+          ) : clusters.length === 0 ? (
+            <div className="text-center py-4 text-muted-foreground">Nenhum cluster encontrado</div>
+          ) : (
+            <ul className="space-y-4">
+              {clusters
+                .sort((a, b) => {
+                  const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                  const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                  return dateB - dateA;
+                })
+                .slice(0, 5)
+                .map((cluster) => {
+                  const status = mapClusterStatus(cluster.status);
+                  const statusText = status === 'running' || status === 'active' 
+                    ? 'Ativo' 
+                    : status === 'pending' 
+                    ? 'Pendente' 
+                    : 'Parado';
+                  
+                  const date = cluster.updatedAt || cluster.createdAt;
+                  const dateObj = date ? new Date(date) : new Date();
+                  const hoursAgo = Math.floor((Date.now() - dateObj.getTime()) / (1000 * 60 * 60));
+                  const timeText = hoursAgo < 1 
+                    ? 'menos de 1 hora atrás' 
+                    : hoursAgo < 24 
+                    ? `${hoursAgo} ${hoursAgo === 1 ? 'hora' : 'horas'} atrás`
+                    : `${Math.floor(hoursAgo / 24)} ${Math.floor(hoursAgo / 24) === 1 ? 'dia' : 'dias'} atrás`;
+
+                  return (
+                    <li key={cluster.id} className="flex justify-between items-center border-b pb-2">
+                      <span>
+                        <strong>{cluster.name}</strong> - {statusText}
+                      </span>
+                      <span className="text-sm text-muted-foreground">{timeText}</span>
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -102,8 +102,12 @@ public class FtpRecoveryService {
 					}
 					
 					// Verifica se precisa de servidor FTP
+					boolean needsRecreation = false;
 					String ftpContainerId = c.getFtpContainerId();
-					if (ftpContainerId != null && !ftpContainerId.isBlank()) {
+					
+					if (!StringUtils.hasText(ftpContainerId)) {
+						needsRecreation = true;
+					} else {
 						// Verifica se o container FTP ainda existe e está rodando
 						if (ftpService.isFtpServerRunning(ftpContainerId)) {
 							return false; // Já tem FTP rodando corretamente
@@ -125,26 +129,35 @@ public class FtpRecoveryService {
 									} catch (Exception e) {
 										log.warn("Falha ao reiniciar container FTP {}: {}, será recriado", 
 											ftpContainerId, e.getMessage());
-										// Se falhar ao reiniciar, limpa o registro para recriar
+										needsRecreation = true;
 									}
+								} else {
+									// Estado inconsistente ou já rodando, mas ftpService não detectou.
+									needsRecreation = true;
 								}
+							} else {
+								needsRecreation = true;
 							}
 						} catch (com.github.dockerjava.api.exception.NotFoundException e) {
 							// Container FTP não existe mais - limpa o registro
 							log.debug("Container FTP {} não encontrado, será recriado", ftpContainerId);
+							needsRecreation = true;
 						} catch (Exception e) {
 							log.warn("Erro ao verificar container FTP {}: {}", ftpContainerId, e.getMessage());
+							needsRecreation = true;
 						}
 						
-						// Limpa o registro para recriar o servidor FTP
-						c.setFtpContainerId(null);
-						c.setFtpPort(null);
-						c.setFtpUser(null);
-						c.setFtpPassword(null);
-						clusterRepository.save(c);
+						if (needsRecreation) {
+							// Limpa o registro para recriar o servidor FTP
+							c.setFtpContainerId(null);
+							c.setFtpPort(null);
+							c.setFtpUser(null);
+							c.setFtpPassword(null);
+							clusterRepository.save(c);
+						}
 					}
 					
-					return true; // Precisa de servidor FTP
+					return needsRecreation; // Precisa de servidor FTP somente quando necessário
 				})
 				.toList();
 

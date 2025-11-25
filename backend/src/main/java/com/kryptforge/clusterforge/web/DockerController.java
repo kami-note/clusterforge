@@ -1,6 +1,7 @@
 package com.kryptforge.clusterforge.web;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -67,12 +68,43 @@ public class DockerController {
 		return ResponseEntity.noContent().build();
 	}
 
+	@GetMapping("/containers/{id}/logs")
+	public ResponseEntity<Map<String, Object>> getContainerLogs(
+		@PathVariable("id") String id,
+		@RequestParam(name = "tail", required = false) Integer tailLines,
+		@RequestParam(name = "since", required = false) Integer sinceSeconds
+	) {
+		try {
+			String logs = dockerEngineService.getContainerLogs(id, true, true, tailLines, sinceSeconds);
+			return ResponseEntity.ok(Map.of(
+				"logs", logs != null ? logs : "",
+				"containerId", id
+			));
+		} catch (Exception e) {
+			return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+				.body(Map.of(
+					"error", e.getMessage() != null ? e.getMessage() : "Erro ao obter logs",
+					"containerId", id
+				));
+		}
+	}
+
 	@GetMapping(path = "/containers/{id}/metrics/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public SseEmitter streamContainerMetrics(
 		@PathVariable("id") String id,
 		@RequestParam(name = "timeoutMillis", defaultValue = "300000") long timeoutMillis
 	) {
 		return dockerStreamService.streamContainerStats(id, timeoutMillis);
+	}
+
+	@GetMapping(path = "/containers/{id}/logs/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public SseEmitter streamContainerLogs(
+		@PathVariable("id") String id,
+		@RequestParam(name = "timeoutMillis", defaultValue = "300000") long timeoutMillis,
+		@RequestParam(name = "tail", required = false) Integer tailLines,
+		@RequestParam(name = "since", required = false) Integer sinceSeconds
+	) {
+		return dockerStreamService.streamContainerLogs(id, timeoutMillis, tailLines, sinceSeconds);
 	}
 
 	/**
@@ -93,6 +125,7 @@ public class DockerController {
 		var clusters = clusterService.list();
 		return dockerStreamService.streamAllClustersMetrics(clusters, timeoutMillis, intervalMillis);
 	}
+
 }
 
 

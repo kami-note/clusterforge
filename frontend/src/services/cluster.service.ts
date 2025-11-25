@@ -203,6 +203,33 @@ class ClusterService {
     );
     return this.getCluster(clusterId);
   }
+
+  /**
+   * Obtém logs do container.
+   * 
+   * @param clusterId ID do cluster
+   * @param tailLines Número de linhas finais a retornar (opcional)
+   * @param sinceSeconds Logs desde X segundos atrás (opcional)
+   * @returns Logs do container
+   */
+  async getContainerLogs(
+    clusterId: string | number,
+    tailLines?: number,
+    sinceSeconds?: number
+  ): Promise<string> {
+    const { containerId } = await this.ensureClusterContainer(clusterId);
+    const params = new URLSearchParams();
+    if (tailLines !== undefined) {
+      params.append('tail', tailLines.toString());
+    }
+    if (sinceSeconds !== undefined) {
+      params.append('since', sinceSeconds.toString());
+    }
+    const queryString = params.toString();
+    const url = `/docker/containers/${containerId}/logs${queryString ? `?${queryString}` : ''}`;
+    const response = await httpClient.get<{ logs: string; containerId: string }>(url);
+    return response.logs || '';
+  }
 }
 
 export const clusterService = new ClusterService();

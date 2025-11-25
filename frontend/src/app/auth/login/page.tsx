@@ -85,8 +85,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 p-4">
-      <Card className="w-full max-w-md shadow-lg dark:shadow-xl dark:border-gray-800">
+    <div className="w-full max-w-md">
+      <Card className="w-full shadow-lg border border-border bg-card text-card-foreground">
         <CardHeader className="text-center space-y-2">
           <CardTitle className="text-2xl font-bold dark:text-gray-100">Acesso ao Sistema</CardTitle>
           <CardDescription className="dark:text-gray-400">
@@ -133,19 +133,18 @@ export default function LoginPage() {
             </div>
           </CardContent>
         </form>
-        <CardFooter className="flex flex-col space-y-2">
-          <p className="text-center text-sm text-muted-foreground dark:text-gray-500">
+        <CardFooter className="flex flex-col space-y-3">
+          <p className="text-center text-sm text-muted-foreground">
             Sistema de Gerenciamento de Clusters
           </p>
-          <div className="text-center text-sm">
-            <span className="text-muted-foreground dark:text-gray-500">Não tem uma conta? </span>
-            <Link 
-              href="/auth/register" 
-              className="text-primary hover:underline font-medium dark:text-primary-foreground"
-            >
+          <div className="text-center text-sm text-muted-foreground">
+            Não tem uma conta?
+          </div>
+          <Button asChild variant="outline" className="w-full">
+            <Link href="/auth/register">
               Criar conta
             </Link>
-          </div>
+          </Button>
         </CardFooter>
       </Card>
     </div>

@@ -176,7 +176,7 @@ public class SecurityConfig {
 			HttpMethod.HEAD.name()
 		));
 		
-		// Headers permitidos para a API REST
+		// Headers permitidos para a API REST e SSE
 		configuration.setAllowedHeaders(Arrays.asList(
 			"Authorization",
 			"Content-Type",
@@ -186,14 +186,19 @@ public class SecurityConfig {
 			"Access-Control-Request-Method",
 			"Access-Control-Request-Headers",
 			"X-Auth-Event",
-			"X-Auth-Reason"
+			"X-Auth-Reason",
+			"Cache-Control",
+			"Last-Event-ID"
 		));
 		
-		// Headers expostos para o frontend
+		// Headers expostos para o frontend (incluindo headers necessários para SSE)
 		configuration.setExposedHeaders(Arrays.asList(
 			"Authorization",
 			"X-Auth-Event",
-			"X-Auth-Reason"
+			"X-Auth-Reason",
+			"Content-Type",
+			"Cache-Control",
+			"Last-Event-ID"
 		));
 		
 		// Permitir credenciais (cookies, headers de autenticação)
@@ -203,9 +208,10 @@ public class SecurityConfig {
 		configuration.setMaxAge(3600L);
 		
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-		// Aplicar CORS para todos os endpoints da API
+		// Aplicar CORS para todos os endpoints da API (incluindo SSE)
+		// A configuração já inclui todos os headers necessários para SSE
 		source.registerCorsConfiguration("/api/**", configuration);
-		// Aplicar CORS também para endpoints Docker (incluindo SSE)
+		// Aplicar CORS também para endpoints Docker (caso sejam acessados diretamente)
 		source.registerCorsConfiguration("/docker/**", configuration);
 		
 		return source;

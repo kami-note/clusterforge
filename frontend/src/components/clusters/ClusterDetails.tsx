@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Skeleton from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -34,6 +33,7 @@ import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { ClusterFileManager } from '@/components/clusters/ClusterFileManager';
 import { config } from '@/lib/config';
 import { clusterService } from '@/services/cluster.service';
+import { sseService } from '@/services/sse.service';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -63,21 +63,6 @@ interface AccessCredentials {
   url: string;
 }
 
-const mockLogs = [
-  '[18:05:30 INFO]: Starting minecraft server version 1.20.1',
-  '[18:05:30 INFO]: Loading properties',
-  '[18:05:30 WARN]: server.properties does not exist. Creating one.',
-  '[18:05:31 INFO]: Default game type: SURVIVAL',
-  '[18:05:31 INFO]: Generating keypair',
-  '[18:05:32 INFO]: Starting Minecraft server on *:25565',
-  '[18:05:32 INFO]: Using epoll channel type',
-  '[18:05:32 INFO]: Preparing level "world"',
-  '[18:05:33 INFO]: Preparing spawn area: 0%',
-  '[18:05:34 INFO]: Preparing spawn area: 5%',
-  '[18:05:35 INFO]: Preparing spawn area: 12%',
-  '[18:05:36 INFO]: Done (4.583s)! For help, type "help"'
-];
-
 export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const router = useRouter();
   const { findClusterById, updateCluster, deleteCluster, loading } = useClusters();
@@ -102,8 +87,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const [currentMetrics, setCurrentMetrics] = useState<ClusterMetrics | null>(null);
   const [, setHealthStatus] = useState<ClusterHealthStatus | null>(null);
   const [status, setStatus] = useState('loading');
-  const [command, setCommand] = useState('java -Xmx6G -Xms6G -jar server.jar nogui');
-  const [consoleOutput, setConsoleOutput] = useState(mockLogs.join('\n'));
+  const [consoleOutput, setConsoleOutput] = useState('');
   const [isLogsPaused, setIsLogsPaused] = useState(false);
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const consoleRef = useRef<HTMLTextAreaElement>(null);
@@ -722,25 +706,106 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   // NÃO fazer polling REST - usar apenas SSE para métricas em tempo real
   // Se SSE não estiver disponível, o usuário verá uma mensagem ou dados estáticos
 
-  // Simular novos logs
+  // Conectar SSE de logs do container
   useEffect(() => {
-    if (!cluster || isLogsPaused || status !== 'running') return;
+    if (!cluster || !cluster.containerId || status !== 'running' || isLogsPaused) {
+      if (status !== 'running' && cluster) {
+        setConsoleOutput('Container não está em execução. Inicie o container para ver os logs.');
+      }
+      return;
+    }
 
-    const logsInterval = setInterval(() => {
-      const randomLogs = [
-        '[INFO]: Player joined the game',
-        '[INFO]: Saving the game (this may take a moment!)',
-        '[INFO]: Saved the game',
-        '[WARN]: Can\'t keep up! Is the server overloaded?',
-        '[INFO]: Player left the game'
-      ];
+    let isInitialLoadComplete = false;
+    let sseLogsBuffer: string[] = [];
 
-      const newLog = `[${new Date().toLocaleTimeString('pt-BR')} ${Math.random() > 0.7 ? 'WARN' : 'INFO'}]: ${randomLogs[Math.floor(Math.random() * randomLogs.length)]}`;
-      setConsoleOutput(prev => prev + '\n' + newLog);
-    }, 10000);
+    // Carregar logs iniciais via REST ANTES de conectar SSE
+    const loadInitialLogs = async () => {
+      try {
+        const logs = await clusterService.getContainerLogs(cluster.id, 100);
+        if (logs) {
+          setConsoleOutput(logs);
+        }
+        isInitialLoadComplete = true;
+        
+        // Processa logs SSE que foram recebidos durante o carregamento inicial
+        if (sseLogsBuffer.length > 0) {
+          // Normaliza cada linha: remove quebras de linha no final e adiciona uma única
+          const bufferedLogs = sseLogsBuffer
+            .map(line => line.replace(/\n+$/, '') + '\n')
+            .join('');
+          setConsoleOutput(prev => {
+            if (!prev) {
+              return bufferedLogs;
+            }
+            // Se o conteúdo anterior não termina com quebra de linha, adiciona uma
+            const separator = prev.endsWith('\n') ? '' : '\n';
+            return prev + separator + bufferedLogs;
+          });
+          sseLogsBuffer = [];
+        }
+        
+        // Retorna timestamp atual para usar no SSE (evita duplicação)
+        return Math.floor(Date.now() / 1000);
+      } catch (error) {
+        console.error('Erro ao carregar logs iniciais:', error);
+        setConsoleOutput('Erro ao carregar logs do container. Verifique se o container está rodando.');
+        isInitialLoadComplete = true;
+        return undefined;
+      }
+    };
 
-    return () => clearInterval(logsInterval);
-  }, [cluster, isLogsPaused, status]);
+    // Conectar SSE para logs em tempo real
+    const containerId = cluster.containerId;
+    if (containerId) {
+      const connectLogs = async (sinceSeconds?: number) => {
+        try {
+          await sseService.connectLogs(cluster.id, containerId, sinceSeconds);
+        } catch (error) {
+          console.error('Erro ao conectar SSE de logs:', error);
+        }
+      };
+
+      // Carrega logs iniciais primeiro, depois conecta SSE com since para evitar duplicação
+      loadInitialLogs().then((sinceTimestamp) => {
+        if (sinceTimestamp !== undefined) {
+          // Usa since para evitar duplicação: SSE só enviará logs novos após o timestamp
+          connectLogs(sinceTimestamp);
+        } else {
+          // Fallback: se não conseguiu carregar logs iniciais, conecta sem since
+          connectLogs();
+        }
+      });
+    }
+
+    // Callback para receber logs via SSE
+    const unsubscribe = sseService.onLogs((receivedClusterId: string | number, logLine: string) => {
+      if (receivedClusterId === cluster.id && logLine) {
+        // Se o carregamento inicial ainda não terminou, bufferiza os logs SSE
+        if (!isInitialLoadComplete) {
+          sseLogsBuffer.push(logLine);
+        } else {
+          // Após o carregamento inicial, adiciona logs normalmente
+          setConsoleOutput(prev => {
+            // Normaliza a linha: remove quebras de linha no final e adiciona uma única
+            const normalizedLine = logLine.replace(/\n+$/, '') + '\n';
+            
+            if (!prev) {
+              return normalizedLine;
+            }
+            
+            // Se o conteúdo anterior não termina com quebra de linha, adiciona uma
+            const separator = prev.endsWith('\n') ? '' : '\n';
+            return prev + separator + normalizedLine;
+          });
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      sseService.disconnectLogs(cluster.id);
+    };
+  }, [cluster, status, isLogsPaused]);
 
   // Auto-scroll do console
   useEffect(() => {
@@ -1020,19 +1085,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro ao excluir cluster';
       toast.error(errorMessage, { id: toastId });
-    }
-  };
-
-  const handleCommandExecute = () => {
-    if (command.trim()) {
-      const commandLog = `[${new Date().toLocaleTimeString('pt-BR')} CMD]: ${command}`;
-      setConsoleOutput(prev => prev + '\n' + commandLog);
-
-      // Simular resposta do comando
-      setTimeout(() => {
-        const responseLog = `[${new Date().toLocaleTimeString('pt-BR')} INFO]: Command executed successfully`;
-        setConsoleOutput(prev => prev + '\n' + responseLog);
-      }, 500);
     }
   };
 
@@ -1550,28 +1602,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm">Comando de Inicialização</label>
-                <div className="flex space-x-2 mt-2">
-                  <Input
-                    value={command}
-                    onChange={(e) => setCommand(e.target.value)}
-                    placeholder="Digite o comando de inicialização..."
-                    className="font-mono"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        handleCommandExecute();
-                      }
-                    }}
-                  />
-                  <Button onClick={handleCommandExecute}>
-                    Executar
-                  </Button>
-                </div>
-              </div>
-
-              <Separator />
-
               <div>
                 <label className="text-sm">Saída do Console</label>
                 <div className="mt-2">

@@ -12,8 +12,11 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.nio.charset.StandardCharsets;
+
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Statistics;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
 import com.kryptforge.clusterforge.docker.dto.ClusterMetricsEvent;
@@ -256,6 +259,98 @@ public class DockerStreamService {
 				try {
 					emitter.completeWithError(e);
 				} catch (Exception ignored) {}
+			}
+		});
+
+		return emitter;
+	}
+
+	/**
+	 * Stream de logs do container via SSE.
+	 * Envia logs em tempo real conforme são gerados pelo container.
+	 * 
+	 * @param containerId ID do container
+	 * @param timeoutMillis Timeout do SSE (padrão: 5 minutos)
+	 * @param tailLines Número de linhas iniciais a enviar (opcional)
+	 * @param sinceSeconds Logs desde X segundos atrás (opcional)
+	 * @return SseEmitter para stream de logs
+	 */
+	public SseEmitter streamContainerLogs(
+		String containerId,
+		long timeoutMillis,
+		Integer tailLines,
+		Integer sinceSeconds
+	) {
+		final SseEmitter emitter = new SseEmitter(timeoutMillis);
+		final var executor = Executors.newSingleThreadExecutor(r -> {
+			Thread t = new Thread(r, "docker-logs-" + containerId);
+			t.setDaemon(true);
+			return t;
+		});
+
+		emitter.onCompletion(() -> executor.shutdown());
+		emitter.onTimeout(() -> {
+			try { emitter.complete(); } catch (Exception ignored) {}
+			executor.shutdown();
+		});
+		emitter.onError(ex -> executor.shutdown());
+
+		executor.submit(() -> {
+			try {
+				var cmd = dockerClient.logContainerCmd(containerId)
+					.withStdOut(true)
+					.withStdErr(true)
+					.withTimestamps(false)
+					.withFollowStream(true); // Segue logs em tempo real
+
+				if (tailLines != null) {
+					cmd.withTail(tailLines);
+				}
+				if (sinceSeconds != null) {
+					cmd.withSince(sinceSeconds);
+				}
+
+				cmd.exec(new ResultCallback.Adapter<Frame>() {
+					private volatile boolean closed = false;
+
+					@Override
+					public void onNext(Frame frame) {
+						if (closed) return;
+						try {
+							if (frame != null && frame.getPayload() != null) {
+								String logLine = new String(frame.getPayload(), StandardCharsets.UTF_8);
+								emitter.send(SseEmitter.event()
+									.name("log")
+									.data(logLine));
+							}
+						} catch (IOException e) {
+							try { emitter.completeWithError(e); } catch (Exception ignored) {}
+							closeQuietly();
+						}
+					}
+
+					@Override
+					public void onError(Throwable throwable) {
+						try { emitter.completeWithError(throwable); } catch (Exception ignored) {}
+						closeQuietly();
+					}
+
+					@Override
+					public void onComplete() {
+						try { emitter.complete(); } catch (Exception ignored) {}
+						closeQuietly();
+					}
+
+					private void closeQuietly() {
+						if (closed) return;
+						closed = true;
+						try {
+							this.close();
+						} catch (IOException ignored) {}
+					}
+				});
+			} catch (Exception e) {
+				try { emitter.completeWithError(e); } catch (Exception ignored) {}
 			}
 		});
 

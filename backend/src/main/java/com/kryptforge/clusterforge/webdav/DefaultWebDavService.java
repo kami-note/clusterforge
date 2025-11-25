@@ -116,6 +116,39 @@ public class DefaultWebDavService implements WebDavService {
 
 		String webDavContainerName = containerName + "-webdav";
 
+		// Verifica se já existe um container WebDAV com o mesmo nome e remove se existir
+		try {
+			var existingContainers = dockerClient.listContainersCmd().withShowAll(true).exec();
+			for (var existingContainer : existingContainers) {
+				if (existingContainer.getNames() != null) {
+					for (String name : existingContainer.getNames()) {
+						if (name.equals("/" + webDavContainerName) || name.equals(webDavContainerName)) {
+							log.info("Container WebDAV '{}' já existe, removendo antes de criar novo", webDavContainerName);
+							try {
+								// Tenta parar o container primeiro
+								try {
+									dockerClient.stopContainerCmd(existingContainer.getId()).withTimeout(10).exec();
+								} catch (Exception e) {
+									log.debug("Container {} já estava parado ou erro ao parar: {}", existingContainer.getId(), e.getMessage());
+								}
+								// Remove o container com force
+								dockerClient.removeContainerCmd(existingContainer.getId()).withForce(true).exec();
+								log.info("Container WebDAV '{}' removido com sucesso", webDavContainerName);
+							} catch (Exception e) {
+								log.warn("Falha ao remover container WebDAV existente '{}': {}", webDavContainerName, e.getMessage());
+								// Continua mesmo se falhar, pois o createContainerCmd pode ainda funcionar
+								// ou lançar uma exceção mais clara
+							}
+							break;
+						}
+					}
+				}
+			}
+		} catch (Exception e) {
+			log.warn("Erro ao verificar containers WebDAV existentes: {}", e.getMessage());
+			// Continua com a criação mesmo se a verificação falhar
+		}
+
 		try {
 			String image = properties.getImage();
 			log.info("Fazendo pull da imagem WebDAV '{}'", image);
@@ -182,13 +215,74 @@ public class DefaultWebDavService implements WebDavService {
 			.withRestartPolicy(RestartPolicy.alwaysRestart());
 
 		// Configurar container para usar o UID/GID do cluster
-		CreateContainerResponse response = dockerClient.createContainerCmd(properties.getImage())
+		CreateContainerResponse response;
+		try {
+			response = dockerClient.createContainerCmd(properties.getImage())
 			.withName(webDavContainerName)
 			.withUser(userManager.formatUserString(uid, gid))
 			.withEnv(env)
 			.withHostConfig(hostConfig)
 			.withExposedPorts(exposedPort)
 			.exec();
+		} catch (RuntimeException e) {
+			// Verifica se é um conflito de nome de container (409 Conflict)
+			String errorMessage = e.getMessage() != null ? e.getMessage() : "";
+			boolean isConflict = errorMessage.contains("409") || 
+								errorMessage.contains("Conflict") || 
+								errorMessage.contains("already in use") ||
+								errorMessage.contains("container name");
+			
+			if (isConflict) {
+				// Container com esse nome ainda existe (pode ter sido criado entre a verificação e a criação)
+				log.warn("Conflito ao criar container WebDAV '{}': {}. Tentando remover e recriar...", 
+					webDavContainerName, errorMessage);
+				// Tenta encontrar e remover o container conflitante
+				boolean containerFoundAndRemoved = false;
+				try {
+					var existingContainers = dockerClient.listContainersCmd().withShowAll(true).exec();
+					for (var existingContainer : existingContainers) {
+						if (existingContainer.getNames() != null) {
+							for (String name : existingContainer.getNames()) {
+								if (name.equals("/" + webDavContainerName) || name.equals(webDavContainerName)) {
+									try {
+										dockerClient.stopContainerCmd(existingContainer.getId()).withTimeout(10).exec();
+									} catch (Exception ignored) {
+										// Container pode já estar parado
+									}
+									dockerClient.removeContainerCmd(existingContainer.getId()).withForce(true).exec();
+									log.info("Container WebDAV conflitante '{}' removido, tentando criar novamente", webDavContainerName);
+									containerFoundAndRemoved = true;
+									break;
+								}
+							}
+						}
+						if (containerFoundAndRemoved) {
+							break;
+						}
+					}
+					
+					if (!containerFoundAndRemoved) {
+						log.warn("Container WebDAV conflitante '{}' não encontrado na lista, mas conflito detectado. Tentando criar novamente...", 
+							webDavContainerName);
+					}
+					
+					// Tenta criar novamente após remover o conflitante (ou se não foi encontrado, tenta mesmo assim)
+					response = dockerClient.createContainerCmd(properties.getImage())
+						.withName(webDavContainerName)
+						.withUser(userManager.formatUserString(uid, gid))
+						.withEnv(env)
+						.withHostConfig(hostConfig)
+						.withExposedPorts(exposedPort)
+						.exec();
+				} catch (Exception ex) {
+					log.error("Falha ao resolver conflito de container WebDAV '{}': {}", webDavContainerName, ex.getMessage());
+					throw new IllegalStateException("Falha ao criar container WebDAV devido a conflito de nome: " + errorMessage, e);
+				}
+			} else {
+				// Não é um conflito, relança a exceção original
+				throw e;
+			}
+		}
 
 		String webDavContainerId = response.getId();
 

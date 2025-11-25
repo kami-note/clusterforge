@@ -104,8 +104,8 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 p-4">
-      <Card className="w-full max-w-md shadow-lg dark:shadow-xl dark:border-gray-800">
+    <div className="w-full max-w-md">
+      <Card className="w-full shadow-lg border border-border bg-card text-card-foreground">
         <CardHeader className="text-center space-y-2">
           <CardTitle className="text-2xl font-bold dark:text-gray-100">Criar Conta</CardTitle>
           <CardDescription className="dark:text-gray-400">
@@ -174,17 +174,16 @@ export default function RegisterPage() {
             </div>
           </CardContent>
         </form>
-        <CardFooter className="flex flex-col space-y-2">
-          <p className="text-center text-sm text-muted-foreground dark:text-gray-500">
-            Já tem uma conta?{' '}
-            <Link 
-              href="/auth/login" 
-              className="text-primary hover:underline font-medium dark:text-primary-foreground"
-            >
+        <CardFooter className="flex flex-col space-y-3">
+          <p className="text-center text-sm text-muted-foreground">
+            Já tem uma conta?
+          </p>
+          <Button asChild variant="outline" className="w-full">
+            <Link href="/auth/login">
               Fazer login
             </Link>
-          </p>
-          <p className="text-center text-xs text-muted-foreground dark:text-gray-600 mt-2">
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
             O primeiro usuário registrado será criado como administrador
           </p>
         </CardFooter>
