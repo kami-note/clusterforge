@@ -13,7 +13,7 @@ import {
   ChartLegend,
   ChartLegendContent 
 } from '@/components/ui/chart';
-import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick, Plus, AlertCircle, Loader2 } from 'lucide-react';
+import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { useClusters } from '@/hooks/useClusters';
@@ -154,10 +154,6 @@ export function ClientDashboard() {
     { name: 'Rede', value: Math.round(aggregatedMetrics.networkPercent) }
   ], [aggregatedMetrics]);
 
-  const handleCreateCluster = () => {
-    router.push('/client/clusters/create');
-  };
-
   const handleViewCluster = (clusterId: string) => {
     router.push(`/client/clusters/${clusterId}`);
   };
@@ -257,10 +253,6 @@ export function ClientDashboard() {
           <h1 className="text-3xl font-semibold">Dashboard do Cliente</h1>
           <p className="text-muted-foreground">Visão geral dos seus serviços e clusters</p>
         </div>
-        <Button className="flex items-center space-x-2" onClick={handleCreateCluster}>
-          <Plus className="h-4 w-4" />
-          <span>Novo Cluster</span>
-        </Button>
       </div>
 
       {/* Resumo de Recursos */}
@@ -343,11 +335,7 @@ export function ClientDashboard() {
             <div className="text-center py-8 text-muted-foreground">
               <Server className="h-12 w-12 mx-auto mb-3 text-muted" />
               <p className="font-medium">Nenhum cluster encontrado</p>
-              <p className="text-sm mt-1">Crie seu primeiro cluster para começar</p>
-              <Button className="mt-4" onClick={handleCreateCluster}>
-                <Plus className="h-4 w-4 mr-2" />
-                Criar Cluster
-              </Button>
+              <p className="text-sm mt-1">Entre em contato com o administrador para criar clusters</p>
             </div>
           ) : (
             <div className="space-y-4">

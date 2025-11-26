@@ -14,7 +14,11 @@ import com.github.dockerjava.api.DockerClient;
 
 @SpringBootTest
 @TestPropertySource(properties = {
-	"clusterforge.docker.host=unix:///var/run/docker.sock"
+	"clusterforge.docker.host=unix:///var/run/docker.sock",
+	"spring.datasource.url=jdbc:h2:mem:testdb-docker-connection;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
+	"spring.datasource.username=sa",
+	"spring.datasource.password=",
+	"spring.jpa.hibernate.ddl-auto=create-drop"
 })
 class DockerConnectionConfigTest {
 

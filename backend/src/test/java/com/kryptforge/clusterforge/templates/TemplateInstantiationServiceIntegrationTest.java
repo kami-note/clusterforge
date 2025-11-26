@@ -27,7 +27,11 @@ import com.kryptforge.clusterforge.docker.DockerEngineService;
 @TestPropertySource(properties = {
 	"clusterforge.docker.host=unix:///var/run/docker.sock",
 	"docker.templates.path=${java.io.tmpdir}/clusterforge-test-templates",
-	"docker.volumes.basePath=${java.io.tmpdir}/clusterforge-test-volumes"
+	"docker.volumes.basePath=${java.io.tmpdir}/clusterforge-test-volumes",
+	"spring.datasource.url=jdbc:h2:mem:testdb-template-instantiation;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
+	"spring.datasource.username=sa",
+	"spring.datasource.password=",
+	"spring.jpa.hibernate.ddl-auto=create-drop"
 })
 class TemplateInstantiationServiceIntegrationTest {
 
