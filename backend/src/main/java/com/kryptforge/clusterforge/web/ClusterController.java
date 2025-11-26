@@ -1,8 +1,13 @@
 package com.kryptforge.clusterforge.web;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +30,10 @@ import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterStatusUpdateR
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterUpdateParamsRequest;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterOwnerUpdateRequest;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
+import com.kryptforge.clusterforge.monitoring.ClusterLog;
+import com.kryptforge.clusterforge.monitoring.ClusterLogRepository;
+import com.kryptforge.clusterforge.monitoring.ClusterMetric;
+import com.kryptforge.clusterforge.monitoring.ClusterMetricRepository;
 import com.kryptforge.clusterforge.users.UserRepository;
 import com.kryptforge.clusterforge.users.User;
 
@@ -35,11 +44,21 @@ public class ClusterController {
 	private final ClusterService service;
 	private final DockerEngineService dockerEngineService;
 	private final UserRepository userRepository;
+	private final ClusterLogRepository logRepository;
+	private final ClusterMetricRepository metricRepository;
 
-	public ClusterController(ClusterService service, DockerEngineService dockerEngineService, UserRepository userRepository) {
+	public ClusterController(
+		ClusterService service,
+		DockerEngineService dockerEngineService,
+		UserRepository userRepository,
+		ClusterLogRepository logRepository,
+		ClusterMetricRepository metricRepository
+	) {
 		this.service = service;
 		this.dockerEngineService = dockerEngineService;
 		this.userRepository = userRepository;
+		this.logRepository = logRepository;
+		this.metricRepository = metricRepository;
 	}
 
 	// POST /api/clusters removido - use POST /api/templates/{name}/instantiate para criar clusters
@@ -227,6 +246,90 @@ public class ClusterController {
 	public ResponseEntity<Void> delete(@PathVariable("id") UUID id) {
 		service.delete(id);
 		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Obtém histórico de logs de um cluster.
+	 * 
+	 * @param id ID do cluster
+	 * @param page Número da página (padrão: 0)
+	 * @param size Tamanho da página (padrão: 100)
+	 * @param startTime Data/hora inicial (opcional, formato ISO)
+	 * @param endTime Data/hora final (opcional, formato ISO)
+	 * @return Página de logs
+	 */
+	@GetMapping("/{id}/logs/history")
+	public Page<ClusterLog> getLogsHistory(
+		@PathVariable("id") UUID id,
+		@RequestParam(name = "page", defaultValue = "0") int page,
+		@RequestParam(name = "size", defaultValue = "100") int size,
+		@RequestParam(name = "startTime", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant startTime,
+		@RequestParam(name = "endTime", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant endTime
+	) {
+		// Verificar se cluster existe
+		service.get(id)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "cluster não encontrado"));
+
+		Pageable pageable = PageRequest.of(page, size);
+
+		if (startTime != null && endTime != null) {
+			return logRepository.findByClusterIdAndTimestampBetween(id, startTime, endTime, pageable);
+		} else {
+			return logRepository.findByClusterIdOrderByTimestampDesc(id, pageable);
+		}
+	}
+
+	/**
+	 * Obtém histórico de métricas de um cluster.
+	 * 
+	 * @param id ID do cluster
+	 * @param page Número da página (padrão: 0)
+	 * @param size Tamanho da página (padrão: 100)
+	 * @param startTime Data/hora inicial (opcional, formato ISO)
+	 * @param endTime Data/hora final (opcional, formato ISO)
+	 * @return Página de métricas
+	 */
+	@GetMapping("/{id}/metrics/history")
+	public Page<ClusterMetric> getMetricsHistory(
+		@PathVariable("id") UUID id,
+		@RequestParam(name = "page", defaultValue = "0") int page,
+		@RequestParam(name = "size", defaultValue = "100") int size,
+		@RequestParam(name = "startTime", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant startTime,
+		@RequestParam(name = "endTime", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant endTime
+	) {
+		// Verificar se cluster existe
+		service.get(id)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "cluster não encontrado"));
+
+		Pageable pageable = PageRequest.of(page, size);
+
+		if (startTime != null && endTime != null) {
+			return metricRepository.findByClusterIdAndTimestampBetween(id, startTime, endTime, pageable);
+		} else {
+			return metricRepository.findByClusterIdOrderByTimestampDesc(id, pageable);
+		}
+	}
+
+	/**
+	 * Obtém estatísticas de logs e métricas de um cluster.
+	 * 
+	 * @param id ID do cluster
+	 * @return Estatísticas (contagem de logs e métricas)
+	 */
+	@GetMapping("/{id}/stats")
+	public ResponseEntity<?> getClusterStats(@PathVariable("id") UUID id) {
+		// Verificar se cluster existe
+		service.get(id)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "cluster não encontrado"));
+
+		long logCount = logRepository.countByClusterId(id);
+		long metricCount = metricRepository.countByClusterId(id);
+
+		return ResponseEntity.ok(java.util.Map.of(
+			"clusterId", id,
+			"logCount", logCount,
+			"metricCount", metricCount
+		));
 	}
 
 	private String resolveOwnerName(UUID ownerId) {

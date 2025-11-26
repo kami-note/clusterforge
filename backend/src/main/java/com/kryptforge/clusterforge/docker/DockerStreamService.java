@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -17,21 +18,43 @@ import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Statistics;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
+import com.kryptforge.clusterforge.clusters.ClusterRepository;
 import com.kryptforge.clusterforge.docker.dto.ContainerLogEvent;
 import com.kryptforge.clusterforge.docker.dto.ClusterMetricsEvent;
 import com.kryptforge.clusterforge.docker.dto.ContainerStats;
 import com.kryptforge.clusterforge.docker.util.ContainerLogParser;
+import com.kryptforge.clusterforge.monitoring.LogStorageService;
 
 /**
  * Serviço para stream de métricas (stats) via SSE.
+ * Também persiste logs e métricas no banco de dados.
  */
 @Service
 public class DockerStreamService {
 
 	private final DockerClient dockerClient;
+	private final ClusterRepository clusterRepository;
+	private final LogStorageService logStorageService;
 
-	public DockerStreamService(DockerConnection connection) {
+	public DockerStreamService(
+		DockerConnection connection,
+		ClusterRepository clusterRepository,
+		LogStorageService logStorageService
+	) {
 		this.dockerClient = Objects.requireNonNull(connection, "connection").getClient();
+		this.clusterRepository = clusterRepository;
+		this.logStorageService = logStorageService;
+	}
+
+	/**
+	 * Busca o clusterId pelo containerId.
+	 */
+	private Optional<UUID> findClusterIdByContainerId(String containerId) {
+		if (containerId == null || containerId.isBlank()) {
+			return Optional.empty();
+		}
+		return clusterRepository.findByContainerId(containerId)
+			.map(ClusterInstance::getId);
 	}
 
 	public SseEmitter streamContainerStats(String containerId, long timeoutMillis) {
@@ -62,6 +85,8 @@ public class DockerStreamService {
 								emitter.send(SseEmitter.event()
 									.name("stats")
 									.data(dto, MediaType.APPLICATION_JSON));
+								// Nota: Métricas são coletadas continuamente pelo ContinuousMetricCollectionService
+								// Não persistir aqui para evitar duplicação
 							} catch (IOException e) {
 								try { emitter.completeWithError(e); } catch (Exception ignored) {}
 								closeQuietly();
@@ -184,6 +209,8 @@ public class DockerStreamService {
 							try {
 								ContainerStats dto = ContainerMapper.toStats(containerId, stats);
 								lastMetrics.put(clusterId, dto);
+								// Nota: Métricas são coletadas continuamente pelo ContinuousMetricCollectionService
+								// Não persistir aqui para evitar duplicação
 							} catch (Exception e) {
 								// Ignorar erro individual, continuar com outros containers
 							}
@@ -240,6 +267,8 @@ public class DockerStreamService {
 								emitter.send(SseEmitter.event()
 									.name("stats")
 									.data(event, MediaType.APPLICATION_JSON));
+								// Nota: A métrica já foi persistida no onNext quando recebida do Docker (linha 222)
+								// Não persistir novamente aqui para evitar duplicação
 							} catch (IOException e) {
 								// Cliente desconectou, sair do loop
 								shouldContinue = false;
@@ -268,6 +297,7 @@ public class DockerStreamService {
 	/**
 	 * Stream de logs do container via SSE.
 	 * Envia logs em tempo real conforme são gerados pelo container.
+	 * Também persiste logs no banco de dados.
 	 * 
 	 * @param containerId ID do container
 	 * @param timeoutMillis Timeout do SSE (padrão: 5 minutos)
@@ -281,6 +311,8 @@ public class DockerStreamService {
 		Integer tailLines,
 		Integer sinceSeconds
 	) {
+		// Buscar clusterId pelo containerId para persistir logs
+		Optional<UUID> clusterIdOpt = findClusterIdByContainerId(containerId);
 		final SseEmitter emitter = new SseEmitter(timeoutMillis);
 		final var executor = Executors.newSingleThreadExecutor(r -> {
 			Thread t = new Thread(r, "docker-logs-" + containerId);
@@ -323,6 +355,10 @@ public class DockerStreamService {
 									emitter.send(SseEmitter.event()
 										.name("log")
 										.data(event, MediaType.APPLICATION_JSON));
+									// Persistir log no banco de dados se clusterId estiver disponível
+									clusterIdOpt.ifPresent(clusterId -> 
+										logStorageService.storeLogAsync(clusterId, event)
+									);
 								}
 							}
 						} catch (IOException e) {

@@ -6,8 +6,6 @@ import static org.mockito.Mockito.*;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,7 +15,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.StatsCmd;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
+import com.kryptforge.clusterforge.clusters.ClusterRepository;
 import com.kryptforge.clusterforge.clusters.ClusterStatus;
+import com.kryptforge.clusterforge.monitoring.LogStorageService;
 
 /**
  * Testes unitários para DockerStreamService.
@@ -28,18 +28,26 @@ class DockerStreamServiceTest {
 	private DockerClient dockerClient;
 	private DockerStreamService service;
 	private StatsCmd statsCmd;
+	private ClusterRepository clusterRepository;
+	private LogStorageService logStorageService;
 
 	@BeforeEach
 	void setup() {
 		dockerConnection = mock(DockerConnection.class);
 		dockerClient = mock(DockerClient.class);
 		statsCmd = mock(StatsCmd.class);
+		clusterRepository = mock(ClusterRepository.class);
+		logStorageService = mock(LogStorageService.class);
 		
 		when(dockerConnection.getClient()).thenReturn(dockerClient);
 		when(dockerClient.statsCmd(anyString())).thenReturn(statsCmd);
 		when(statsCmd.withNoStream(anyBoolean())).thenReturn(statsCmd);
 		
-		service = new DockerStreamService(dockerConnection);
+		service = new DockerStreamService(
+			dockerConnection,
+			clusterRepository,
+			logStorageService
+		);
 	}
 
 	@Test
