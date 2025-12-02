@@ -15,8 +15,8 @@ export interface User {
 
 export interface AuthResponse {
   token: string; // access token
-  refreshToken?: string;
-  expiresIn: number; // ms
+  refreshToken?: string; // Opcional - backend pode não retornar
+  expiresIn?: number; // Opcional - backend pode não retornar
 }
 
 export interface LoginRequest {
@@ -32,7 +32,14 @@ export interface RegisterRequest {
 // ============================================
 // CLUSTERS
 // ============================================
-export type ClusterStatus = 'running' | 'stopped' | 'restarting' | 'error';
+export type ClusterStatus = 'running' | 'stopped' | 'restarting' | 'error' | 'pending' | 'active' | 'deleted';
+
+export interface ClusterAccessInfo {
+  containerId?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+}
 
 export interface Cluster {
   id: string;
@@ -42,12 +49,15 @@ export interface Cluster {
   memory: number;
   storage: number;
   lastUpdate: string;
-  owner: string;
+  owner?: string;
+  ownerId?: string;
   serviceType: string;
   service: ServiceTemplate | null;
   startupCommand: string;
   port?: string;
-  ftpPort?: string;
+  ftp?: ClusterAccessInfo;
+  webDav?: ClusterAccessInfo;
+  containerId?: string; // ID do container Docker para SSE
 }
 
 export interface ClusterData {
@@ -80,7 +90,7 @@ export interface ServiceTemplate {
 // MÉTRICAS E MONITORAMENTO
 // ============================================
 export interface ClusterMetrics {
-  clusterId?: number;
+  clusterId?: number | string; // Aceita number (legado) ou string (UUID)
   clusterName?: string;
   timestamp?: string;
   
@@ -130,7 +140,7 @@ export interface ClusterMetrics {
 
 export interface ClusterStatsMessage {
   timestamp: number;
-  clusters: Record<number, ClusterMetrics>;
+  clusters: Record<number | string, ClusterMetrics>; // Aceita number (legado) ou string (UUID)
   systemStats?: {
     totalClusters: number;
     healthyClusters: number;
@@ -143,7 +153,7 @@ export interface ClusterStatsMessage {
 }
 
 export interface ClusterHealthStatus {
-  clusterId: number;
+  clusterId: number | string; // Aceita number (legado) ou string (UUID)
   status: 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN';
   lastCheck?: string;
   details?: Record<string, unknown>;
@@ -177,25 +187,45 @@ export interface ApiError {
 }
 
 export interface ClusterListItem {
-  id: number;
+  id: string; // UUID
   name: string;
   status?: string;
   port?: number;
-  ftpPort?: number;
   rootPath?: string;
   userId?: number;
+  ownerId?: string;
+  ownerUsername?: string;
   owner?: {
     userId: number;
   };
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
+  templateName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  env?: Record<string, string>;
+  ports?: number[];
+  volumes?: string[];
+  containerId?: string; // ID do container Docker para SSE
+  ftp?: ClusterAccessInfo;
+  webDav?: ClusterAccessInfo;
 }
 
 export interface ClusterDetailsResponse {
-  id: number;
+  id: string; // UUID
   name: string;
   status?: string;
+  templateName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  env?: Record<string, string>;
+  ports?: number[];
+  volumes?: string[];
+  containerId?: string; // ID do container Docker para SSE
+  ownerId?: string;
+  ownerUsername?: string;
+  // Campos opcionais que podem não estar presentes no novo backend
   port?: number;
   rootPath?: string;
   userId?: number;
@@ -204,26 +234,42 @@ export interface ClusterDetailsResponse {
     username: string;
     role: string;
   };
-  templateName?: string;
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;
-  createdAt?: string;
-  updatedAt?: string;
+  ftp?: ClusterAccessInfo;
+  webDav?: ClusterAccessInfo;
 }
 
 export interface CreateClusterRequest {
   templateName: string;
   baseName?: string;
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;
 }
 
+// Request para instanciação de template (novo backend)
+export interface TemplateInstantiateRequest {
+  name: string;
+  env?: Record<string, string>;
+  ports?: string[];
+  binds?: string[];
+  cpuLimitPercent?: number;
+  memoryLimitMb?: number;
+}
+
+// Response da instanciação de template (novo backend)
+export interface TemplateInstantiateResponse {
+  containerId: string;
+  name: string;
+}
+
+// Response legado mantido para compatibilidade
 export interface CreateClusterResponse {
-  clusterId: number | null;
+  clusterId: string | null; // UUID
   clusterName: string;
   port: number;
   ftpPort?: number;

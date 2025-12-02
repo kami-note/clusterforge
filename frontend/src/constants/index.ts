@@ -16,12 +16,19 @@ export const STORAGE_KEYS = {
 // ============================================
 // STATUS MAPPING
 // ============================================
-export const CLUSTER_STATUS_MAP: Record<string, 'running' | 'stopped' | 'restarting' | 'error'> = {
-  'CREATED': 'running',
+// Mapeia status do backend (enum ClusterStatus) para formato do frontend
+export const CLUSTER_STATUS_MAP: Record<string, 'running' | 'stopped' | 'restarting' | 'error' | 'pending'> = {
+  // Status do backend atual (ClusterStatus enum)
+  'PENDING': 'pending',
+  'ACTIVE': 'running',
+  'STOPPED': 'stopped',
+  'DELETED': 'stopped', // Deletado mostra como parado
+  'ERROR': 'error',
+  // Status legados (compatibilidade)
+  'CREATED': 'pending',
   'STARTING': 'restarting',
   'RUNNING': 'running',
   'STOPPING': 'restarting',
-  'STOPPED': 'stopped',
   'FAILED': 'error',
   'RESTARTING': 'restarting',
 } as const;
@@ -102,15 +109,6 @@ export const VALIDATION_LIMITS = {
 export const PAGINATION = {
   DEFAULT_PAGE_SIZE: 10,
   MAX_PAGE_SIZE: 100,
-} as const;
-
-// ============================================
-// WEBSOCKET
-// ============================================
-export const WEBSOCKET_CONFIG = {
-  RECONNECT_DELAY: 3000,
-  MAX_RECONNECT_ATTEMPTS: 5,
-  HEARTBEAT_INTERVAL: 4000,
 } as const;
 
 // ============================================

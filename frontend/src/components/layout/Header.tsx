@@ -32,6 +32,9 @@ export function Header() {
       case 'client-view':
         router.push('/admin/client-view');
         break;
+      case 'user-management':
+        router.push('/admin/users');
+        break;
       default:
         router.push('/' + view);
     }
@@ -68,6 +71,12 @@ export function Header() {
                   onClick={() => handleViewChange('cluster-management')}
                 >
                   Gerenciar Clusters
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => handleViewChange('user-management')}
+                >
+                  Usuários & permissões
                 </Button>
               </>
             )}

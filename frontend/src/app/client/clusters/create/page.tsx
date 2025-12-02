@@ -20,7 +20,7 @@ export default function ClientClusterCreationPage() {
   };
 
   return (
-    <ProtectedRoute allowedRoles={['client', 'admin']}>
+    <ProtectedRoute allowedRoles={['admin']}>
       <ClusterCreation 
         userType="client" 
         onBack={handleBack} 

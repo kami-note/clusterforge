@@ -3,10 +3,13 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { ClusterData } from '@/types';
 import { clusterService } from '@/services/cluster.service';
+import { templateService } from '@/services/template.service';
 import { Cluster } from '@/types';
 import { mapClusterStatus, formatTemplateName } from '@/utils/cluster.utils';
-import { memoryMbToGb, cpuCoresToPercent } from '@/utils/cluster.utils';
+import { memoryMbToGb } from '@/utils/cluster.utils';
 import { handleError, safeConsoleError } from '@/utils/error.utils';
+import { useAuth } from '@/hooks/useAuth';
+import { authService } from '@/services/auth.service';
 
 interface ClustersContextType {
   clusters: Cluster[];
@@ -15,6 +18,7 @@ interface ClustersContextType {
   updateCluster: (id: string, updates: Partial<Cluster>) => Promise<void>;
   deleteCluster: (id: string) => Promise<void>;
   loading: boolean;
+  reloadClusters: () => Promise<void>;
 }
 
 const ClustersContext = createContext<ClustersContextType | undefined>(undefined);
@@ -68,9 +72,20 @@ const initialClusters: Cluster[] = [
 export function ClustersProvider({ children }: { children: ReactNode }) {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user, isLoading: authLoading } = useAuth();
 
   // Função para carregar clusters da API
   const loadClusters = useCallback(async () => {
+    // Não tentar carregar se não estiver autenticado
+    const token = authService.getToken();
+    const expiresAt = authService.getTokenExpiry();
+    
+    if (!token || (expiresAt && expiresAt <= Date.now())) {
+      setLoading(false);
+      setClusters([]);
+      return;
+    }
+
     try {
       setLoading(true);
       const apiClusters = await clusterService.listClusters();
@@ -83,38 +98,42 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
             const details = await clusterService.getCluster(cluster.id);
             
             return {
-              id: details.id.toString(),
+              id: typeof details.id === 'string' ? details.id : details.id.toString(),
               name: details.name,
               status: mapClusterStatus(details.status), // Status sempre vem da API
-              cpu: details.cpuLimit ? cpuCoresToPercent(details.cpuLimit) : 0,
+              cpu: details.cpuLimitPercent ?? 0,
               memory: details.memoryLimit ? memoryMbToGb(details.memoryLimit) : 0,
               storage: details.diskLimit || 0,
               lastUpdate: details.updatedAt || details.createdAt || 'desconhecido',
-              owner: details.user?.username || 'Desconhecido',
+              owner: details.ownerUsername || 'Não atribuído',
+              ownerId: details.ownerId || undefined,
               serviceType: formatTemplateName(details.templateName) || details.rootPath || 'Custom',
               service: null,
               startupCommand: '',
-              port: details.port?.toString() || details.rootPath,
-              ftpPort: details.ftpPort?.toString(),
+              port: details.port?.toString() || (details.ports && details.ports.length > 0 ? details.ports[0].toString() : undefined) || details.rootPath,
+        ftp: details.ftp,
+        webDav: details.webDav,
             };
           } catch (error) {
             const message = handleError(error);
             safeConsoleError(`Error loading cluster ${cluster.id}:`, message, error);
             // Retorna dados básicos se falhar ao buscar detalhes
             return {
-              id: cluster.id.toString(),
+              id: typeof cluster.id === 'string' ? cluster.id : cluster.id.toString(),
               name: cluster.name,
               status: mapClusterStatus(cluster.status),
-              cpu: cluster.cpuLimit ? cpuCoresToPercent(cluster.cpuLimit) : 0,
+              cpu: cluster.cpuLimitPercent ?? 0,
               memory: cluster.memoryLimit ? memoryMbToGb(cluster.memoryLimit) : 0,
               storage: cluster.diskLimit || 0,
-              lastUpdate: 'desconhecido',
-              owner: cluster.owner?.userId?.toString() || 'Desconhecido',
-              serviceType: cluster.rootPath || 'Custom',
+              lastUpdate: cluster.updatedAt || cluster.createdAt || 'desconhecido',
+              owner: cluster.ownerUsername || 'Desconhecido',
+              ownerId: cluster.ownerId,
+              serviceType: formatTemplateName(cluster.templateName) || cluster.rootPath || 'Custom',
               service: null,
               startupCommand: '',
-              port: cluster.port?.toString(),
-              ftpPort: (cluster as any).ftpPort?.toString(),
+              port: cluster.port?.toString() || (cluster.ports && cluster.ports.length > 0 ? cluster.ports[0].toString() : undefined),
+              ftp: cluster.ftp,
+              webDav: cluster.webDav,
             };
           }
         })
@@ -129,12 +148,22 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]); // Depender de user para recarregar quando autenticação mudar
 
-  // Carregar clusters da API quando o componente montar
+  // Carregar clusters da API quando o componente montar E usuário estiver autenticado
   useEffect(() => {
-    loadClusters();
-  }, [loadClusters]);
+    // Aguardar verificação de autenticação terminar
+    if (authLoading) return;
+    
+    // Só carregar se estiver autenticado
+    if (user) {
+      loadClusters();
+    } else {
+      // Se não autenticado, limpar clusters
+      setClusters([]);
+      setLoading(false);
+    }
+  }, [loadClusters, user, authLoading]);
 
   // Removido polling periódico para evitar recarregamentos visíveis
 
@@ -142,13 +171,17 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true);
       
-      // Chama a API real para criar o cluster
-      await clusterService.createCluster({
-        templateName: clusterData.service?.id || 'webserver-php',
-        baseName: clusterData.name,
-        cpuLimit: clusterData.resources.cpu,
-        memoryLimit: clusterData.resources.ram * 1024, // Converte GB para MB
-        diskLimit: clusterData.resources.disk,
+      // NOVO BACKEND: Usa TemplateService.instantiateTemplate
+      const templateName = clusterData.service?.id || 'webserver-php';
+      await templateService.instantiateTemplate(templateName, {
+        name: clusterData.name,
+        env: {
+          // Converter recursos para variáveis de ambiente se necessário
+          ...(clusterData.resources.cpu && { CPU_LIMIT_PERCENT: clusterData.resources.cpu.toString() }),
+          ...(clusterData.resources.ram && { MEMORY_LIMIT: (clusterData.resources.ram * 1024).toString() }), // GB para MB
+          ...(clusterData.resources.disk && { DISK_LIMIT: clusterData.resources.disk.toString() }),
+        },
+        // Ports e binds podem ser definidos aqui se necessário
       });
 
       // Recarregar lista da API para ter dados atualizados (incluindo status)
@@ -165,7 +198,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
   const findClusterById = useCallback(async (id: string): Promise<Cluster | null> => {
     try {
       setLoading(true);
-      const clusterDetails = await clusterService.getCluster(parseInt(id));
+      // ID agora é UUID (string), não precisa mais de parseInt
+      const clusterDetails = await clusterService.getCluster(id);
       
       if (!clusterDetails) {
         return null;
@@ -173,10 +207,10 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
 
       // Converte para o formato esperado
       const cluster: Cluster = {
-        id: clusterDetails.id.toString(),
+        id: typeof clusterDetails.id === 'string' ? clusterDetails.id : clusterDetails.id.toString(),
         name: clusterDetails.name,
         status: mapClusterStatus(clusterDetails.status),
-        cpu: clusterDetails.cpuLimit ? cpuCoresToPercent(clusterDetails.cpuLimit) : 0,
+        cpu: clusterDetails.cpuLimitPercent ?? 0,
         memory: clusterDetails.memoryLimit ? memoryMbToGb(clusterDetails.memoryLimit) : 0,
         storage: clusterDetails.diskLimit || 0,
         lastUpdate: clusterDetails.updatedAt || clusterDetails.createdAt || 'desconhecido',
@@ -184,8 +218,10 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         serviceType: formatTemplateName(clusterDetails.templateName) || 'Serviço Personalizado',
         service: null,
         startupCommand: '',
-        port: clusterDetails.port?.toString(),
-        ftpPort: clusterDetails.ftpPort?.toString(),
+        port: clusterDetails.port?.toString() || (clusterDetails.ports && clusterDetails.ports.length > 0 ? clusterDetails.ports[0].toString() : undefined),
+        ftp: clusterDetails.ftp,
+        webDav: clusterDetails.webDav,
+        containerId: clusterDetails.containerId, // Preservar containerId para SSE
       };
 
       return cluster;
@@ -206,7 +242,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     
     // Executar ação da API em background (não bloquear UI)
     if (updates.status === 'running') {
-      clusterService.startCluster(parseInt(id))
+      // ID agora é UUID (string), não precisa mais de parseInt
+      clusterService.startCluster(id)
         .then(() => {
           // Recarregar lista em background após sucesso
           loadClusters().catch(err => 
@@ -225,7 +262,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
           }
         });
     } else if (updates.status === 'stopped') {
-      clusterService.stopCluster(parseInt(id))
+      // ID agora é UUID (string), não precisa mais de parseInt
+      clusterService.stopCluster(id)
         .then(() => {
           // Recarregar lista em background após sucesso
           loadClusters().catch(err => 
@@ -252,7 +290,8 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
     setClusters(prev => prev.filter(c => c.id !== id));
     
     // Executar deleção em background (não bloquear UI)
-    clusterService.deleteCluster(parseInt(id))
+    // ID agora é UUID (string), não precisa mais de parseInt
+    clusterService.deleteCluster(id)
       .then(() => {
         // Recarregar lista em background após sucesso para garantir consistência
         loadClusters().catch(err => 
@@ -276,7 +315,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ClustersContext.Provider value={{ clusters, addCluster, findClusterById, updateCluster, deleteCluster, loading }}>
+    <ClustersContext.Provider value={{ clusters, addCluster, findClusterById, updateCluster, deleteCluster, loading, reloadClusters: loadClusters }}>
       {children}
     </ClustersContext.Provider>
   );

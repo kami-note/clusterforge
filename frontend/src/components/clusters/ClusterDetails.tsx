@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Skeleton from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -24,13 +23,27 @@ import {
   Server,
   ZoomIn,
   ZoomOut,
-  Maximize2
+  Maximize2,
+  FolderTree
 } from 'lucide-react';
 import { useClusters } from '@/hooks/useClusters';
 import { Cluster } from '@/types';
-import { clusterService, FtpCredentials } from '@/services/cluster.service';
 import { monitoringService, ClusterMetrics, ClusterHealthStatus } from '@/services/monitoring.service';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
+import { ClusterFileManager } from '@/components/clusters/ClusterFileManager';
+import { config } from '@/lib/config';
+import { clusterService } from '@/services/cluster.service';
+import { sseService, type ContainerLogEventPayload } from '@/services/sse.service';
+import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Trash2 } from 'lucide-react';
+import {
+  calculateCpuUsageRelativeToLimit,
+  calculateMemoryUsageRelativeToLimit,
+  calculateDiskUsageRelativeToLimit,
+  calculateNetworkUsageRelativeToLimit
+} from '@/utils/cluster.utils';
 
 interface ClusterDetailsProps {
   clusterId: string;
@@ -47,23 +60,18 @@ interface ResourceDataPoint {
   network: number;
 }
 
-const mockLogs = [
-  '[18:05:30 INFO]: Starting minecraft server version 1.20.1',
-  '[18:05:30 INFO]: Loading properties',
-  '[18:05:30 WARN]: server.properties does not exist. Creating one.',
-  '[18:05:31 INFO]: Default game type: SURVIVAL',
-  '[18:05:31 INFO]: Generating keypair',
-  '[18:05:32 INFO]: Starting Minecraft server on *:25565',
-  '[18:05:32 INFO]: Using epoll channel type',
-  '[18:05:32 INFO]: Preparing level "world"',
-  '[18:05:33 INFO]: Preparing spawn area: 0%',
-  '[18:05:34 INFO]: Preparing spawn area: 5%',
-  '[18:05:35 INFO]: Preparing spawn area: 12%',
-  '[18:05:36 INFO]: Done (4.583s)! For help, type "help"'
-];
+interface AccessCredentials {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  protocol: 'ftp' | 'webdav';
+  url: string;
+}
 
 export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
-  const { findClusterById, updateCluster, loading } = useClusters();
+  const router = useRouter();
+  const { findClusterById, updateCluster, deleteCluster, loading } = useClusters();
   const { metrics: realtimeMetrics, connected } = useRealtimeMetrics();
   const [cluster, setCluster] = useState<Cluster | null>(null);
   
@@ -85,14 +93,68 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const [currentMetrics, setCurrentMetrics] = useState<ClusterMetrics | null>(null);
   const [, setHealthStatus] = useState<ClusterHealthStatus | null>(null);
   const [status, setStatus] = useState('loading');
-  const [command, setCommand] = useState('java -Xmx6G -Xms6G -jar server.jar nogui');
-  const [consoleOutput, setConsoleOutput] = useState(mockLogs.join('\n'));
+  const [consoleOutput, setConsoleOutput] = useState('');
   const [isLogsPaused, setIsLogsPaused] = useState(false);
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const consoleRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedInitialDataRef = useRef(false);
-  const [ftpCredentials, setFtpCredentials] = useState<{ host: string; port: number; username: string; password: string } | null>(null);
-  const [ftpLoading, setFtpLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState<'overview' | 'files'>('overview');
+
+  const formatLogLine = useCallback((logEvent: ContainerLogEventPayload): string => {
+    if (!logEvent || !logEvent.message) {
+      return '';
+    }
+
+    // Determinar timestamp: se já temos string ISO, usar diretamente; senão, converter de epochSecond
+    let timestampLabel: string | undefined;
+    if (logEvent.timestamp) {
+      // timestamp já é uma string ISO, converter diretamente
+      try {
+        timestampLabel = new Date(logEvent.timestamp).toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+      } catch {
+        // Se falhar, tentar usar epochSecond como fallback
+        if (typeof logEvent.epochSecond === 'number' && Number.isFinite(logEvent.epochSecond)) {
+          timestampLabel = new Date(logEvent.epochSecond * 1000).toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+        }
+      }
+    } else if (typeof logEvent.epochSecond === 'number' && Number.isFinite(logEvent.epochSecond)) {
+      // Usar epochSecond diretamente
+      timestampLabel = new Date(logEvent.epochSecond * 1000).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    }
+
+    const streamLabel =
+      logEvent.stream && logEvent.stream !== 'STDOUT'
+        ? logEvent.stream
+        : undefined;
+
+    const prefixParts: string[] = [];
+    if (timestampLabel) {
+      prefixParts.push(`[${timestampLabel}]`);
+    }
+    if (streamLabel) {
+      prefixParts.push(`[${streamLabel}]`);
+    }
+
+    const normalizedMessage = logEvent.message.replace(/\r/g, '').replace(/\n+$/, '');
+    if (!normalizedMessage) {
+      return '';
+    }
+
+    const prefix = prefixParts.length > 0 ? `${prefixParts.join(' ')} ` : '';
+    return `${prefix}${normalizedMessage}\n`;
+  }, []);
 
   // Função auxiliar para sanitizar valores numéricos
   const sanitizeValue = useCallback((value: number | undefined | null): number => {
@@ -200,6 +262,54 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return [finalMin, finalMax];
   }, []);
 
+  const resolvedAccessHost = useMemo(() => {
+    if (config.access?.host) {
+      return config.access.host;
+    }
+    if (typeof window !== 'undefined' && window.location.hostname) {
+      return window.location.hostname;
+    }
+    try {
+      return new URL(config.api.baseUrl).hostname;
+    } catch {
+      return 'localhost';
+    }
+  }, []);
+
+  const buildAccessCredentials = useCallback(
+    (access: Cluster['ftp'], protocol: 'ftp' | 'webdav'): AccessCredentials | null => {
+      if (!access || !access.port || !access.username || !access.password) {
+        return null;
+      }
+      const proto =
+        protocol === 'webdav'
+          ? config.access?.webdavProtocol || config.access?.protocol || 'http'
+          : config.access?.ftpProtocol || 'ftp';
+      const url = `${proto}://${resolvedAccessHost}:${access.port}`;
+      return {
+        host: resolvedAccessHost,
+        port: access.port,
+        username: access.username,
+        password: access.password,
+        protocol,
+        url,
+      };
+    },
+    [resolvedAccessHost],
+  );
+
+  const ftpCredentials = useMemo(
+    () => buildAccessCredentials(cluster?.ftp, 'ftp'),
+    [cluster?.ftp, buildAccessCredentials],
+  );
+
+  const webDavCredentials = useMemo(
+    () => buildAccessCredentials(cluster?.webDav, 'webdav'),
+    [cluster?.webDav, buildAccessCredentials],
+  );
+
+  const accessLoading = !cluster;
+
   // Helper para converter oklch para hex (usando elemento temporário)
   // No tema escuro, prioriza cores mais brilhantes para melhor visibilidade
   const oklchToHex = useCallback((oklch: string, fallback: string = '#8884d8', preferFallback: boolean = false): string => {
@@ -273,7 +383,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     chart4: '#ea580c', // laranja escuro (tema claro) ou roxo (tema escuro)
   });
 
-  // Carregar dados iniciais (apenas cluster, sem métricas - métricas vêm do WebSocket)
+  // Carregar dados iniciais (apenas cluster, sem métricas - métricas vêm do SSE)
   // Este efeito roda APENAS quando clusterId mudar, não quando realtimeMetrics mudar
   useEffect(() => {
     let isCancelled = false;
@@ -288,15 +398,16 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         if (clusterData) {
           setCluster(clusterData);
           
-          const clusterIdNum = parseInt(clusterId);
+          // ID agora é UUID (string), não precisa mais de parseInt
           
           // SEMPRE usar o status da API como fonte primária inicial
           // O status da API é mais confiável no momento do carregamento
-          let initialStatus = clusterData.status;
+          const initialStatus = clusterData.status;
           
           // Buscar health status da API para ter informação mais atualizada
+          // Endpoint pode não existir no backend (não crítico)
           try {
-            const health = await monitoringService.getClusterHealth(clusterIdNum);
+            const health = await monitoringService.getClusterHealth(clusterId);
             if (!isCancelled && health) {
               setHealthStatus(health);
               
@@ -304,77 +415,64 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               // mas priorizar o status da entidade do cluster (que vem de /clusters/{id})
               // A API pode ter status diferente do health check
             }
-          } catch (error) {
-            if (process.env.NODE_ENV === 'development') {
-              console.debug("Failed to fetch health status from API, using cluster status:", error);
+          } catch (error: any) {
+            // Não logar se for 403/404 (endpoint não existe ou não autorizado)
+            // Apenas usar o status do cluster como fallback (comportamento normal)
+            if (error?.status !== 403 && error?.status !== 404) {
+              if (process.env.NODE_ENV === 'development') {
+                console.debug("Failed to fetch health status from API, using cluster status:", error);
+              }
             }
           }
           
-          // Buscar credenciais FTP
-          try {
-            setFtpLoading(true);
-            const ftpCreds = await clusterService.getFtpCredentials(clusterIdNum);
-            if (!isCancelled) {
-              setFtpCredentials(ftpCreds);
-            }
-          } catch (error) {
-            if (process.env.NODE_ENV === 'development') {
-              console.debug("Failed to fetch FTP credentials:", error);
-            }
-            // Não definir credenciais se falhar (pode não estar configurado)
-          } finally {
-            if (!isCancelled) {
-              setFtpLoading(false);
-            }
-          }
-          
-          // Verificar WebSocket apenas para métricas, não para sobrescrever status inicial
-          const wsMetrics = realtimeMetrics && !isNaN(clusterIdNum) && realtimeMetrics[clusterIdNum] 
-            ? realtimeMetrics[clusterIdNum] 
+          // Verificar SSE apenas para métricas, não para sobrescrever status inicial
+          // ID agora é UUID (string), tentar buscar como string primeiro (UUID), depois como number (legado)
+          const sseMetrics = realtimeMetrics && (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)]) 
+            ? (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)])
             : null;
           
-          // Se houver métricas do WebSocket, usar TODOS os campos disponíveis
-          if (wsMetrics && connected && !isCancelled) {
-            const wsMetricsData: ClusterMetrics = {
+          // Se houver métricas do SSE, usar TODOS os campos disponíveis
+          if (sseMetrics && connected && !isCancelled) {
+            const sseMetricsData: ClusterMetrics = {
               // CPU
-              cpuUsagePercent: wsMetrics.cpuUsagePercent ?? undefined,
-              cpuLimitCores: wsMetrics.cpuLimitCores ?? undefined,
+              cpuUsagePercent: sseMetrics.cpuUsagePercent ?? undefined,
+              cpuLimitCores: sseMetrics.cpuLimitCores ?? undefined,
               
               // Memory
-              memoryUsagePercent: wsMetrics.memoryUsagePercent ?? undefined,
-              memoryUsageMb: wsMetrics.memoryUsageMb ?? undefined,
-              memoryLimitMb: wsMetrics.memoryLimitMb ?? undefined,
+              memoryUsagePercent: sseMetrics.memoryUsagePercent ?? undefined,
+              memoryUsageMb: sseMetrics.memoryUsageMb ?? undefined,
+              memoryLimitMb: sseMetrics.memoryLimitMb ?? undefined,
               
               // Disk
-              diskUsagePercent: wsMetrics.diskUsagePercent !== null && wsMetrics.diskUsagePercent !== undefined 
-                ? wsMetrics.diskUsagePercent 
+              diskUsagePercent: sseMetrics.diskUsagePercent !== null && sseMetrics.diskUsagePercent !== undefined 
+                ? sseMetrics.diskUsagePercent 
                 : undefined,
-              diskUsageMb: wsMetrics.diskUsageMb ?? undefined,
-              diskLimitMb: wsMetrics.diskLimitMb ?? undefined,
+              diskUsageMb: sseMetrics.diskUsageMb ?? undefined,
+              diskLimitMb: sseMetrics.diskLimitMb ?? undefined,
               
               // Network
-              networkRxBytes: wsMetrics.networkRxBytes ?? undefined,
-              networkTxBytes: wsMetrics.networkTxBytes ?? undefined,
-              networkUsage: wsMetrics.networkRxBytes && wsMetrics.networkTxBytes 
-                ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
+              networkRxBytes: sseMetrics.networkRxBytes ?? undefined,
+              networkTxBytes: sseMetrics.networkTxBytes ?? undefined,
+              networkUsage: sseMetrics.networkRxBytes && sseMetrics.networkTxBytes 
+                ? (sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024 
                 : undefined,
               
               // Container
-              containerUptimeSeconds: wsMetrics.containerUptimeSeconds ?? undefined,
-              containerRestartCount: wsMetrics.containerRestartCount ?? undefined,
-              containerStatus: wsMetrics.containerStatus ?? undefined,
+              containerUptimeSeconds: sseMetrics.containerUptimeSeconds ?? undefined,
+              containerRestartCount: sseMetrics.containerRestartCount ?? undefined,
+              containerStatus: sseMetrics.containerStatus ?? undefined,
               
               // Health
-              healthState: wsMetrics.healthState ?? undefined,
+              healthState: sseMetrics.healthState ?? undefined,
               
               // Cluster Info
-              clusterId: wsMetrics.clusterId ?? clusterIdNum,
+              clusterId: sseMetrics.clusterId ?? clusterId,
             };
-            setCurrentMetrics(wsMetricsData);
+            setCurrentMetrics(sseMetricsData);
             
             // Inicializar gráfico apenas se ainda não houver dados
             if (allResourceData.length === 0) {
-              generateInitialChartData(wsMetricsData);
+              generateInitialChartData(sseMetricsData);
             }
           }
           
@@ -447,7 +545,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   }, [allResourceData.length]); // Remover visiblePoints das dependências para evitar loop
 
 
-  // ÚNICA fonte de atualização: WebSocket para métricas em tempo real
+  // ÚNICA fonte de atualização: SSE para métricas em tempo real
   // Usar refs para evitar loops - não incluir status nas dependências
   const statusRef = useRef(status);
   useEffect(() => {
@@ -457,18 +555,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   useEffect(() => {
     if (!cluster) return;
 
-    const clusterIdNum = parseInt(clusterId);
-    if (isNaN(clusterIdNum)) {
-      setMetricsError('ID do cluster inválido');
-      return;
-    }
-
-    const wsMetrics = realtimeMetrics && realtimeMetrics[clusterIdNum] 
-      ? realtimeMetrics[clusterIdNum] 
+    // ID agora é UUID (string), não precisa mais de parseInt
+    // Tentar buscar como string primeiro (UUID), depois como number (legado)
+    const sseMetrics = realtimeMetrics && (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)]) 
+      ? (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)])
       : null;
     
-    // Só processar se WebSocket estiver conectado E houver métricas
-    if (!wsMetrics || !connected) {
+    // Só processar se SSE estiver conectado E houver métricas
+    if (!sseMetrics || !connected) {
       if (!connected) {
         setMetricsError(null); // Limpar erro quando desconectado (já há aviso visual)
       }
@@ -480,87 +574,116 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       setMetricsError(null);
     }
     
-    // Debug: verificar TODOS os campos recebidos do WebSocket
+    // Debug: verificar TODOS os campos recebidos do SSE
     if (process.env.NODE_ENV === 'development') {
-      console.log('📊 Métricas COMPLETAS recebidas do WebSocket para cluster', clusterIdNum, {
+      console.log('📊 Métricas COMPLETAS recebidas do SSE para cluster', clusterId, {
         // CPU
-        cpuUsagePercent: wsMetrics.cpuUsagePercent,
-        cpuLimitCores: wsMetrics.cpuLimitCores,
+        cpuUsagePercent: sseMetrics.cpuUsagePercent,
+        cpuLimitCores: sseMetrics.cpuLimitCores,
         
         // Memory
-        memoryUsagePercent: wsMetrics.memoryUsagePercent,
-        memoryUsageMb: wsMetrics.memoryUsageMb,
-        memoryLimitMb: wsMetrics.memoryLimitMb,
+        memoryUsagePercent: sseMetrics.memoryUsagePercent,
+        memoryUsageMb: sseMetrics.memoryUsageMb,
+        memoryLimitMb: sseMetrics.memoryLimitMb,
         
         // Disk
-        diskUsagePercent: wsMetrics.diskUsagePercent,
-        diskUsageMb: wsMetrics.diskUsageMb,
-        diskLimitMb: wsMetrics.diskLimitMb,
+        diskUsagePercent: sseMetrics.diskUsagePercent,
+        diskUsageMb: sseMetrics.diskUsageMb,
+        diskLimitMb: sseMetrics.diskLimitMb,
         
         // Network
-        networkRxBytes: wsMetrics.networkRxBytes,
-        networkTxBytes: wsMetrics.networkTxBytes,
-        networkMB: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
-          ? ((wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
+        networkRxBytes: sseMetrics.networkRxBytes,
+        networkTxBytes: sseMetrics.networkTxBytes,
+        networkMB: sseMetrics.networkRxBytes !== undefined && sseMetrics.networkTxBytes !== undefined
+          ? ((sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
           : 'N/A',
         
         // Container
-        containerUptimeSeconds: wsMetrics.containerUptimeSeconds,
-        containerStatus: wsMetrics.containerStatus,
+        containerUptimeSeconds: sseMetrics.containerUptimeSeconds,
+        containerStatus: sseMetrics.containerStatus,
         
         // Health
-        healthState: wsMetrics.healthState,
+        healthState: sseMetrics.healthState,
         
         // Objeto completo para debug
-        objetoCompleto: wsMetrics
+        objetoCompleto: sseMetrics
       });
     }
     
-    // Usar TODOS os campos disponíveis do WebSocket (ClusterMetricsMessage)
+    // Calcular porcentagens relativas ao limite do cluster
+    // CPU: se limite é 50% da máquina e uso é 50% da máquina, então é 100% do limite
+    // cluster.cpu já é cpuLimitPercent (em percentual 1-100)
+    const cpuUsageRelativeToLimit = calculateCpuUsageRelativeToLimit(
+      sseMetrics.cpuUsagePercent,
+      cluster?.cpu // cluster.cpu já é cpuLimitPercent
+    );
+    
+    // Memory: já vem como percentual do limite, mas garantir consistência
+    // cluster.memory é o limite em GB, converter para MB
+    const memoryUsageRelativeToLimit = calculateMemoryUsageRelativeToLimit(
+      sseMetrics.memoryUsagePercent,
+      sseMetrics.memoryUsageMb,
+      cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb // Converter GB para MB
+    );
+    
+    // Disk: similar à memória
+    // cluster.storage é o limite em GB, converter para MB
+    const diskUsageRelativeToLimit = calculateDiskUsageRelativeToLimit(
+      sseMetrics.diskUsagePercent,
+      sseMetrics.diskUsageMb,
+      cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb // Converter GB para MB
+    );
+    
+    // Network: calcular relativo ao limite (não temos networkLimit na interface Cluster)
+    const networkUsageRelativeToLimit = calculateNetworkUsageRelativeToLimit(
+      sseMetrics.networkRxBytes,
+      sseMetrics.networkTxBytes,
+      sseMetrics.networkLimitMbps
+    );
+    
+    // Usar TODOS os campos disponíveis do SSE (ContainerStats)
     const metrics: ClusterMetrics = {
-      // CPU - usar diretamente do WebSocket
-      cpuUsagePercent: wsMetrics.cpuUsagePercent ?? undefined,
-      cpuLimitCores: wsMetrics.cpuLimitCores ?? undefined,
+      // CPU - usar porcentagem relativa ao limite do cluster
+      cpuUsagePercent: cpuUsageRelativeToLimit,
+      cpuLimitCores: sseMetrics.cpuLimitCores ?? undefined,
       
-      // Memory - usar diretamente do WebSocket
-      memoryUsagePercent: wsMetrics.memoryUsagePercent ?? undefined,
-      memoryUsageMb: wsMetrics.memoryUsageMb ?? undefined,
-      memoryLimitMb: wsMetrics.memoryLimitMb ?? undefined,
+      // Memory - usar porcentagem relativa ao limite do cluster
+      memoryUsagePercent: memoryUsageRelativeToLimit,
+      memoryUsageMb: sseMetrics.memoryUsageMb ?? undefined,
+      memoryLimitMb: cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb, // Converter GB para MB
       
-      // Disk - usar diretamente do WebSocket
-      diskUsagePercent: wsMetrics.diskUsagePercent !== null && wsMetrics.diskUsagePercent !== undefined 
-        ? wsMetrics.diskUsagePercent 
-        : undefined,
-      diskUsageMb: wsMetrics.diskUsageMb ?? undefined,
-      diskLimitMb: wsMetrics.diskLimitMb ?? undefined,
-      diskReadBytes: wsMetrics.diskReadBytes ?? undefined,
-      diskWriteBytes: wsMetrics.diskWriteBytes ?? undefined,
+      // Disk - usar porcentagem relativa ao limite do cluster
+      diskUsagePercent: diskUsageRelativeToLimit,
+      diskUsageMb: sseMetrics.diskUsageMb ?? undefined,
+      diskLimitMb: cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb, // Converter GB para MB
+      diskReadBytes: sseMetrics.diskReadBytes ?? undefined,
+      diskWriteBytes: sseMetrics.diskWriteBytes ?? undefined,
       
       // Network - calcular de networkRxBytes e networkTxBytes
-      networkRxBytes: wsMetrics.networkRxBytes ?? undefined,
-      networkTxBytes: wsMetrics.networkTxBytes ?? undefined,
-      networkLimitMbps: wsMetrics.networkLimitMbps ?? undefined,
-      networkUsage: wsMetrics.networkRxBytes !== undefined && wsMetrics.networkTxBytes !== undefined
-        ? (wsMetrics.networkRxBytes + wsMetrics.networkTxBytes) / 1024 / 1024 
+      networkRxBytes: sseMetrics.networkRxBytes ?? undefined,
+      networkTxBytes: sseMetrics.networkTxBytes ?? undefined,
+      networkLimitMbps: sseMetrics.networkLimitMbps ?? undefined,
+      networkUsage: sseMetrics.networkRxBytes !== undefined && sseMetrics.networkTxBytes !== undefined
+        ? (sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024 
         : undefined,
       
-      // Container - usar diretamente do WebSocket
-      containerUptimeSeconds: wsMetrics.containerUptimeSeconds ?? undefined,
-      containerRestartCount: wsMetrics.containerRestartCount ?? undefined,
-      containerStatus: wsMetrics.containerStatus ?? undefined,
+      // Container - usar diretamente do SSE
+      containerUptimeSeconds: sseMetrics.containerUptimeSeconds ?? undefined,
+      containerRestartCount: sseMetrics.containerRestartCount ?? undefined,
+      containerStatus: sseMetrics.containerStatus ?? undefined,
       
-      // Application - usar diretamente do WebSocket
-      applicationResponseTimeMs: wsMetrics.applicationResponseTimeMs ?? undefined,
-      applicationStatusCode: wsMetrics.applicationStatusCode ?? undefined,
+      // Application - usar diretamente do SSE
+      applicationResponseTimeMs: sseMetrics.applicationResponseTimeMs ?? undefined,
+      applicationStatusCode: sseMetrics.applicationStatusCode ?? undefined,
       
-      // Health - usar diretamente do WebSocket
-      healthState: wsMetrics.healthState ?? undefined,
-      errorMessage: wsMetrics.errorMessage ?? undefined,
+      // Health - usar diretamente do SSE
+      healthState: sseMetrics.healthState ?? undefined,
+      errorMessage: sseMetrics.errorMessage ?? undefined,
       
-      // Cluster Info - usar diretamente do WebSocket
-      clusterId: wsMetrics.clusterId ?? clusterIdNum,
-      clusterName: wsMetrics.clusterName ?? undefined,
-      timestamp: wsMetrics.timestamp ?? undefined, // LocalDateTime serializado como string ISO
+      // Cluster Info - usar diretamente do SSE
+      clusterId: sseMetrics.clusterId ?? clusterId,
+      clusterName: sseMetrics.clusterName ?? undefined,
+      timestamp: sseMetrics.timestamp ?? undefined, // LocalDateTime serializado como string ISO
     };
     
     // Atualizar métricas apenas se houver mudança significativa
@@ -576,18 +699,18 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       return metrics;
     });
     
-    // Não usar WebSocket para alterar status; apenas a API controla estado.
+    // Não usar SSE para alterar status; apenas a API controla estado.
     
     // Atualizar healthStatus apenas se mudou
-    if (wsMetrics.healthState) {
+    if (sseMetrics.healthState) {
       setHealthStatus(prev => {
-        const newStatus = wsMetrics.healthState === 'HEALTHY' ? 'HEALTHY' : 
-                         wsMetrics.healthState === 'UNHEALTHY' ? 'UNHEALTHY' : 'UNKNOWN';
-        if (prev && prev.status === newStatus && prev.clusterId === clusterIdNum) {
+        const newStatus = sseMetrics.healthState === 'HEALTHY' ? 'HEALTHY' : 
+                         sseMetrics.healthState === 'UNHEALTHY' ? 'UNHEALTHY' : 'UNKNOWN';
+        if (prev && prev.status === newStatus && prev.clusterId === clusterId) {
           return prev; // Retornar mesmo objeto se não mudou
         }
         return {
-          clusterId: clusterIdNum,
+          clusterId: clusterId,
           status: newStatus
         };
       });
@@ -671,28 +794,103 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     }
   }, [realtimeMetrics, connected, clusterId, sanitizeValue, cluster]);
 
-  // NÃO fazer polling REST - usar apenas WebSocket para métricas em tempo real
-  // Se WebSocket não estiver disponível, o usuário verá uma mensagem ou dados estáticos
+  // NÃO fazer polling REST - usar apenas SSE para métricas em tempo real
+  // Se SSE não estiver disponível, o usuário verá uma mensagem ou dados estáticos
 
-  // Simular novos logs
+  // Conectar SSE de logs do container
   useEffect(() => {
-    if (!cluster || isLogsPaused || status !== 'running') return;
+    if (!cluster || !cluster.containerId || status !== 'running' || isLogsPaused) {
+      if (status !== 'running' && cluster) {
+        setConsoleOutput('Container não está em execução. Inicie o container para ver os logs.');
+      }
+      return;
+    }
 
-    const logsInterval = setInterval(() => {
-      const randomLogs = [
-        '[INFO]: Player joined the game',
-        '[INFO]: Saving the game (this may take a moment!)',
-        '[INFO]: Saved the game',
-        '[WARN]: Can\'t keep up! Is the server overloaded?',
-        '[INFO]: Player left the game'
-      ];
+    // Usar ref para evitar race condition com callback do SSE
+    const isInitialLoadCompleteRef = { current: false };
+    const sseLogsBufferRef = { current: [] as string[] };
 
-      const newLog = `[${new Date().toLocaleTimeString('pt-BR')} ${Math.random() > 0.7 ? 'WARN' : 'INFO'}]: ${randomLogs[Math.floor(Math.random() * randomLogs.length)]}`;
-      setConsoleOutput(prev => prev + '\n' + newLog);
-    }, 10000);
+    const flushBufferedLogs = () => {
+      if (sseLogsBufferRef.current.length === 0) {
+        return;
+      }
+      const bufferedLogs = sseLogsBufferRef.current.join('');
+      setConsoleOutput(prev => {
+        if (!prev) {
+          return bufferedLogs;
+        }
+        const separator = prev.endsWith('\n') ? '' : '\n';
+        return prev + separator + bufferedLogs;
+      });
+      sseLogsBufferRef.current = [];
+    };
 
-    return () => clearInterval(logsInterval);
-  }, [cluster, isLogsPaused, status]);
+    // Carregar logs iniciais via REST ANTES de conectar SSE
+    const loadInitialLogs = async (): Promise<number | undefined> => {
+      try {
+        const response = await clusterService.getContainerLogs(cluster.id, 200);
+        if (response?.logs !== undefined && response.logs !== null) {
+          setConsoleOutput(response.logs);
+        } else {
+          setConsoleOutput('');
+        }
+        isInitialLoadCompleteRef.current = true;
+        flushBufferedLogs();
+        return response?.lastTimestamp ?? undefined;
+      } catch (error) {
+        console.error('Erro ao carregar logs iniciais:', error);
+        setConsoleOutput('Erro ao carregar logs do container. Verifique se o container está rodando.');
+        isInitialLoadCompleteRef.current = true;
+        flushBufferedLogs();
+        return undefined;
+      }
+    };
+
+    // Callback para receber logs via SSE (registrado ANTES de conectar para evitar perder logs)
+    const unsubscribe = sseService.onLogs((receivedClusterId: string | number, logEvent: ContainerLogEventPayload) => {
+      if (receivedClusterId === cluster.id && logEvent?.message) {
+        const formattedLine = formatLogLine(logEvent);
+        if (!formattedLine) {
+          return;
+        }
+
+        if (!isInitialLoadCompleteRef.current) {
+          sseLogsBufferRef.current.push(formattedLine);
+        } else {
+          setConsoleOutput(prev => {
+            const previousValue = prev || '';
+            if (!previousValue) {
+              return formattedLine;
+            }
+            const separator = previousValue.endsWith('\n') ? '' : '\n';
+            return previousValue + separator + formattedLine;
+          });
+        }
+      }
+    });
+
+    // Conectar SSE para logs em tempo real
+    const containerId = cluster.containerId;
+    if (containerId) {
+      const connectLogs = async (sinceSeconds?: number) => {
+        try {
+          await sseService.connectLogs(cluster.id, containerId, sinceSeconds);
+        } catch (error) {
+          console.error('Erro ao conectar SSE de logs:', error);
+        }
+      };
+
+      // Carrega logs iniciais primeiro, depois conecta SSE com since para evitar duplicação
+      loadInitialLogs().then((sinceTimestamp) => {
+        connectLogs(sinceTimestamp);
+      });
+    }
+
+    return () => {
+      unsubscribe();
+      sseService.disconnectLogs(cluster.id);
+    };
+  }, [cluster, status, isLogsPaused, formatLogLine]);
 
   // Auto-scroll do console
   useEffect(() => {
@@ -877,9 +1075,18 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return () => observer.disconnect();
   }, [oklchToHex, updateThemeColors]);
 
-  const handleAction = (action: 'start' | 'stop' | 'restart' | 'reinstall') => {
+  const handleAction = async (action: 'start' | 'stop' | 'restart' | 'reinstall' | 'delete') => {
+    if (!cluster) return;
+
+    if (action === 'delete') {
+      // A deleção será tratada pelo AlertDialog, apenas prevenir chamada direta
+      return;
+    }
+
     const newStatus = action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting';
     setStatus(newStatus);
+    
+    // Atualização otimista na UI
     if (cluster) {
       updateCluster(cluster.id, { status: newStatus });
     }
@@ -894,28 +1101,70 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     const newLog = `[${new Date().toLocaleTimeString('pt-BR')} SYSTEM]: ${actionMessages[action]}`;
     setConsoleOutput(prev => prev + '\n' + newLog);
 
-    if (action === 'restart' || action === 'reinstall') {
-      setTimeout(() => {
-        setStatus('running');
-        if (cluster) {
-          updateCluster(cluster.id, { status: 'running' });
+    try {
+      if (action === 'start') {
+        const toastId = toast.loading('Iniciando cluster...');
+        await clusterService.startCluster(cluster.id);
+        toast.success('Cluster iniciado com sucesso!', { id: toastId });
+        // Recarregar dados do cluster
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
         }
-        const successLog = `[${new Date().toLocaleTimeString('pt-BR')} SYSTEM]: Servidor ${action === 'restart' ? 'reiniciado' : 'reinstalado'} com sucesso`;
-        setConsoleOutput(prev => prev + '\n' + successLog);
-      }, 3000);
+      } else if (action === 'stop') {
+        const toastId = toast.loading('Parando cluster...');
+        await clusterService.stopCluster(cluster.id);
+        toast.success('Cluster parado com sucesso!', { id: toastId });
+        // Recarregar dados do cluster
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
+        }
+      } else if (action === 'restart') {
+        const toastId = toast.loading('Reiniciando cluster...');
+        await clusterService.restartCluster(cluster.id);
+        toast.success('Cluster reiniciado com sucesso!', { id: toastId });
+        // Recarregar dados do cluster
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
+        }
+      } else if (action === 'reinstall') {
+        // Reinstalação é uma operação complexa que pode não estar disponível no backend atual
+        toast.info('Reinstalação não está disponível no momento.');
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      toast.error(`Erro ao executar ação: ${errorMessage}`);
+      // Reverter status em caso de erro
+      if (cluster) {
+        const updated = await findClusterById(cluster.id);
+        if (updated) {
+          setCluster(updated);
+          setStatus(updated.status);
+        }
+      }
     }
   };
 
-  const handleCommandExecute = () => {
-    if (command.trim()) {
-      const commandLog = `[${new Date().toLocaleTimeString('pt-BR')} CMD]: ${command}`;
-      setConsoleOutput(prev => prev + '\n' + commandLog);
+  const handleDelete = async () => {
+    if (!cluster) return;
 
-      // Simular resposta do comando
+    const toastId = toast.loading('Excluindo cluster...');
+    
+    try {
+      await deleteCluster(cluster.id);
+      toast.success('Cluster excluído com sucesso!', { id: toastId });
+      // Voltar para a lista após excluir
       setTimeout(() => {
-        const responseLog = `[${new Date().toLocaleTimeString('pt-BR')} INFO]: Command executed successfully`;
-        setConsoleOutput(prev => prev + '\n' + responseLog);
-      }, 500);
+        onBack();
+      }, 1000);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro ao excluir cluster';
+      toast.error(errorMessage, { id: toastId });
     }
   };
 
@@ -1071,7 +1320,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       {/* 1. Informações Essenciais e Ações Rápidas */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center space-x-4">
               <Button variant="outline" onClick={onBack}>
                 <ArrowLeft className="h-4 w-4" />
@@ -1081,20 +1330,31 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 <Server className="h-8 w-8 text-primary" />
                 <div>
                   <h1>{cluster.name}</h1>
-                  <div className="flex items-center space-x-4 mt-1">
-                    <div className={`w-3 h-3 rounded-full ${getStatusColor(status)}`} />
-                    <span className="text-sm">{getStatusText(status)}</span>
+                  <div className="flex items-center space-x-4 mt-1 text-sm text-muted-foreground">
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-3 h-3 rounded-full ${getStatusColor(status)}`} />
+                      <span>{getStatusText(status)}</span>
+                    </div>
+                    <span>•</span>
+                    <span>Uptime: {cluster.lastUpdate}</span>
+                    <span>•</span>
+                    <span>{cluster.serviceType}</span>
                   </div>
-                  <span className="text-sm text-muted-foreground">•</span>
-                  <span className="text-sm text-muted-foreground">Uptime: {cluster.lastUpdate}</span>
-                  <span className="text-sm text-muted-foreground">•</span>
-                  <span className="text-sm text-muted-foreground">{cluster.serviceType}</span>
                 </div>
               </div>
             </div>
             
             {/* Botões de Ação */}
-            <div className="flex space-x-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:space-x-3">
+              <Button
+                size="lg"
+                variant={activeSection === 'files' ? 'default' : 'outline'}
+                className="h-12 px-6"
+                onClick={() => setActiveSection(prev => prev === 'files' ? 'overview' : 'files')}
+              >
+                <FolderTree className="h-5 w-5 mr-2" />
+                {activeSection === 'files' ? 'Voltar para Monitoramento' : 'Gerenciador de Arquivos'}
+              </Button>
               {status === 'stopped' ? (
                 <Button 
                   size="lg" 
@@ -1116,31 +1376,79 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 </Button>
               ) : null}
               
-              <Button 
-                size="lg" 
-                variant="outline" 
-                onClick={() => handleAction('restart')}
-                disabled={status === 'restarting'}
-                className="h-12 px-6"
-              >
-                <RotateCw className={`h-5 w-5 mr-2 ${status === 'restarting' ? 'animate-spin' : ''}`} />
-                Reiniciar
-              </Button>
-              
-              <Button 
-                size="lg" 
-                variant="outline" 
-                onClick={() => handleAction('reinstall')}
-                className="h-12 px-6"
-              >
-                <RefreshCw className="h-5 w-5 mr-2" />
-                Reinstalar
-              </Button>
+              <div className="flex space-x-3">
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  onClick={() => handleAction('restart')}
+                  disabled={status === 'restarting'}
+                  className="h-12 px-6"
+                >
+                  <RotateCw className={`h-5 w-5 mr-2 ${status === 'restarting' ? 'animate-spin' : ''}`} />
+                  Reiniciar
+                </Button>
+                
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  onClick={() => handleAction('reinstall')}
+                  className="h-12 px-6"
+                >
+                  <RefreshCw className="h-5 w-5 mr-2" />
+                  Reinstalar
+                </Button>
+
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="h-12 px-6 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="h-5 w-5 mr-2" />
+                      Apagar
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Tem certeza que deseja excluir o cluster <strong>{cluster?.name}</strong>? 
+                        Esta ação não pode ser desfeita e todos os dados serão perdidos.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDelete}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Excluir
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {activeSection === 'files' ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Gerenciador de Arquivos</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ClusterFileManager 
+              clusterName={cluster.name}
+              clusterId={cluster.id}
+              webDavCredentials={cluster.webDav}
+              endpointHint={webDavCredentials?.url}
+            />
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* 2. Monitoramento de Recursos */}
         <div className="xl:col-span-2 space-y-6">
@@ -1202,13 +1510,13 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               {!connected && (
                 <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                   <p className="text-sm text-yellow-600 dark:text-yellow-400">
-                    WebSocket desconectado. Aguardando conexão para receber métricas em tempo real...
+                    SSE desconectado. Aguardando conexão para receber métricas em tempo real...
                   </p>
                 </div>
               )}
               {!currentMetrics && (
                 <div className="mb-4 p-3 bg-muted rounded-lg text-center">
-                  <p className="text-sm text-muted-foreground">Aguardando métricas via WebSocket...</p>
+                  <p className="text-sm text-muted-foreground">Aguardando métricas via SSE...</p>
                 </div>
               )}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1235,7 +1543,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                   <LineChart 
                     data={resourceData}
                     margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
-                    onMouseEnter={(e) => {
+                    onMouseEnter={() => {
                       // Debug: log dos dados quando hover
                       if (process.env.NODE_ENV === 'development') {
                         console.log('📊 Dados do gráfico:', resourceData.slice(-5), {
@@ -1335,14 +1643,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                   </LineChart>
                 ) : (
                   <div className="flex items-center justify-center h-full text-muted-foreground">
-                    <p>Aguardando dados do WebSocket...</p>
+                    <p>Aguardando dados do SSE...</p>
                   </div>
                 )}
               </ResponsiveContainer>
             </CardContent>
           </Card>
 
-          {/* 3. Entrada de Comando e Console */}
+          {/* 3. Console de Controle */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1353,7 +1661,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                     <CardDescription>Digite comandos e monitore a saída do servidor</CardDescription>
                   </div>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex flex-wrap gap-2">
                   <Button 
                     variant="outline" 
                     size="sm"
@@ -1374,30 +1682,6 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Entrada de Comando */}
-              <div>
-                <label className="text-sm">Comando de Inicialização</label>
-                <div className="flex space-x-2 mt-2">
-                  <Input
-                    value={command}
-                    onChange={(e) => setCommand(e.target.value)}
-                    placeholder="Digite o comando de inicialização..."
-                    className="font-mono"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        handleCommandExecute();
-                      }
-                    }}
-                  />
-                  <Button onClick={handleCommandExecute}>
-                    Executar
-                  </Button>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Console de Saída */}
               <div>
                 <label className="text-sm">Saída do Console</label>
                 <div className="mt-2">
@@ -1431,12 +1715,12 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 <label className="text-sm text-muted-foreground">Endereço do Servidor</label>
                 <div className="flex items-center space-x-2 mt-1">
                   <code className="flex-1 p-2 bg-muted rounded text-sm">
-                    {cluster.port ? `localhost:${cluster.port}` : 'N/A'}
+                    {cluster.port ? `${resolvedAccessHost}:${cluster.port}` : 'N/A'}
                   </code>
                   <Button 
                     variant="outline" 
                     size="sm"
-                    onClick={() => copyToClipboard(cluster.port ? `localhost:${cluster.port}` : '')}
+                    onClick={() => copyToClipboard(cluster.port ? `${resolvedAccessHost}:${cluster.port}` : '')}
                   >
                     <Copy className="h-3 w-3" />
                   </Button>
@@ -1447,7 +1731,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
 
               <div>
                 <label className="text-sm text-muted-foreground">Acesso FTP/SFTP</label>
-                {ftpLoading ? (
+                {accessLoading ? (
                   <div className="mt-2 space-y-2">
                     <Skeleton className="h-8 w-full" />
                     <Skeleton className="h-8 w-full" />
@@ -1463,6 +1747,17 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                         variant="outline" 
                         size="sm"
                         onClick={() => copyToClipboard(ftpCredentials.host)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">URL:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.url}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(ftpCredentials.url)}
                       >
                         <Copy className="h-3 w-3" />
                       </Button>
@@ -1504,6 +1799,71 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                 ) : (
                   <div className="mt-2 text-sm text-muted-foreground">
                     FTP não configurado para este cluster
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              <div>
+                <label className="text-sm text-muted-foreground">Acesso WebDAV</label>
+                {accessLoading ? (
+                  <div className="mt-2 space-y-2">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                  </div>
+                ) : webDavCredentials ? (
+                  <div className="space-y-2 mt-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">URL:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.url}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.url)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Usuário:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.username}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.username)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Senha:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.password}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.password)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs w-16">Porta:</span>
+                      <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.port}</code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => copyToClipboard(webDavCredentials.port.toString())}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    WebDAV não configurado para este cluster
                   </div>
                 )}
               </div>
@@ -1571,6 +1931,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           </Card>
         </div>
       </div>
+      )}
     </div>
   );
 }

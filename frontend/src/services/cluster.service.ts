@@ -26,13 +26,32 @@ export interface UserCredentials {
 }
 
 export interface UpdateClusterLimitsRequest {
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;
 }
 
+export interface ContainerLogsResponse {
+  containerId: string;
+  logs: string;
+  lastTimestamp?: number;
+}
+
 class ClusterService {
+  /**
+   * Garante que o cluster possui um containerId disponível para operações Docker.
+   */
+  private async ensureClusterContainer(
+    clusterId: string | number
+  ): Promise<{ cluster: ClusterDetailsResponse; containerId: string }> {
+    const cluster = await this.getCluster(clusterId);
+    if (!cluster?.containerId) {
+      throw new Error('Cluster não possui containerId ativo. Sincronize ou reinstale o servidor.');
+    }
+    return { cluster, containerId: cluster.containerId };
+  }
+
   /**
    * Lista todos os clusters
    * Admin: vê todos os clusters
@@ -40,7 +59,31 @@ class ClusterService {
    */
   async listClusters(): Promise<ClusterListItem[]> {
     try {
-      return await httpClient.get<ClusterListItem[]>('/clusters');
+      const clusters = await httpClient.get<ClusterDetailsResponse[]>('/clusters');
+      // Converter ClusterDetailsResponse para ClusterListItem
+      return clusters.map((c) => ({
+        id: typeof c.id === 'string' ? c.id : c.id.toString(),
+        name: c.name,
+        status: c.status,
+        templateName: c.templateName,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+        env: c.env,
+        ports: c.ports,
+        volumes: c.volumes,
+        containerId: c.containerId, // ID do container Docker para SSE
+        // Campos opcionais
+        port: c.port ?? (c.ports && c.ports.length > 0 ? c.ports[0] : undefined),
+        rootPath: c.rootPath,
+        userId: c.userId,
+        ownerId: c.ownerId,
+        ownerUsername: c.ownerUsername,
+        cpuLimitPercent: c.cpuLimitPercent,
+        memoryLimit: c.memoryLimit,
+        diskLimit: c.diskLimit,
+        ftp: c.ftp,
+        webDav: c.webDav,
+      }));
     } catch (error) {
       // Se acesso negado ao endpoint administrativo, busca clusters do usuário logado
       const isApiError = typeof error === 'object' && error !== null && 'status' in (error as any);
@@ -48,17 +91,28 @@ class ClusterService {
         const user = await authService.getCurrentUser();
         if (user?.id) {
           const userClusters = await httpClient.get<ClusterDetailsResponse[]>(`/clusters/user/${user.id}`);
-          // Normaliza para ClusterListItem mínimo
+          // Normaliza para ClusterListItem
           return userClusters.map((c) => ({
-            id: c.id,
+            id: typeof c.id === 'string' ? c.id : c.id.toString(),
             name: c.name,
             status: c.status,
-            port: c.port,
+            templateName: c.templateName,
+            createdAt: c.createdAt,
+            updatedAt: c.updatedAt,
+            env: c.env,
+            ports: c.ports,
+            volumes: c.volumes,
+            containerId: c.containerId, // ID do container Docker para SSE
+            port: c.port ?? (c.ports && c.ports.length > 0 ? c.ports[0] : undefined),
             rootPath: c.rootPath,
             userId: c.userId,
-            cpuLimit: c.cpuLimit,
+            ownerId: c.ownerId,
+            ownerUsername: c.ownerUsername,
+            cpuLimitPercent: c.cpuLimitPercent,
             memoryLimit: c.memoryLimit,
             diskLimit: c.diskLimit,
+            ftp: c.ftp,
+            webDav: c.webDav,
           }));
         }
         // Sem userId disponível, retorna vazio para evitar quebrar a UI
@@ -71,73 +125,137 @@ class ClusterService {
   /**
    * Obtém detalhes de um cluster específico
    */
-  async getCluster(clusterId: number): Promise<ClusterDetailsResponse> {
+  async getCluster(clusterId: string | number): Promise<ClusterDetailsResponse> {
     return httpClient.get<ClusterDetailsResponse>(`/clusters/${clusterId}`);
   }
 
   /**
    * Obtém clusters de um usuário específico
    */
-  async getUserClusters(userId: number): Promise<ClusterDetailsResponse[]> {
+  async getUserClusters(userId: string | number): Promise<ClusterDetailsResponse[]> {
     return httpClient.get<ClusterDetailsResponse[]>(`/clusters/user/${userId}`);
   }
 
   /**
-   * Cria um novo cluster
+   * Cria um novo cluster (LEGADO - usar TemplateService.instantiateTemplate)
    * Usa timeout maior (60s) pois criação de cluster pode demorar
+   * @deprecated Use TemplateService.instantiateTemplate em vez disso
    */
   async createCluster(request: CreateClusterRequest): Promise<CreateClusterResponse> {
-    return httpClient.post<CreateClusterResponse>('/clusters', request, 60000);
+    // NOVO BACKEND: POST /api/templates/{name}/instantiate
+    // Este método mantido apenas para compatibilidade
+    // TODO: Migrar todos os usos para TemplateService.instantiateTemplate
+    throw new Error('Método createCluster está depreciado. Use TemplateService.instantiateTemplate em vez disso.');
   }
 
   /**
    * Atualiza limites de recursos de um cluster
    * Usa timeout maior (60s) pois operações de atualização podem demorar
+   * NOTA: Novo backend não suporta limites via PATCH, usa env/variáveis de ambiente
    */
   async updateClusterLimits(
-    clusterId: number,
+    clusterId: string | number,
     request: UpdateClusterLimitsRequest
-  ): Promise<CreateClusterResponse> {
-    return httpClient.patch<CreateClusterResponse>(`/clusters/${clusterId}`, request, 60000);
+  ): Promise<ClusterDetailsResponse> {
+    // Novo backend usa ClusterUpdateParamsRequest com env, ports, volumes
+    // Converter limites para env se necessário
+    const env: Record<string, string> = {};
+    if (request.cpuLimitPercent !== undefined) {
+      env.CPU_LIMIT_PERCENT = request.cpuLimitPercent.toString();
+    }
+    if (request.memoryLimit !== undefined) {
+      env.MEMORY_LIMIT = request.memoryLimit.toString();
+    }
+    if (request.diskLimit !== undefined) {
+      env.DISK_LIMIT = request.diskLimit.toString();
+    }
+    if (request.networkLimit !== undefined) {
+      env.NETWORK_LIMIT = request.networkLimit.toString();
+    }
+    
+    return httpClient.patch<ClusterDetailsResponse>(`/clusters/${clusterId}`, {
+      env,
+    }, 60000);
   }
 
   /**
    * Deleta um cluster
    * Usa timeout maior (60s) pois deleção de cluster pode demorar
    */
-  async deleteCluster(clusterId: number): Promise<void> {
+  async deleteCluster(clusterId: string | number): Promise<void> {
     return httpClient.delete(`/clusters/${clusterId}`, 60000);
+  }
+
+  async updateClusterOwner(clusterId: string | number, ownerId?: string | null): Promise<ClusterDetailsResponse> {
+    return httpClient.patch<ClusterDetailsResponse>(`/clusters/${clusterId}/owner`, {
+      ownerId: ownerId ?? null,
+    });
   }
 
   /**
    * Inicia um cluster
    * Usa timeout maior (60s) pois operações de start podem demorar
+   * Agora usa o endpoint do ClusterController que atualiza o status imediatamente
    */
-  async startCluster(clusterId: number): Promise<CreateClusterResponse> {
-    return httpClient.post<CreateClusterResponse>(`/clusters/${clusterId}/start`, undefined, 60000);
+  async startCluster(clusterId: string | number): Promise<ClusterDetailsResponse> {
+    return httpClient.post<ClusterDetailsResponse>(
+      `/clusters/${clusterId}/start`,
+      undefined,
+      60000
+    );
   }
 
   /**
    * Para um cluster
    * Usa timeout maior (60s) pois operações de stop podem demorar
+   * Agora usa o endpoint do ClusterController que atualiza o status imediatamente
    */
-  async stopCluster(clusterId: number): Promise<CreateClusterResponse> {
-    return httpClient.post<CreateClusterResponse>(`/clusters/${clusterId}/stop`, undefined, 60000);
+  async stopCluster(clusterId: string | number, timeoutSeconds: number = 10): Promise<ClusterDetailsResponse> {
+    return httpClient.post<ClusterDetailsResponse>(
+      `/clusters/${clusterId}/stop?timeout=${encodeURIComponent(timeoutSeconds)}`,
+      undefined,
+      60000
+    );
   }
 
   /**
-   * Obtém credenciais FTP de um cluster
+   * Reinicia um cluster (para e inicia novamente)
+   * Usa timeout maior (90s) pois operações de restart podem demorar mais
+   * Agora usa o endpoint do ClusterController que atualiza o status imediatamente
    */
-  async getFtpCredentials(clusterId: number): Promise<FtpCredentials> {
-    return httpClient.get<FtpCredentials>(`/clusters/${clusterId}/ftp-credentials`);
+  async restartCluster(clusterId: string | number, timeoutSeconds: number = 10): Promise<ClusterDetailsResponse> {
+    return httpClient.post<ClusterDetailsResponse>(
+      `/clusters/${clusterId}/restart?timeout=${encodeURIComponent(timeoutSeconds)}`,
+      undefined,
+      90000
+    );
   }
-}
 
-export interface FtpCredentials {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
+  /**
+   * Obtém logs do container.
+   * 
+   * @param clusterId ID do cluster
+   * @param tailLines Número de linhas finais a retornar (opcional)
+   * @param sinceSeconds Logs desde X segundos atrás (opcional)
+   * @returns Logs do container
+   */
+  async getContainerLogs(
+    clusterId: string | number,
+    tailLines?: number,
+    sinceSeconds?: number
+  ): Promise<ContainerLogsResponse> {
+    const { containerId } = await this.ensureClusterContainer(clusterId);
+    const params = new URLSearchParams();
+    if (tailLines !== undefined) {
+      params.append('tail', tailLines.toString());
+    }
+    if (sinceSeconds !== undefined) {
+      params.append('since', sinceSeconds.toString());
+    }
+    const queryString = params.toString();
+    const url = `/docker/containers/${containerId}/logs${queryString ? `?${queryString}` : ''}`;
+    return httpClient.get<ContainerLogsResponse>(url);
+  }
 }
 
 export const clusterService = new ClusterService();

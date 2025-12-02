@@ -44,9 +44,19 @@ class MonitoringService {
 
   /**
    * Obtém status de saúde de um cluster específico
+   * Retorna null se o endpoint não existir (não crítico)
    */
-  async getClusterHealth(clusterId: number): Promise<ClusterHealthStatus> {
-    return httpClient.get<ClusterHealthStatus>(`/health/clusters/${clusterId}`);
+  async getClusterHealth(clusterId: number | string): Promise<ClusterHealthStatus | null> {
+    try {
+      return await httpClient.get<ClusterHealthStatus>(`/health/clusters/${clusterId}`);
+    } catch (error: any) {
+      // Se o endpoint não existir (404, 403 ou 401), retornar null (não crítico)
+      // 401 pode ocorrer se o endpoint não existir e o Spring Security bloquear
+      if (error?.status === 404 || error?.status === 403 || error?.status === 401) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**

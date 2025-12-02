@@ -33,13 +33,19 @@ import { clusterService } from '@/services/cluster.service';
 import { toast } from 'sonner';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 import { TIMEOUTS } from '@/constants';
+import {
+  mapClusterStatus,
+  calculateCpuUsageRelativeToLimit,
+  calculateMemoryUsageRelativeToLimit,
+  calculateDiskUsageRelativeToLimit
+} from '@/utils/cluster.utils';
 
 interface Cluster {
   id: string;
   name: string;
   owner: string;
   service: string;
-  status: 'active' | 'stopped' | 'reinstalling';
+  status: 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
   resources: {
     cpu: { used: number; limit: number };
     ram: { used: number; limit: number };
@@ -213,12 +219,12 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   // Usar useTransition para operações pesadas (filtros)
   const [isPending, startTransition] = useTransition();
   
-  // Mostrar erro de WebSocket apenas uma vez
+  // Mostrar erro de SSE apenas uma vez
   useEffect(() => {
     if (wsError && !wsErrorShown && !connected) {
       setWsErrorShown(true);
       const timeout = setTimeout(() => {
-        toast.warning('Conexão perdida. As informações podem estar desatualizadas.', {
+        toast.warning('Conexão SSE perdida. As informações podem estar desatualizadas.', {
           duration: 5000,
         });
       }, 1000);
@@ -236,30 +242,68 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   // Converter clusters da API para o formato esperado do componente e integrar métricas em tempo real
   const clusters = useMemo(() => {
     return apiClusters.map(cluster => {
-      // Converter ID para número para buscar métricas (API retorna string, WebSocket usa number)
-      const clusterId = parseInt(cluster.id.toString());
-      const realtimeMetrics = isNaN(clusterId) ? undefined : metrics[clusterId];
+      // Usar ID como string (UUID) ou number (legado) para buscar métricas
+      const clusterIdStr = cluster.id.toString();
+      // Tentar buscar como string primeiro (UUID), depois como number (legado)
+      const realtimeMetrics = metrics[clusterIdStr] || metrics[parseInt(clusterIdStr)];
       
-      // Status SEMPRE baseado na API; WebSocket não altera status
-      let status: 'active' | 'stopped' | 'reinstalling' = cluster.status === 'running' ? 'active' : cluster.status === 'stopped' ? 'stopped' : 'active';
+      // Status SEMPRE baseado na API; SSE não altera status
+      // Usa mapClusterStatus para mapear corretamente os status do backend (ACTIVE, PENDING, etc)
+      const mappedStatus = mapClusterStatus(cluster.status);
+      // Converter para formato do componente (compatibilidade com interface local)
+      let status: 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
+      // Se mapeou para 'running', converter para 'active' para compatibilidade
+      if (mappedStatus === 'running') {
+        status = 'active';
+      } else if (mappedStatus === 'restarting') {
+        status = 'reinstalling';
+      } else if (mappedStatus === 'pending') {
+        status = 'pending';
+      } else if (mappedStatus === 'deleted') {
+        status = 'stopped'; // Deletado mostra como parado na UI
+      } else {
+        status = mappedStatus as 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
+      }
       
-      // Usar métricas em tempo real se disponíveis, senão usar valores da API
-      // IMPORTANTE: cpuUsagePercent já vem normalizado (0-100%) do backend, não precisa recalcular
-      const cpuUsagePercent = realtimeMetrics?.cpuUsagePercent;
+      // Calcular porcentagens relativas ao limite do cluster
+      // cluster.cpuLimitPercent está disponível em ClusterListItem
+      const cpuUsageRelativeToLimit = calculateCpuUsageRelativeToLimit(
+        realtimeMetrics?.cpuUsagePercent,
+        cluster.cpuLimitPercent
+      );
+      
+      // cluster.memoryLimit está em MB na interface ClusterListItem
+      const memoryUsageRelativeToLimit = calculateMemoryUsageRelativeToLimit(
+        realtimeMetrics?.memoryUsagePercent,
+        realtimeMetrics?.memoryUsageMb,
+        cluster.memoryLimit ? cluster.memoryLimit : realtimeMetrics?.memoryLimitMb
+      );
+      
+      // cluster.diskLimit está em GB na interface ClusterListItem, converter para MB
+      const diskUsageRelativeToLimit = calculateDiskUsageRelativeToLimit(
+        realtimeMetrics?.diskUsagePercent,
+        realtimeMetrics?.diskUsageMb,
+        cluster.diskLimit ? cluster.diskLimit * 1024 : realtimeMetrics?.diskLimitMb
+      );
+      
+      // Usar métricas relativas ao limite para exibição
+      const cpuUsagePercent = cpuUsageRelativeToLimit;
       const cpuUsage = cpuUsagePercent !== undefined ? cpuUsagePercent : (cluster.cpu || 0);
-      const cpuLimit = 100; // Sempre 100% pois cpuUsagePercent já é normalizado
+      const cpuLimit = 100; // Sempre 100% pois agora é relativo ao limite do cluster
       
-      const memoryUsageMb = realtimeMetrics?.memoryUsageMb || cluster.memory || 0;
-      const memoryLimitMb = realtimeMetrics?.memoryLimitMb || cluster.memory || 4096; // Default 4GB
+      const memoryUsageMb = realtimeMetrics?.memoryUsageMb || 0;
+      // cluster.memoryLimit está em MB na interface ClusterListItem
+      const memoryLimitMb = cluster.memoryLimit || realtimeMetrics?.memoryLimitMb || 4096;
       
       const diskUsageMb = realtimeMetrics?.diskUsageMb || 0;
-      const diskLimitMb = realtimeMetrics?.diskLimitMb || (cluster.storage ? cluster.storage * 1024 : 20480); // Default 20GB
+      // cluster.diskLimit está em GB na interface ClusterListItem, converter para MB
+      const diskLimitMb = cluster.diskLimit ? cluster.diskLimit * 1024 : (realtimeMetrics?.diskLimitMb || 20480);
       
-      // Verificar se há alertas baseado nas métricas (sem usar healthState)
+      // Verificar se há alertas baseado nas métricas relativas ao limite (sem usar healthState)
       const hasAlert = realtimeMetrics ? (
-        (realtimeMetrics.cpuUsagePercent && realtimeMetrics.cpuUsagePercent > 90) ||
-        (realtimeMetrics.memoryUsagePercent && realtimeMetrics.memoryUsagePercent > 90) ||
-        (realtimeMetrics.diskUsagePercent && realtimeMetrics.diskUsagePercent > 90)
+        (cpuUsageRelativeToLimit !== undefined && cpuUsageRelativeToLimit > 90) ||
+        (memoryUsageRelativeToLimit !== undefined && memoryUsageRelativeToLimit > 90) ||
+        (diskUsageRelativeToLimit !== undefined && diskUsageRelativeToLimit > 90)
       ) : false;
       
       return {
@@ -375,15 +419,32 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'active':
+      case 'running':
         return <Badge className="bg-green-100 dark:bg-green-950 text-green-800 dark:text-green-300 border-green-200 dark:border-green-800">Ativo</Badge>;
       case 'stopped':
+      case 'deleted':
         return <Badge variant="secondary">Parado</Badge>;
       case 'reinstalling':
-        return <Badge className="bg-yellow-100 dark:bg-yellow-950 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">Reinstalando</Badge>;
+      case 'restarting':
+      case 'starting':
+      case 'stopping':
+        return <Badge className="bg-yellow-100 dark:bg-yellow-950 text-yellow-800 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">Reiniciando</Badge>;
+      case 'pending':
+        return <Badge className="bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-800">Pendente</Badge>;
+      case 'error':
+      case 'failed':
+        return <Badge variant="destructive">Erro</Badge>;
       default:
-        return <Badge variant="outline">Desconhecido</Badge>;
+        // Tentar exibir o status original se não for reconhecido
+        if (status) {
+          const upperStatus = status.toUpperCase();
+          if (['PENDING', 'ACTIVE', 'STOPPED', 'DELETED', 'ERROR'].includes(upperStatus)) {
+            return <Badge variant="outline">{status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}</Badge>;
+          }
+        }
+        return <Badge variant="outline">{status || 'Desconhecido'}</Badge>;
     }
   };
 
@@ -528,7 +589,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
 
   // Função assíncrona para iniciar cluster com verificação de status
   const startClusterWithVerification = (clusterId: string) => {
-    const clusterIdNum = parseInt(clusterId);
+    // ID agora é UUID (string), não precisa mais de parseInt
     const toastIdStr = `action-${clusterId}`;
     
     // Marcar como processando
@@ -536,13 +597,13 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     const toastId = toast.loading('Iniciando cluster em segundo plano...', { id: toastIdStr });
     
     // Executar em background (não bloquear UI)
-    clusterService.startCluster(clusterIdNum)
+    clusterService.startCluster(clusterId)
       .then((startResponse) => {
         // Atualizar toast
         toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
         
         // Polling em background para verificar status
-        pollClusterStartStatus(clusterId, clusterIdNum, startResponse, String(toastId));
+        pollClusterStartStatus(clusterId, startResponse, String(toastId));
       })
       .catch((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -562,7 +623,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             }
           );
           // Continuar verificando em background
-          pollClusterStartStatus(clusterId, clusterIdNum, null, String(toastId));
+          pollClusterStartStatus(clusterId, null, String(toastId));
           return;
         }
         
@@ -605,7 +666,6 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   // Função de polling para verificar status de inicialização em background
   const pollClusterStartStatus = async (
     clusterId: string, 
-    clusterIdNum: number, 
     startResponse: any,
     toastId: string
   ) => {
@@ -618,9 +678,9 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
       
       try {
-        const clusterDetails = await clusterService.getCluster(clusterIdNum);
+        const clusterDetails = await clusterService.getCluster(clusterId);
         
-        if (clusterDetails.status === 'RUNNING') {
+        if (clusterDetails.status === 'ACTIVE' || clusterDetails.status === 'RUNNING') {
           isRunning = true;
           // Recarregar da API para ter status atualizado
           await updateCluster(clusterId, { status: 'running' });
@@ -672,8 +732,8 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     // Timeout - verifica status final
     if (!isRunning) {
       try {
-        const finalCheck = await clusterService.getCluster(clusterIdNum);
-        if (finalCheck.status === 'RUNNING') {
+        const finalCheck = await clusterService.getCluster(clusterId);
+        if (finalCheck.status === 'ACTIVE' || finalCheck.status === 'RUNNING') {
           await updateCluster(clusterId, { status: 'running' });
           toast.success('Cluster iniciado com sucesso!', { id: toastId });
         } else {
@@ -699,7 +759,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
 
   // Função para parar cluster com verificação de status em background
   const stopClusterWithVerification = (clusterId: string) => {
-    const clusterIdNum = parseInt(clusterId);
+    // ID agora é UUID (string), não precisa mais de parseInt
     const toastIdStr = `action-${clusterId}`;
     
     // Marcar como processando
@@ -707,13 +767,13 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     const toastId = toast.loading('Parando cluster em segundo plano...', { id: toastIdStr });
     
     // Executar em background (não bloquear UI)
-    clusterService.stopCluster(clusterIdNum)
+    clusterService.stopCluster(clusterId)
       .then((stopResponse) => {
         // Atualizar toast
         toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
         
         // Polling em background para verificar status
-        pollClusterStopStatus(clusterId, clusterIdNum, String(toastId));
+        pollClusterStopStatus(clusterId, String(toastId));
       })
       .catch((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -733,7 +793,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             }
           );
           // Continuar verificando em background
-          pollClusterStopStatus(clusterId, clusterIdNum, String(toastId));
+          pollClusterStopStatus(clusterId, String(toastId));
           return;
         }
         
@@ -750,8 +810,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   
   // Função de polling para verificar status de parada em background
   const pollClusterStopStatus = async (
-    clusterId: string, 
-    clusterIdNum: number,
+    clusterId: string,
     toastId: string
   ) => {
     const maxAttempts = TIMEOUTS.CLUSTER_STOP_MAX_ATTEMPTS;
@@ -763,7 +822,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
       
       try {
-        const clusterDetails = await clusterService.getCluster(clusterIdNum);
+        const clusterDetails = await clusterService.getCluster(clusterId);
         
         if (clusterDetails.status === 'STOPPED') {
           isStopped = true;
@@ -803,7 +862,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     // Timeout - verifica status final
     if (!isStopped) {
       try {
-        const finalCheck = await clusterService.getCluster(clusterIdNum);
+        const finalCheck = await clusterService.getCluster(clusterId);
         if (finalCheck.status === 'STOPPED') {
           await updateCluster(clusterId, { status: 'stopped' });
           toast.success('Cluster parado com sucesso!', { id: toastId });
@@ -843,35 +902,48 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         case 'restart': {
           const toastId = toast.loading('Reiniciando cluster em segundo plano...', { id: `action-${clusterId}` });
           
-          // Primeiro parar o cluster em background
-          stopClusterWithVerification(clusterId);
+          // Marcar como processando
+          setProcessingClusters(prev => new Set(prev).add(clusterId));
           
-          // Aguardar um tempo e depois iniciar (em background também)
-          setTimeout(() => {
-            toast.loading('Aguardando parada para reiniciar...', { id: toastId });
-            
-            // Verificar se parou antes de iniciar
-            const checkAndStart = async () => {
-              try {
-                const clusterDetails = await clusterService.getCluster(parseInt(clusterId));
-                if (clusterDetails.status === 'STOPPED') {
-                  toast.loading('Reiniciando cluster...', { id: toastId });
-                  startClusterWithVerification(clusterId);
-                  // O sucesso será mostrado pela função startClusterWithVerification
-                } else {
-                  // Tentar novamente após mais alguns segundos
-                  setTimeout(checkAndStart, 3000);
-                }
-              } catch {
-                // Se erro, tenta iniciar mesmo assim
-                toast.loading('Reiniciando cluster...', { id: toastId });
-                startClusterWithVerification(clusterId);
+          // Usar o novo método de restart que faz tudo em uma chamada
+          clusterService.restartCluster(clusterId)
+            .then((restartResponse) => {
+              toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
+              
+              // Polling em background para verificar status
+              pollClusterStartStatus(clusterId, restartResponse, String(toastId));
+            })
+            .catch((error: unknown) => {
+              const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+              if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+                console.error('Erro ao reiniciar cluster:', error);
               }
-            };
-            
-            // Aguardar 3 segundos antes de verificar
-            setTimeout(checkAndStart, 3000);
-          }, 2000);
+              
+              const apiError = error as any;
+              if (apiError.name === 'TimeoutError') {
+                toast.warning(
+                  'A reinicialização do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
+                  { 
+                    id: String(toastId),
+                    duration: 5000 
+                  }
+                );
+                pollClusterStartStatus(clusterId, null, String(toastId));
+                return;
+              }
+              
+              const errorDetails = parseDockerError(errorMessage);
+              if (errorDetails) {
+                setClusterErrors(prev => ({ ...prev, [clusterId]: errorDetails }));
+              }
+              
+              toast.error(`Erro ao reiniciar cluster: ${errorMessage}`, { id: String(toastId) });
+              setProcessingClusters(prev => {
+                const next = new Set(prev);
+                next.delete(clusterId);
+                return next;
+              });
+            });
           
           break;
         }
@@ -957,7 +1029,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         <div>
           <div className="flex items-center space-x-2">
             <h1>Gerenciamento de Clusters</h1>
-            {/* Indicador de conexão WebSocket */}
+            {/* Indicador de conexão SSE */}
             {connected ? (
               <Badge variant="outline" className="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800 flex items-center space-x-1">
                 <Wifi className="h-3 w-3" />

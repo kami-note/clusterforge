@@ -1,0 +1,11 @@
+{
+  "name": "webserver-php",
+  "description": "Servidor PHP 8.2 com Apache para apps simples.",
+  "version": "1.0.0",
+  "tags": ["php", "apache", "web"],
+  "env": {
+    "APACHE_DOCUMENT_ROOT": "/var/www/html"
+  },
+  "ports": [8080],
+  "volumes": ["./src:/var/www/html:rw"]
+}

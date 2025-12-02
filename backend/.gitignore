@@ -32,8 +32,4 @@ build/
 ### VS Code ###
 .vscode/
 
-
-/data/
-/test-data/
-/test-containers/
-/test-clusters/
+data/*

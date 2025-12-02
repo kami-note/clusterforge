@@ -1,5 +1,11 @@
 Doc
-.cursor
 .vscode
 
 **/*.md
+
+backend_old
+frontend_old
+
+imagens
+
+.pids

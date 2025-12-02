@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+  php:
+    image: php:8.2-apache
+    container_name: webserver-php
+    ports:
+      - "8080:80"
+    environment:
+      APACHE_DOCUMENT_ROOT: /var/www/html
+    volumes:
+      - ./src:/var/www/html:rw
+    restart: unless-stopped
