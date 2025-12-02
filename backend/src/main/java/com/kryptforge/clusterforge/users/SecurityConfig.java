@@ -19,6 +19,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Arrays;
 import java.util.List;
@@ -64,10 +65,10 @@ public class SecurityConfig {
 	public org.springframework.security.web.access.AccessDeniedHandler accessDeniedHandler() {
 		return (request, response, accessDeniedException) -> {
 			// Não fazer nada se a resposta já foi commitada (evita erro duplo)
+			// Isso é comum em requisições assíncronas/streaming onde a resposta já começou a ser enviada
 			if (response.isCommitted()) {
-				org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecurityConfig.class);
-				log.debug("Tentativa de tratar AccessDeniedException para {} {}, mas resposta já foi commitada", 
-					request.getMethod(), request.getRequestURI());
+				// Silenciosamente ignorar - não logar como erro pois é comportamento esperado
+				// em requisições assíncronas onde a autorização é verificada após o início do stream
 				return;
 			}
 			
@@ -80,9 +81,8 @@ public class SecurityConfig {
 			try {
 				response.getWriter().write("{\"error\":\"Acesso negado\",\"message\":\"Você não tem permissão para acessar este recurso\"}");
 			} catch (Exception e) {
-				org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecurityConfig.class);
-				log.debug("Erro ao escrever resposta de acesso negado para {} {}: {}", 
-					request.getMethod(), request.getRequestURI(), e.getMessage());
+				// Ignorar silenciosamente se não conseguir escrever (resposta pode ter sido commitada durante a escrita)
+				// Isso é comum em requisições assíncronas
 			}
 		};
 	}
@@ -98,6 +98,12 @@ public class SecurityConfig {
 			.csrf(csrf -> csrf.disable())
 			.cors(cors -> cors.configurationSource(corsConfigurationSource()))
 			.authorizeHttpRequests(auth -> auth
+				// IMPORTANTE: Permitir requisições de dispatch assíncrono sem re-autorização
+				// Isso evita AuthorizationDeniedException em SSE/streaming quando a resposta já foi commitada
+				// A autorização já foi feita na requisição original, não precisa re-verificar no dispatch assíncrono
+				.dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
+				// Permitir requisições de error dispatch (para tratamento de erros)
+				.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
 				// Permitir OPTIONS requests (preflight CORS) sem autenticação
 				.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 				.requestMatchers("/api/auth/**").permitAll()

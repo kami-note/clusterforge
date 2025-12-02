@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.AuthenticationEntryPoint;
@@ -52,9 +53,27 @@ public class SecurityExceptionFilter extends OncePerRequestFilter {
 			if (!response.isCommitted()) {
 				authenticationEntryPoint.commence(request, response, e);
 			}
+		} catch (AuthorizationDeniedException e) {
+			// AuthorizationDeniedException pode ocorrer em requisições assíncronas
+			// onde a resposta já foi commitada antes da verificação de autorização
+			// NOTA: AuthorizationDeniedException não é uma subclasse de AccessDeniedException,
+			// então precisamos tratá-la separadamente
+			if (!response.isCommitted()) {
+				log.debug("AuthorizationDeniedException capturada pelo SecurityExceptionFilter para {} {}: {}", 
+					request.getMethod(), request.getRequestURI(), e.getMessage());
+				// Converter AuthorizationDeniedException para AccessDeniedException
+				// para que o AccessDeniedHandler possa tratá-la
+				AccessDeniedException accessDeniedEx = new AccessDeniedException(
+					"Autorização negada: " + e.getMessage(), e);
+				accessDeniedHandler.handle(request, response, accessDeniedEx);
+			} else {
+				// Silenciosamente ignorar se a resposta já foi commitada
+				// Isso é comportamento esperado em requisições assíncronas/streaming
+				log.trace("AuthorizationDeniedException ignorada para {} {} (resposta já commitada)", 
+					request.getMethod(), request.getRequestURI());
+			}
 		} catch (AccessDeniedException e) {
-			// AuthorizationDeniedException é uma subclasse de AccessDeniedException
-			// Captura ambas as exceções de acesso negado
+			// Captura outras exceções de acesso negado
 			log.debug("Exceção de acesso negado capturada pelo SecurityExceptionFilter para {} {}: {}", 
 				request.getMethod(), request.getRequestURI(), e.getMessage());
 			if (!response.isCommitted()) {
