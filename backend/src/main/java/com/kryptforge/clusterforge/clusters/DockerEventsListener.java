@@ -3,6 +3,8 @@ package com.kryptforge.clusterforge.clusters;
 import java.net.SocketTimeoutException;
 import java.util.Optional;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +17,11 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Event;
 import com.kryptforge.clusterforge.docker.DockerConnection;
+import com.kryptforge.clusterforge.docker.util.DockerStatusMapper;
+
+import jakarta.annotation.PreDestroy;
+
+import static com.kryptforge.clusterforge.clusters.ClusterConstants.EVENT_RECONNECT_DELAY_MS;
 
 /**
  * Listener de eventos do Docker que atualiza o banco de dados instantaneamente
@@ -29,6 +36,7 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 	private final ClusterRepository clusterRepository;
 	private final boolean enabled;
 	private volatile boolean running = false;
+	private final ScheduledExecutorService reconnectScheduler;
 
 	public DockerEventsListener(
 		DockerConnection dockerConnection,
@@ -37,7 +45,29 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 		this.dockerConnection = dockerConnection;
 		this.clusterRepository = clusterRepository;
 		this.enabled = enabled;
+		this.reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+			Thread t = new Thread(r, "docker-events-reconnect");
+			t.setDaemon(true);
+			return t;
+		});
 		log.info("DockerEventsListener inicializado (enabled: {})", enabled);
+	}
+
+	@PreDestroy
+	public void shutdown() {
+		running = false;
+		if (reconnectScheduler != null && !reconnectScheduler.isShutdown()) {
+			reconnectScheduler.shutdown();
+			try {
+				if (!reconnectScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+					reconnectScheduler.shutdownNow();
+				}
+			} catch (InterruptedException e) {
+				reconnectScheduler.shutdownNow();
+				Thread.currentThread().interrupt();
+			}
+		}
+		log.info("DockerEventsListener encerrado");
 	}
 
 	@Override
@@ -92,16 +122,12 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 								log.error("Erro na escuta de eventos do Docker: {}", throwable.getMessage(), throwable);
 							}
 							running = false;
-							// Tenta reconectar após 5 segundos
-							try {
-								Thread.sleep(5000);
-								if (enabled) {
+							// Agenda reconexão usando ScheduledExecutorService (não bloqueante)
+							if (enabled && !reconnectScheduler.isShutdown()) {
+								reconnectScheduler.schedule(() -> {
 									log.info("Tentando reconectar ao stream de eventos do Docker...");
 									startListening();
-								}
-							} catch (InterruptedException e) {
-								Thread.currentThread().interrupt();
-								log.warn("Thread de eventos Docker interrompida");
+								}, EVENT_RECONNECT_DELAY_MS, TimeUnit.MILLISECONDS);
 							}
 						}
 
@@ -184,19 +210,10 @@ public class DockerEventsListener implements ApplicationListener<ContextRefreshe
 
 	/**
 	 * Mapeia ação do evento Docker para ClusterStatus.
+	 * Usa DockerStatusMapper para centralizar a lógica de mapeamento.
 	 */
 	private ClusterStatus mapEventToStatus(String action, String status) {
-		if (action == null) {
-			return null;
-		}
-
-		return switch (action.toLowerCase()) {
-			case "start" -> ClusterStatus.ACTIVE;
-			case "stop", "die", "kill" -> ClusterStatus.STOPPED;
-			case "create" -> ClusterStatus.PENDING;
-			case "remove", "destroy" -> ClusterStatus.DELETED;
-			default -> null; // Ignora outras ações (attach, detach, etc)
-		};
+		return DockerStatusMapper.fromDockerEventAction(action);
 	}
 }
 

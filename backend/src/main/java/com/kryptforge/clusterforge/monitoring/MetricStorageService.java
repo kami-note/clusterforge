@@ -21,6 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.kryptforge.clusterforge.clusters.ClusterConstants;
 import com.kryptforge.clusterforge.docker.dto.ContainerStats;
 
 import jakarta.annotation.PreDestroy;
@@ -34,13 +35,6 @@ import jakarta.annotation.PreDestroy;
 public class MetricStorageService {
 
 	private static final Logger logger = LoggerFactory.getLogger(MetricStorageService.class);
-	
-	// Tamanho do buffer para batch inserts (flush quando atingir este tamanho)
-	private static final int BATCH_SIZE = 50;
-	// Intervalo máximo para flush do buffer (em milissegundos)
-	private static final long FLUSH_INTERVAL_MS = 5000; // 5 segundos
-	// Capacidade máxima do buffer (evita memory leak)
-	private static final int MAX_BUFFER_SIZE = 1000;
 
 	private final ClusterMetricRepository metricRepository;
 	private final ExecutorService executor;
@@ -48,13 +42,13 @@ public class MetricStorageService {
 	
 	// Buffer thread-safe para acumular métricas antes de fazer batch insert
 	// Limite de capacidade para evitar memory leak
-	private final BlockingQueue<MetricEntry> metricBuffer = new LinkedBlockingQueue<>(MAX_BUFFER_SIZE);
+	private final BlockingQueue<MetricEntry> metricBuffer = new LinkedBlockingQueue<>(ClusterConstants.METRICS_BUFFER_MAX_SIZE);
 	private final ScheduledExecutorService flushScheduler;
 
 	public MetricStorageService(ClusterMetricRepository metricRepository, PlatformTransactionManager transactionManager) {
 		this.metricRepository = metricRepository;
 		// Thread pool reduzido para processamento assíncrono (batch inserts são mais eficientes)
-		this.executor = Executors.newFixedThreadPool(2, r -> {
+		this.executor = Executors.newFixedThreadPool(ClusterConstants.METRICS_STORAGE_THREAD_POOL_SIZE, r -> {
 			Thread t = new Thread(r, "metric-storage");
 			t.setDaemon(true);
 			return t;
@@ -70,7 +64,12 @@ public class MetricStorageService {
 		});
 		
 		// Iniciar flush periódico
-		this.flushScheduler.scheduleWithFixedDelay(this::flushBuffer, FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
+		this.flushScheduler.scheduleWithFixedDelay(
+			this::flushBuffer, 
+			ClusterConstants.METRICS_FLUSH_INTERVAL_MS, 
+			ClusterConstants.METRICS_FLUSH_INTERVAL_MS, 
+			TimeUnit.MILLISECONDS
+		);
 	}
 	
 	/**
@@ -104,13 +103,14 @@ public class MetricStorageService {
 		// Adicionar ao buffer (não bloqueante)
 		boolean added = metricBuffer.offer(new MetricEntry(clusterId, containerId, stats));
 		if (!added) {
-			logger.warn("Buffer de métricas está cheio ({}), descartando métrica do cluster {}", MAX_BUFFER_SIZE, clusterId);
+			logger.warn("Buffer de métricas está cheio ({}), descartando métrica do cluster {}", 
+				ClusterConstants.METRICS_BUFFER_MAX_SIZE, clusterId);
 			return;
 		}
 		
 		// Se o buffer atingir o tamanho do batch, fazer flush imediato
 		// O flushBuffer() já está sincronizado, então múltiplas chamadas são seguras
-		if (metricBuffer.size() >= BATCH_SIZE) {
+		if (metricBuffer.size() >= ClusterConstants.METRICS_BATCH_SIZE) {
 			CompletableFuture.runAsync(this::flushBuffer, executor);
 		}
 	}
@@ -133,7 +133,7 @@ public class MetricStorageService {
 			
 			List<MetricEntry> entries = new ArrayList<>();
 			// Drenar até BATCH_SIZE entradas do buffer (operação atômica)
-			metricBuffer.drainTo(entries, BATCH_SIZE);
+			metricBuffer.drainTo(entries, ClusterConstants.METRICS_BATCH_SIZE);
 			
 			if (entries.isEmpty()) {
 				return;
@@ -316,9 +316,9 @@ public class MetricStorageService {
 			logger.info("Encerrando ScheduledExecutorService de flush de métricas...");
 			flushScheduler.shutdown();
 			try {
-				if (!flushScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+				if (!flushScheduler.awaitTermination(ClusterConstants.FLUSH_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
 					flushScheduler.shutdownNow();
-					if (!flushScheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+					if (!flushScheduler.awaitTermination(ClusterConstants.FLUSH_SCHEDULER_FORCE_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
 						logger.warn("ScheduledExecutorService não terminou após shutdownNow");
 					}
 				}
@@ -331,14 +331,15 @@ public class MetricStorageService {
 		// Fazer flush final do buffer antes de encerrar o executor
 		logger.info("Fazendo flush final do buffer de métricas ({} entradas restantes)...", metricBuffer.size());
 		int flushCount = 0;
-		while (!metricBuffer.isEmpty() && flushCount < 10) { // Limite de 10 flushes para evitar loop infinito
+		while (!metricBuffer.isEmpty() && flushCount < ClusterConstants.MAX_SHUTDOWN_FLUSHES) {
 			flushBuffer();
 			flushCount++;
 			
 			// Aguardar um pouco entre flushes para permitir processamento
+			// Thread.sleep é apropriado aqui pois precisamos de um delay fixo durante shutdown
 			if (!metricBuffer.isEmpty()) {
 				try {
-					Thread.sleep(500);
+					TimeUnit.MILLISECONDS.sleep(ClusterConstants.SHUTDOWN_FLUSH_DELAY_MS);
 				} catch (InterruptedException e) {
 					Thread.currentThread().interrupt();
 					break;
@@ -356,11 +357,12 @@ public class MetricStorageService {
 			executor.shutdown();
 			try {
 				// Aguardar até 30 segundos para conclusão das tarefas pendentes
-				if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
-					logger.warn("ExecutorService não terminou em 30 segundos, forçando shutdown...");
+				if (!executor.awaitTermination(ClusterConstants.EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+					logger.warn("ExecutorService não terminou em {} segundos, forçando shutdown...", 
+						ClusterConstants.EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS);
 					executor.shutdownNow();
 					// Aguardar mais 10 segundos após shutdownNow
-					if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+					if (!executor.awaitTermination(ClusterConstants.EXECUTOR_FORCE_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
 						logger.error("ExecutorService não terminou após shutdownNow");
 					}
 				} else {

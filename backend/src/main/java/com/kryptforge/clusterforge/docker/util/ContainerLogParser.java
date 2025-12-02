@@ -55,8 +55,9 @@ public final class ContainerLogParser {
 			try {
 				long epochSeconds = Long.parseLong(candidate);
 				return Instant.ofEpochSecond(epochSeconds);
-			} catch (NumberFormatException ignored) {
+			} catch (NumberFormatException nfe) {
 				// Se também falhar, retornar null (sem timestamp)
+				// Isso é esperado para logs sem timestamp válido
 				return null;
 			}
 		}

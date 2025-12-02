@@ -2,6 +2,8 @@ package com.kryptforge.clusterforge.docker;
 
 import java.time.Duration;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
 
 import com.github.dockerjava.api.DockerClient;
@@ -15,6 +17,8 @@ import com.github.dockerjava.transport.DockerHttpClient;
  * podendo usar um host customizado via propriedade.
  */
 public class DefaultDockerConnection implements DockerConnection {
+
+	private static final Logger log = LoggerFactory.getLogger(DefaultDockerConnection.class);
 
 	private final DockerClient client;
 	private final DockerHttpClient httpClient;
@@ -51,13 +55,15 @@ public class DefaultDockerConnection implements DockerConnection {
 			if (this.client != null) {
 				this.client.close();
 			}
-		} catch (Exception ignored) {
+		} catch (Exception e) {
+			log.trace("Erro ao fechar DockerClient: {}", e.getMessage());
 		}
 		try {
 			if (this.httpClient != null) {
 				this.httpClient.close();
 			}
-		} catch (Exception ignored) {
+		} catch (Exception e) {
+			log.trace("Erro ao fechar DockerHttpClient: {}", e.getMessage());
 		}
 	}
 }

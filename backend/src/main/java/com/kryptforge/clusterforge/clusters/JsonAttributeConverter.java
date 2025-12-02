@@ -1,7 +1,6 @@
 package com.kryptforge.clusterforge.clusters;
 
 import jakarta.persistence.AttributeConverter;
-import jakarta.persistence.Converter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;

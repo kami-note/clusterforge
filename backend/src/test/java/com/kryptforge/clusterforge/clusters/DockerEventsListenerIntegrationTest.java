@@ -22,6 +22,9 @@ import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.templates.TemplateInstantiationService;
 import com.kryptforge.clusterforge.templates.TemplateProperties;
 import com.kryptforge.clusterforge.templates.InstantiationResult;
+import com.kryptforge.clusterforge.users.User;
+import com.kryptforge.clusterforge.users.UserService;
+import com.kryptforge.clusterforge.users.Role;
 
 /**
  * Testes de integração para DockerEventsListener.
@@ -56,9 +59,13 @@ class DockerEventsListenerIntegrationTest {
 	@Autowired
 	private TemplateProperties templateProperties;
 
+	@Autowired
+	private UserService userService;
+
 	private String testInstanceName;
 	private UUID testInstanceId;
 	private Path templatesRoot;
+	private User testUser;
 
 	@BeforeEach
 	void setup() throws IOException, InterruptedException {
@@ -66,11 +73,16 @@ class DockerEventsListenerIntegrationTest {
 		boolean dockerAvailable = "1".equals(System.getenv("DOCKER_INTEGRATION_TEST"));
 		assumeTrue(dockerAvailable, "Testes de integração desabilitados. Defina DOCKER_INTEGRATION_TEST=1 para habilitar.");
 
+		// Cria usuário de teste e autentica
+		String timestamp = String.valueOf(System.currentTimeMillis());
+		testUser = userService.create("test-admin-" + timestamp, "password123", Role.ADMIN);
+		setAuthenticatedUser(testUser);
+
 		// Aguarda o listener iniciar (se ainda não iniciou)
 		Thread.sleep(2000);
 
 		// Gera nome único para instância de teste
-		testInstanceName = "test-events-" + System.currentTimeMillis();
+		testInstanceName = "test-events-" + timestamp;
 
 		// Obtém path de templates configurado
 		templatesRoot = Path.of(templateProperties.getTemplatesPath()).toAbsolutePath();
@@ -87,6 +99,25 @@ class DockerEventsListenerIntegrationTest {
 			"    command: [\"sh\", \"-c\", \"sleep 30\"]\n" +
 			"    ports:\n" +
 			"      - \"80\"\n");
+	}
+
+	private void setAuthenticatedUser(User user) {
+		org.springframework.security.core.userdetails.UserDetails userDetails =
+			org.springframework.security.core.userdetails.User.builder()
+				.username(user.getUsername())
+				.password(user.getPassword())
+				.authorities("ROLE_" + user.getRole().name())
+				.build();
+		
+		org.springframework.security.authentication.UsernamePasswordAuthenticationToken authToken =
+			new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+				user,
+				null,
+				userDetails.getAuthorities()
+			);
+		
+		org.springframework.security.core.context.SecurityContextHolder.getContext()
+			.setAuthentication(authToken);
 	}
 
 	@AfterEach

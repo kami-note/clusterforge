@@ -4,7 +4,7 @@ SCRIPT := /home/levi/Projects/clusterforge-f/scripts/install.sh
 DOCKER_DAEMON_JSON := /etc/docker/daemon.json
 DOCKER_OVERRIDE := /etc/systemd/system/docker.service.d/override.conf
 
-.PHONY: help status up-socket up-tcp down-tcp restart-docker test test-ping test-integration
+.PHONY: help status up-socket up-tcp down-tcp restart-docker test test-ping test-integration test-docker-real
 
 help:
 	@echo "Targets disponíveis:"
@@ -16,6 +16,7 @@ help:
 	@echo "  make test          - Roda testes unitários do backend (sem ping real)"
 	@echo "  make test-ping     - Roda testes com ping real ao Docker (DOCKER_TEST_ALLOW_PING=1)"
 	@echo "  make test-integration - Roda todos os testes incluindo integração com Docker (DOCKER_INTEGRATION_TEST=1)"
+	@echo "  make test-docker-real - Roda TODOS os testes (unitários e integração) com Docker real"
 
 status:
 	sudo bash $(SCRIPT) --status
@@ -64,5 +65,8 @@ test-ping:
 
 test-integration:
 	@bash -lc 'cd /home/levi/Projects/clusterforge-f/backend && DOCKER_INTEGRATION_TEST=1 ./mvnw test'
+
+test-docker-real:
+	@bash -lc 'cd /home/levi/Projects/clusterforge-f/backend && DOCKER_INTEGRATION_TEST=1 DOCKER_TEST_ALLOW_PING=1 ./mvnw test'
 
 

@@ -3,6 +3,7 @@ package com.kryptforge.clusterforge.clusters;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +13,7 @@ import org.springframework.util.StringUtils;
 
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
+import com.kryptforge.clusterforge.docker.util.DockerStatusMapper;
 import com.kryptforge.clusterforge.ftp.FtpService;
 import com.kryptforge.clusterforge.templates.TemplateService;
 import com.kryptforge.clusterforge.users.CurrentUser;
@@ -19,6 +21,8 @@ import com.kryptforge.clusterforge.users.Role;
 import com.kryptforge.clusterforge.users.User;
 import com.kryptforge.clusterforge.users.UserRepository;
 import com.kryptforge.clusterforge.webdav.WebDavService;
+
+import static com.kryptforge.clusterforge.clusters.ClusterConstants.*;
 
 @Service
 @Transactional
@@ -84,7 +88,7 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional(readOnly = true)
 	public List<ClusterInstance> list() {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		if (user.getRole() == Role.ADMIN) {
 			return repository.findAll();
@@ -97,7 +101,7 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional(readOnly = true)
 	public Optional<ClusterInstance> get(UUID id) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		Optional<ClusterInstance> cluster = repository.findById(id);
 		
@@ -118,10 +122,10 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public ClusterInstance updateStatus(UUID id, ClusterStatus status) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance c = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, c);
 		
@@ -132,10 +136,10 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public ClusterInstance updateParams(UUID id, ClusterParams params) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance c = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, c);
 		
@@ -151,20 +155,20 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public ClusterInstance updateOwner(UUID id, UUID ownerId) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 
 		if (user.getRole() != Role.ADMIN) {
-			throw new IllegalArgumentException("apenas administradores podem alterar o proprietário de um cluster");
+			throw new IllegalArgumentException(ERROR_ONLY_ADMIN_CAN_CHANGE_OWNER);
 		}
 
 		ClusterInstance cluster = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 
 		if (ownerId == null) {
 			cluster.setOwnerId(null);
 		} else {
 			User newOwner = userRepository.findById(ownerId)
-				.orElseThrow(() -> new IllegalArgumentException("usuário não encontrado"));
+				.orElseThrow(() -> new IllegalArgumentException(ERROR_USER_NOT_FOUND));
 			cluster.setOwnerId(newOwner.getId());
 		}
 
@@ -187,17 +191,13 @@ public class DefaultClusterService implements ClusterService {
 		}
 	}
 
-	// Métodos updateContainerId, updateFtpInfo e updateWebDavInfo removidos da interface pública
-	// Esses métodos são apenas para uso interno durante a instanciação de templates
-	// e não devem ser expostos via REST ou chamados diretamente por usuários
-
 	@Override
 	public ClusterInstance syncStatus(UUID id) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance instance = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, instance);
 		
@@ -212,23 +212,13 @@ public class DefaultClusterService implements ClusterService {
 			// Tenta inspecionar o container para verificar seu estado real
 			var inspect = dockerEngineService.inspectContainer(containerId);
 			if (inspect != null && inspect.getState() != null) {
-				String dockerStatus = inspect.getState().getStatus();
-				Boolean running = inspect.getState().getRunning();
+				ClusterStatus newStatus = DockerStatusMapper.fromContainerState(inspect.getState());
 				
-				ClusterStatus newStatus;
-				if (running != null && running) {
-					// Container está rodando
-					newStatus = ClusterStatus.ACTIVE;
-				} else if ("exited".equalsIgnoreCase(dockerStatus) || "stopped".equalsIgnoreCase(dockerStatus)) {
-					// Container foi parado
-					newStatus = ClusterStatus.STOPPED;
-				} else if ("created".equalsIgnoreCase(dockerStatus)) {
-					// Container criado mas não iniciado
-					newStatus = ClusterStatus.PENDING;
-				} else {
-					// Outros estados (restarting, removing, etc) - mantém status atual ou marca como ERROR
-					log.warn("Container {} está em estado inesperado: {}", containerId, dockerStatus);
-					newStatus = instance.getStatus(); // Mantém status atual
+				// Se o mapper retornou ERROR mas temos um status atual válido, mantém o atual
+				if (newStatus == ClusterStatus.ERROR && instance.getStatus() != ClusterStatus.ERROR) {
+					log.warn("Container {} está em estado inesperado, mantendo status atual: {}", 
+						containerId, instance.getStatus());
+					newStatus = instance.getStatus();
 				}
 				
 				if (instance.getStatus() != newStatus) {
@@ -238,11 +228,7 @@ public class DefaultClusterService implements ClusterService {
 				}
 			}
 		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
-			// Container não existe mais - foi removido
-			log.info("Container {} não encontrado, atualizando status para DELETED para instância '{}'", containerId, instance.getName());
-			instance.setStatus(ClusterStatus.DELETED);
-			instance.setContainerId(null); // Limpa containerId já que não existe mais
-			return repository.save(instance);
+			return handleContainerNotFound(instance, containerId);
 		} catch (Exception e) {
 			log.error("Erro ao sincronizar status do container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
 			// Em caso de erro, marca como ERROR
@@ -258,16 +244,16 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public ClusterInstance startContainer(UUID id) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance instance = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, instance);
 		
 		String containerId = instance.getContainerId();
 		if (containerId == null || containerId.isBlank()) {
-			throw new IllegalStateException("Instância '{}' não possui containerId".formatted(instance.getName()));
+			throw new IllegalStateException(ERROR_NO_CONTAINER_ID.formatted(instance.getName()));
 		}
 
 		try {
@@ -281,11 +267,7 @@ public class DefaultClusterService implements ClusterService {
 			instance.setStatus(ClusterStatus.ACTIVE);
 			return repository.save(instance);
 		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
-			// Container não existe mais
-			log.warn("Container {} não encontrado ao tentar iniciar, atualizando status para DELETED", containerId);
-			instance.setStatus(ClusterStatus.DELETED);
-			instance.setContainerId(null);
-			return repository.save(instance);
+			return handleContainerNotFound(instance, containerId);
 		} catch (Exception e) {
 			log.error("Erro ao iniciar container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
 			instance.setStatus(ClusterStatus.ERROR);
@@ -297,16 +279,16 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public ClusterInstance stopContainer(UUID id, int timeoutSeconds) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance instance = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, instance);
 		
 		String containerId = instance.getContainerId();
 		if (containerId == null || containerId.isBlank()) {
-			throw new IllegalStateException("Instância '{}' não possui containerId".formatted(instance.getName()));
+			throw new IllegalStateException(ERROR_NO_CONTAINER_ID.formatted(instance.getName()));
 		}
 
 		try {
@@ -315,11 +297,7 @@ public class DefaultClusterService implements ClusterService {
 			instance.setStatus(ClusterStatus.STOPPED);
 			return repository.save(instance);
 		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
-			// Container não existe mais
-			log.warn("Container {} não encontrado ao tentar parar, atualizando status para DELETED", containerId);
-			instance.setStatus(ClusterStatus.DELETED);
-			instance.setContainerId(null);
-			return repository.save(instance);
+			return handleContainerNotFound(instance, containerId);
 		} catch (Exception e) {
 			log.error("Erro ao parar container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
 			instance.setStatus(ClusterStatus.ERROR);
@@ -331,16 +309,16 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public ClusterInstance restartContainer(UUID id, int timeoutSeconds) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance instance = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, instance);
 		
 		String containerId = instance.getContainerId();
 		if (containerId == null || containerId.isBlank()) {
-			throw new IllegalStateException("Instância '{}' não possui containerId".formatted(instance.getName()));
+			throw new IllegalStateException(ERROR_NO_CONTAINER_ID.formatted(instance.getName()));
 		}
 
 		try {
@@ -356,11 +334,7 @@ public class DefaultClusterService implements ClusterService {
 					}
 				}
 			} catch (com.github.dockerjava.api.exception.NotFoundException e) {
-				// Container não existe mais
-				log.warn("Container {} não encontrado ao tentar reiniciar, atualizando status para DELETED", containerId);
-				instance.setStatus(ClusterStatus.DELETED);
-				instance.setContainerId(null);
-				return repository.save(instance);
+				return handleContainerNotFound(instance, containerId);
 			}
 
 			// Para o container apenas se estiver rodando
@@ -371,14 +345,13 @@ public class DefaultClusterService implements ClusterService {
 					instance.setStatus(ClusterStatus.STOPPED);
 					repository.save(instance);
 					
-					// Aguarda um pouco antes de reiniciar (2 segundos)
-					Thread.sleep(2000);
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-					log.error("Thread interrompida ao aguardar reinício do container {} para instância '{}'", containerId, instance.getName());
-					instance.setStatus(ClusterStatus.ERROR);
-					repository.save(instance);
-					throw new IllegalStateException("Falha ao reiniciar container: thread interrompida", e);
+					// Aguarda um pouco antes de reiniciar (delay necessário para o Docker processar o stop)
+					try {
+						TimeUnit.MILLISECONDS.sleep(RESTART_DELAY_MS);
+					} catch (InterruptedException ie) {
+						Thread.currentThread().interrupt();
+						log.warn("Delay de restart interrompido para container {}", containerId);
+					}
 				} catch (Exception e) {
 					// Se falhar ao parar, tenta iniciar mesmo assim (pode já estar parado)
 					log.warn("Erro ao parar container {} para reiniciar, tentando iniciar mesmo assim: {}", containerId, e.getMessage());
@@ -398,11 +371,7 @@ public class DefaultClusterService implements ClusterService {
 				return repository.save(instance);
 			}
 		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
-			// Container não existe mais
-			log.warn("Container {} não encontrado ao tentar reiniciar, atualizando status para DELETED", containerId);
-			instance.setStatus(ClusterStatus.DELETED);
-			instance.setContainerId(null);
-			return repository.save(instance);
+			return handleContainerNotFound(instance, containerId);
 		} catch (Exception e) {
 			log.error("Erro ao reiniciar container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
 			instance.setStatus(ClusterStatus.ERROR);
@@ -414,10 +383,10 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public void delete(UUID id) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance instance = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, instance);
 		
@@ -432,10 +401,10 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	public void deleteContainer(UUID id) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance instance = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		checkOwnership(user, instance);
 		
@@ -446,72 +415,17 @@ public class DefaultClusterService implements ClusterService {
 		}
 
 		try {
-			// Remove o servidor FTP associado primeiro (se existir)
-			String ftpContainerId = instance.getFtpContainerId();
-			Integer ftpPort = instance.getFtpPort();
-			if (ftpContainerId != null && !ftpContainerId.isBlank()) {
-				try {
-					log.info("Removendo servidor FTP {} para instância '{}'", ftpContainerId, instance.getName());
-					ftpService.removeFtpServer(ftpContainerId);
-					log.info("Servidor FTP {} removido com sucesso", ftpContainerId);
-					
-					// Libera a porta FTP
-					if (ftpPort != null) {
-						portManager.releasePort(ftpPort);
-						log.debug("Porta FTP {} liberada para instância '{}'", ftpPort, instance.getName());
-					}
-				} catch (Exception e) {
-					log.warn("Falha ao remover servidor FTP {}: {}", ftpContainerId, e.getMessage());
-					// Continua com a remoção do container principal mesmo se o FTP falhar
-				}
-			}
+			// Remove servidores auxiliares (FTP e WebDAV)
+			removeAuxiliaryServers(instance);
 
-			// Remove servidor WebDAV associado
-			String webDavContainerId = instance.getWebDavContainerId();
-			Integer webDavPort = instance.getWebDavPort();
-			if (StringUtils.hasText(webDavContainerId)) {
-				try {
-					log.info("Removendo servidor WebDAV {} para instância '{}'", webDavContainerId, instance.getName());
-					webDavService.removeWebDavServer(webDavContainerId);
-					if (webDavPort != null) {
-						portManager.releasePort(webDavPort);
-						log.debug("Porta WebDAV {} liberada para instância '{}'", webDavPort, instance.getName());
-					}
-				} catch (Exception e) {
-					log.warn("Falha ao remover servidor WebDAV {}: {}", webDavContainerId, e.getMessage());
-				}
-			}
-
-			// Para o container antes de remover
-			try {
-				dockerEngineService.stopContainer(containerId, 10);
-				log.debug("Container {} parado com sucesso", containerId);
-			} catch (Exception e) {
-				log.warn("Falha ao parar container {}: {}", containerId, e.getMessage());
-				// Continua tentando remover mesmo se não conseguir parar
-			}
-
-			// Remove o container (force=true para remover mesmo se estiver rodando)
-			dockerEngineService.removeContainer(containerId, true, false);
-			log.info("Container {} removido com sucesso para instância '{}'", containerId, instance.getName());
+			// Para e remove o container principal
+			stopAndRemoveContainer(containerId, instance.getName());
 			
 			// Libera portas alocadas
-			if (instance.getPorts() != null && !instance.getPorts().isEmpty()) {
-				portManager.releasePorts(instance.getPorts());
-				log.debug("Portas liberadas para instância '{}': {}", instance.getName(), instance.getPorts());
-			}
+			releaseInstancePorts(instance);
 			
-			// Limpa o containerId e informações do FTP do registro e atualiza status para DELETED
-			instance.setContainerId(null);
-			instance.setFtpContainerId(null);
-			instance.setFtpPort(null);
-			instance.setFtpUser(null);
-			instance.setFtpPassword(null);
-			instance.setWebDavContainerId(null);
-			instance.setWebDavPort(null);
-			instance.setWebDavUser(null);
-			instance.setWebDavPassword(null);
-			instance.setStatus(ClusterStatus.DELETED);
+			// Limpa dados e atualiza status
+			clearInstanceContainerData(instance);
 			repository.save(instance);
 		} catch (Exception e) {
 			log.error("Erro ao remover container {} para instância '{}': {}", containerId, instance.getName(), e.getMessage());
@@ -519,13 +433,93 @@ public class DefaultClusterService implements ClusterService {
 		}
 	}
 
+	/**
+	 * Remove servidores auxiliares (FTP e WebDAV) associados à instância.
+	 */
+	private void removeAuxiliaryServers(ClusterInstance instance) {
+		// Remove servidor FTP
+		String ftpContainerId = instance.getFtpContainerId();
+		Integer ftpPort = instance.getFtpPort();
+		if (ftpContainerId != null && !ftpContainerId.isBlank()) {
+			try {
+				log.info("Removendo servidor FTP {} para instância '{}'", ftpContainerId, instance.getName());
+				ftpService.removeFtpServer(ftpContainerId);
+				log.info("Servidor FTP {} removido com sucesso", ftpContainerId);
+				
+				if (ftpPort != null) {
+					portManager.releasePort(ftpPort);
+					log.debug("Porta FTP {} liberada para instância '{}'", ftpPort, instance.getName());
+				}
+			} catch (Exception e) {
+				log.warn("Falha ao remover servidor FTP {}: {}", ftpContainerId, e.getMessage());
+			}
+		}
+
+		// Remove servidor WebDAV
+		String webDavContainerId = instance.getWebDavContainerId();
+		Integer webDavPort = instance.getWebDavPort();
+		if (StringUtils.hasText(webDavContainerId)) {
+			try {
+				log.info("Removendo servidor WebDAV {} para instância '{}'", webDavContainerId, instance.getName());
+				webDavService.removeWebDavServer(webDavContainerId);
+				if (webDavPort != null) {
+					portManager.releasePort(webDavPort);
+					log.debug("Porta WebDAV {} liberada para instância '{}'", webDavPort, instance.getName());
+				}
+			} catch (Exception e) {
+				log.warn("Falha ao remover servidor WebDAV {}: {}", webDavContainerId, e.getMessage());
+			}
+		}
+	}
+
+	/**
+	 * Para e remove um container Docker.
+	 */
+	private void stopAndRemoveContainer(String containerId, String instanceName) {
+		try {
+			dockerEngineService.stopContainer(containerId, DEFAULT_STOP_TIMEOUT_SECONDS);
+			log.debug("Container {} parado com sucesso", containerId);
+		} catch (Exception e) {
+			log.warn("Falha ao parar container {}: {}", containerId, e.getMessage());
+		}
+
+		dockerEngineService.removeContainer(containerId, true, false);
+		log.info("Container {} removido com sucesso para instância '{}'", containerId, instanceName);
+	}
+
+	/**
+	 * Libera portas alocadas para a instância.
+	 */
+	private void releaseInstancePorts(ClusterInstance instance) {
+		if (instance.getPorts() != null && !instance.getPorts().isEmpty()) {
+			portManager.releasePorts(instance.getPorts());
+			log.debug("Portas liberadas para instância '{}': {}", instance.getName(), instance.getPorts());
+		}
+	}
+
+	/**
+	 * Limpa dados de container da instância e marca como DELETED.
+	 */
+	private void clearInstanceContainerData(ClusterInstance instance) {
+		instance.setContainerId(null);
+		instance.setFtpContainerId(null);
+		instance.setFtpPort(null);
+		instance.setFtpUser(null);
+		instance.setFtpPassword(null);
+		instance.setWebDavContainerId(null);
+		instance.setWebDavPort(null);
+		instance.setWebDavUser(null);
+		instance.setWebDavPassword(null);
+		instance.setStatus(ClusterStatus.DELETED);
+	}
+
 	@Override
 	public void deleteFromDatabase(UUID id) {
 		User user = currentUser.getCurrentUser()
-			.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+			.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
 		
 		ClusterInstance instance = repository.findById(id)
-			.orElseThrow(() -> new IllegalArgumentException("cluster não encontrado"));
+			.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
 		
 		// Verifica ownership antes de permitir exclusão
 		checkOwnership(user, instance);
@@ -543,8 +537,24 @@ public class DefaultClusterService implements ClusterService {
 		
 		// User só tem acesso aos seus próprios clusters
 		if (!user.getId().equals(instance.getOwnerId())) {
-			throw new IllegalArgumentException("acesso negado: cluster não pertence ao usuário");
+			throw new IllegalArgumentException(ERROR_ACCESS_DENIED);
 		}
+	}
+
+	/**
+	 * Trata o caso de container não encontrado no Docker.
+	 * Atualiza o status para DELETED e limpa o containerId.
+	 * 
+	 * @param instance Instância do cluster
+	 * @param containerId ID do container que não foi encontrado
+	 * @return Instância atualizada
+	 */
+	private ClusterInstance handleContainerNotFound(ClusterInstance instance, String containerId) {
+		log.info("Container {} não encontrado, atualizando status para DELETED para instância '{}'", 
+			containerId, instance.getName());
+		instance.setStatus(ClusterStatus.DELETED);
+		instance.setContainerId(null);
+		return repository.save(instance);
 	}
 
 	private List<Integer> normalizePorts(List<Integer> ports) {

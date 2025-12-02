@@ -25,6 +25,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.templates.TemplateProperties;
 import com.kryptforge.clusterforge.templates.dto.TemplateInstantiateRequest;
+import com.kryptforge.clusterforge.users.User;
+import com.kryptforge.clusterforge.users.UserService;
+import com.kryptforge.clusterforge.users.Role;
+import com.kryptforge.clusterforge.users.JwtService;
 
 /**
  * Testes de integração para TemplateController usando MockMvc.
@@ -70,9 +74,23 @@ class TemplateControllerIntegrationTest {
 	@Autowired
 	private TemplateProperties templateProperties;
 
+	@Autowired
+	private UserService userService;
+
+	@Autowired
+	private JwtService jwtService;
+
+	private User testUser;
+	private String jwtToken;
+
 	@BeforeEach
 	void setup() throws Exception {
-		testContainerName = "test-http-" + System.currentTimeMillis();
+		String timestamp = String.valueOf(System.currentTimeMillis());
+		testContainerName = "test-http-" + timestamp;
+		
+		// Cria usuário de teste e gera token JWT
+		testUser = userService.create("test-admin-" + timestamp, "password123", Role.ADMIN);
+		jwtToken = jwtService.generateToken(testUser);
 		
 		// Garante que o path de templates existe
 		Path templatesRoot = Path.of(TEMPLATES_PATH).toAbsolutePath();
@@ -193,12 +211,14 @@ class TemplateControllerIntegrationTest {
 
 		// Primeira criação deve funcionar
 		mockMvc.perform(post("/api/templates/test-template/instantiate")
+				.header("Authorization", "Bearer " + jwtToken)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request)))
 			.andExpect(status().isCreated());
 
 		// Segunda criação com mesmo nome deve retornar 409
 		mockMvc.perform(post("/api/templates/test-template/instantiate")
+				.header("Authorization", "Bearer " + jwtToken)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request)))
 			.andExpect(status().isConflict());
@@ -221,6 +241,7 @@ class TemplateControllerIntegrationTest {
 		);
 
 		mockMvc.perform(post("/api/templates/test-template/instantiate")
+				.header("Authorization", "Bearer " + jwtToken)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request)))
 			.andExpect(status().isCreated());

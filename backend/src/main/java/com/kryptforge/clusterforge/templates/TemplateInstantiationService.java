@@ -68,13 +68,61 @@ public class TemplateInstantiationService {
 							  List<String> overrideBinds,
 							  Integer cpuLimitPercent,
 							  Long memoryLimitMb) throws IOException {
+		// 1. Validação de entrada
+		validateInstantiationRequest(templateName, instanceName);
+
+		// 2. Resolve caminhos e lê especificação do compose
+		Path dir = resolveTemplateDirectory(templateName);
+		ComposeServiceSpec spec = readFirstService(dir.resolve(COMPOSE_FILE));
+		if (!StringUtils.hasText(spec.image)) {
+			throw new IllegalStateException("Compose sem image no primeiro service");
+		}
+
+		// 3. Processa environment
+		Map<String, String> env = mergeEnvironment(spec.environment, overrideEnv);
+
+		// 4. Processa portas
+		PortMappingResult portResult = processPortMappings(templateName, spec.ports, overridePorts);
+
+		// 5. Processa volumes/binds
+		List<String> binds = processVolumeBindings(spec.volumes, overrideBinds, dir);
+
+		// 6. Faz pull da imagem
+		pullImageSafely(spec.image, templateName);
+
+		// 7. Prepara volume da instância
+		String mainVolumePath = identifyOrCreateMainVolume(instanceName, binds);
+		String instanceVolumePath = ensureInstanceSpecificVolume(instanceName, mainVolumePath, dir, spec.volumes);
+		List<String> instanceBinds = updateBindsForInstance(binds, mainVolumePath, instanceVolumePath);
+
+		// 8. Cria e inicia container
+		String containerId = createAndStartContainer(
+			spec, env, portResult.mappedPorts, instanceBinds, instanceName, 
+			cpuLimitPercent, memoryLimitMb, portResult.allocatedHostPorts, templateName
+		);
+
+		// 9. Configura servidores auxiliares (FTP e WebDAV)
+		FtpServerInfo ftpInfo = setupFtpServer(instanceName, instanceVolumePath);
+		WebDavServerInfo webDavInfo = setupWebDavServer(instanceName, instanceVolumePath, ftpInfo);
+
+		return new InstantiationResult(containerId, portResult.mappedPorts, ftpInfo, webDavInfo);
+	}
+
+	/**
+	 * Valida os parâmetros de entrada da instanciação.
+	 */
+	private void validateInstantiationRequest(String templateName, String instanceName) {
 		requireText(templateName, "templateName");
 		requireText(instanceName, "instanceName");
-		// valida caracteres do nome (aproximação simples; Docker exige [a-zA-Z0-9][a-zA-Z0-9_.-]*)
 		if (!instanceName.matches("^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")) {
 			throw new IllegalArgumentException("instanceName inválido. Use [a-zA-Z0-9][a-zA-Z0-9_.-]*");
 		}
+	}
 
+	/**
+	 * Resolve e valida o diretório do template.
+	 */
+	private Path resolveTemplateDirectory(String templateName) throws NoSuchFileException {
 		Path root = Path.of(templateProperties.getTemplatesPath()).toAbsolutePath().normalize();
 		Path dir = root.resolve(templateName).normalize();
 		if (!dir.startsWith(root)) {
@@ -84,126 +132,145 @@ public class TemplateInstantiationService {
 		if (!Files.exists(compose)) {
 			throw new NoSuchFileException("docker-compose.yml não encontrado em: " + templateName);
 		}
+		return dir;
+	}
 
-		ComposeServiceSpec spec = readFirstService(compose);
-		if (!StringUtils.hasText(spec.image)) {
-			throw new IllegalStateException("Compose sem image no primeiro service");
-		}
-
-		// merge de environment
+	/**
+	 * Mescla variáveis de ambiente do compose com overrides.
+	 */
+	private Map<String, String> mergeEnvironment(Map<String, String> specEnv, Map<String, String> overrideEnv) {
 		Map<String, String> env = new LinkedHashMap<>();
-		env.putAll(spec.environment);
+		env.putAll(specEnv);
 		if (!CollectionUtils.isEmpty(overrideEnv)) {
 			env.putAll(overrideEnv);
 		}
+		return env;
+	}
 
-		// portas - extrai apenas as portas do container do docker-compose.yml
-		// e deixa o PortManager alocar portas do host automaticamente
+	/**
+	 * Resultado do processamento de portas.
+	 */
+	private record PortMappingResult(List<String> mappedPorts, List<Integer> allocatedHostPorts) {}
+
+	/**
+	 * Processa mapeamentos de portas do compose e overrides.
+	 */
+	private PortMappingResult processPortMappings(String templateName, List<String> specPorts, List<String> overridePorts) {
 		List<String> ports = new ArrayList<>();
 		
-		// Se há override de portas do frontend, usa elas
 		if (!CollectionUtils.isEmpty(overridePorts)) {
 			ports = new ArrayList<>(overridePorts);
-		} else if (!spec.ports.isEmpty()) {
-			// Extrai apenas as portas do container do docker-compose.yml
-			// Formato no compose pode ser:
-			// - "containerPort" (1 parte)
-			// - "hostPort:containerPort" (2 partes)
-			// - "hostIp:hostPort:containerPort" (3 partes) - ex: "127.0.0.1:8080:80"
-			// Sempre passamos apenas containerPort para o PortManager alocar hostPort automaticamente
-			for (String portMapping : spec.ports) {
-				if (portMapping == null || portMapping.trim().isEmpty()) {
-					continue;
-				}
-				
-				String[] parts = portMapping.split(":");
-				if (parts.length == 1) {
-					// Apenas porta do container especificada - passa direto
-					// Remove especificação de protocolo (ex: "80/tcp" -> "80")
-					String containerPort = stripProtocol(parts[0].trim());
-					ports.add(containerPort);
-				} else if (parts.length == 2) {
-					// Formato "hostPort:containerPort" - extrai apenas containerPort
-					// Remove especificação de protocolo (ex: "8080:80/tcp" -> "80")
-					String containerPort = stripProtocol(parts[1].trim());
-					ports.add(containerPort);
-					log.debug("Template '{}' especifica porta do host no compose ({}), usando apenas porta do container ({}) para alocação automática", 
-						templateName, parts[0].trim(), containerPort);
-				} else if (parts.length == 3) {
-					// Formato "hostIp:hostPort:containerPort" - extrai apenas containerPort
-					// Exemplo: "127.0.0.1:8080:80/tcp" -> extrai "80"
-					// Remove especificação de protocolo
-					String containerPort = stripProtocol(parts[2].trim());
-					ports.add(containerPort);
-					log.debug("Template '{}' especifica IP e porta do host no compose ({}:{}), usando apenas porta do container ({}) para alocação automática", 
-						templateName, parts[0].trim(), parts[1].trim(), containerPort);
-				} else {
-					// Formato inválido ou não suportado
-					log.warn("Template '{}' possui mapeamento de porta em formato inválido ou não suportado: '{}'. Ignorando.", 
-						templateName, portMapping);
-				}
-			}
+		} else if (!specPorts.isEmpty()) {
+			ports = extractContainerPorts(templateName, specPorts);
 		}
 		
-		// Mapeia portas usando PortManager para alocar portas do host dinamicamente
-		// O PortManager sempre aloca portas do host automaticamente quando recebe apenas containerPort
 		List<Integer> allocatedHostPorts = new ArrayList<>();
 		if (!ports.isEmpty()) {
 			try {
 				ports = portManager.mapPorts(ports);
 				log.debug("Portas mapeadas para template '{}': {}", templateName, ports);
-				// Extrai portas do host alocadas para possível liberação em caso de falha
 				allocatedHostPorts = extractHostPorts(ports);
 			} catch (Exception e) {
 				log.error("Erro ao mapear portas para template '{}': {}", templateName, e.getMessage());
 				throw new IllegalStateException("Erro ao alocar portas: " + e.getMessage(), e);
 			}
 		}
+		
+		return new PortMappingResult(ports, allocatedHostPorts);
+	}
 
-		// volumes/binds - resolve caminhos relativos ao diretório do template
+	/**
+	 * Extrai portas do container dos mapeamentos do compose.
+	 */
+	private List<String> extractContainerPorts(String templateName, List<String> specPorts) {
+		List<String> ports = new ArrayList<>();
+		for (String portMapping : specPorts) {
+			if (portMapping == null || portMapping.trim().isEmpty()) {
+				continue;
+			}
+			
+			String[] parts = portMapping.split(":");
+			if (parts.length == 1) {
+				String containerPort = stripProtocol(parts[0].trim());
+				ports.add(containerPort);
+			} else if (parts.length == 2) {
+				String containerPort = stripProtocol(parts[1].trim());
+				ports.add(containerPort);
+				log.debug("Template '{}' especifica porta do host no compose ({}), usando apenas porta do container ({}) para alocação automática", 
+					templateName, parts[0].trim(), containerPort);
+			} else if (parts.length == 3) {
+				String containerPort = stripProtocol(parts[2].trim());
+				ports.add(containerPort);
+				log.debug("Template '{}' especifica IP e porta do host no compose ({}:{}), usando apenas porta do container ({}) para alocação automática", 
+					templateName, parts[0].trim(), parts[1].trim(), containerPort);
+			} else {
+				log.warn("Template '{}' possui mapeamento de porta em formato inválido ou não suportado: '{}'. Ignorando.", 
+					templateName, portMapping);
+			}
+		}
+		return ports;
+	}
+
+	/**
+	 * Processa bindings de volumes do compose e overrides.
+	 */
+	private List<String> processVolumeBindings(List<String> specVolumes, List<String> overrideBinds, Path templateDir) {
+		if (!CollectionUtils.isEmpty(overrideBinds)) {
+			return new ArrayList<>(overrideBinds);
+		}
+		
 		List<String> binds = new ArrayList<>();
-		for (String v : spec.volumes) {
+		for (String v : specVolumes) {
 			if (!StringUtils.hasText(v)) continue;
 			String[] parts = v.split(":");
 			if (parts.length < 2) continue;
-			String hostPath = parts[0];
+			
+			String hostPath = resolveHostPath(parts[0], templateDir);
 			String containerPath = parts[1];
-			if (hostPath.startsWith("./") || hostPath.startsWith("../")) {
-				hostPath = dir.resolve(hostPath).normalize().toString();
-			} else if (!Path.of(hostPath).isAbsolute() && StringUtils.hasText(templateProperties.getVolumesBasePath())) {
-				// se for relativo mas não começar com ./ ou ../, prefixa volumesBasePath
-				hostPath = Path.of(templateProperties.getVolumesBasePath()).toAbsolutePath().resolve(hostPath).normalize().toString();
-			}
-			// mantém sufixo de modo se presente (:ro/:rw)
 			String mode = parts.length >= 3 ? ":" + parts[2] : "";
 			binds.add(hostPath + ":" + containerPath + mode);
 		}
-		if (!CollectionUtils.isEmpty(overrideBinds)) {
-			binds = new ArrayList<>(overrideBinds);
-		}
+		return binds;
+	}
 
-		// garante imagem presente
+	/**
+	 * Resolve caminho do host para volumes.
+	 */
+	private String resolveHostPath(String hostPath, Path templateDir) {
+		if (hostPath.startsWith("./") || hostPath.startsWith("../")) {
+			return templateDir.resolve(hostPath).normalize().toString();
+		} else if (!Path.of(hostPath).isAbsolute() && StringUtils.hasText(templateProperties.getVolumesBasePath())) {
+			return Path.of(templateProperties.getVolumesBasePath()).toAbsolutePath().resolve(hostPath).normalize().toString();
+		}
+		return hostPath;
+	}
+
+	/**
+	 * Faz pull da imagem de forma segura (não falha se o pull falhar).
+	 */
+	private void pullImageSafely(String image, String templateName) {
 		try {
-			log.info("Fazendo pull da imagem '{}' para template '{}'", spec.image, templateName);
-			dockerEngineService.pullImage(spec.image);
+			log.info("Fazendo pull da imagem '{}' para template '{}'", image, templateName);
+			dockerEngineService.pullImage(image);
 		} catch (Exception e) {
-			log.warn("Falha ao fazer pull da imagem {}: {}", spec.image, e.getMessage());
+			log.warn("Falha ao fazer pull da imagem {}: {}", image, e.getMessage());
 		}
+	}
 
-		// Identifica ou cria o volume principal para o servidor FTP/WebDAV
-		// IMPORTANTE: O volume principal deve ser o mesmo que o container principal usa
-		// Se o template usa volumes relativos (./src), precisamos garantir que cada instância
-		// tenha seu próprio volume, não compartilhe o volume do template
-		String mainVolumePath = identifyOrCreateMainVolume(instanceName, binds);
-		
-		// Se o volume principal é do template (caminho relativo resolvido para o template),
-		// criar um volume específico da instância e copiar os arquivos do template
-		String instanceVolumePath = ensureInstanceSpecificVolume(instanceName, mainVolumePath, dir, spec.volumes);
-		
-		// Atualizar binds para usar o volume da instância ao invés do template
-		List<String> instanceBinds = updateBindsForInstance(binds, mainVolumePath, instanceVolumePath);
-
-		// cria e inicia container
+	/**
+	 * Cria e inicia o container Docker.
+	 */
+	private String createAndStartContainer(
+		ComposeServiceSpec spec,
+		Map<String, String> env,
+		List<String> ports,
+		List<String> binds,
+		String instanceName,
+		Integer cpuLimitPercent,
+		Long memoryLimitMb,
+		List<Integer> allocatedHostPorts,
+		String templateName
+	) {
 		String containerId = null;
 		try {
 			containerId = dockerEngineService.createContainer(
@@ -211,7 +278,7 @@ public class TemplateInstantiationService {
 				spec.command,
 				env,
 				ports,
-				instanceBinds,
+				binds,
 				instanceName,
 				spec.workingDir,
 				spec.stdinOpen,
@@ -221,79 +288,97 @@ public class TemplateInstantiationService {
 				memoryLimitMb
 			);
 			dockerEngineService.startContainer(containerId);
+			return containerId;
 		} catch (Exception e) {
 			log.warn("Falha ao criar/iniciar container para template '{}': {}", templateName, e.getMessage());
-			// Libera portas alocadas antes de relançar a exceção
-			if (!allocatedHostPorts.isEmpty()) {
-				try {
-					portManager.releasePorts(allocatedHostPorts);
-					log.debug("Portas alocadas liberadas após falha na criação/inicialização do container: {}", allocatedHostPorts);
-				} catch (Exception releaseEx) {
-					log.warn("Falha ao liberar portas alocadas {}: {}", allocatedHostPorts, releaseEx.getMessage());
-				}
-			}
+			releasePortsSafely(allocatedHostPorts);
 			throw e;
 		}
+	}
 
-		// Cria servidor FTP para o container usando o volume da instância
-		FtpServerInfo ftpInfo = null;
-		WebDavServerInfo webDavInfo = null;
+	/**
+	 * Libera portas de forma segura.
+	 */
+	private void releasePortsSafely(List<Integer> ports) {
+		if (ports != null && !ports.isEmpty()) {
+			try {
+				portManager.releasePorts(ports);
+				log.debug("Portas alocadas liberadas: {}", ports);
+			} catch (Exception releaseEx) {
+				log.warn("Falha ao liberar portas alocadas {}: {}", ports, releaseEx.getMessage());
+			}
+		}
+	}
+
+	/**
+	 * Configura servidor FTP para a instância.
+	 */
+	private FtpServerInfo setupFtpServer(String instanceName, String volumePath) {
 		int ftpPort = -1;
 		try {
 			ftpPort = portManager.allocatePort();
 			if (ftpPort == -1) {
 				log.warn("Não foi possível alocar porta para servidor FTP do container {}", instanceName);
-			} else {
-				log.info("Criando servidor FTP para container {} na porta {}", instanceName, ftpPort);
-				ftpInfo = ftpService.createFtpServer(instanceName, instanceVolumePath, ftpPort, null, null);
-				log.info("Servidor FTP criado com sucesso para container {}: containerId={}, port={}", 
-					instanceName, ftpInfo.containerId(), ftpInfo.hostPort());
+				return null;
 			}
+			
+			log.info("Criando servidor FTP para container {} na porta {}", instanceName, ftpPort);
+			FtpServerInfo ftpInfo = ftpService.createFtpServer(instanceName, volumePath, ftpPort, null, null);
+			log.info("Servidor FTP criado com sucesso para container {}: containerId={}, port={}", 
+				instanceName, ftpInfo.containerId(), ftpInfo.hostPort());
+			return ftpInfo;
 		} catch (Exception e) {
 			log.error("Falha ao criar servidor FTP para container {}: {}", instanceName, e.getMessage(), e);
-			// Libera a porta FTP se foi alocada mas a criação falhou
 			if (ftpPort != -1) {
-				try {
-					portManager.releasePort(ftpPort);
-					log.debug("Porta FTP {} liberada após falha na criação do servidor", ftpPort);
-				} catch (Exception ex) {
-					log.warn("Falha ao liberar porta FTP {}: {}", ftpPort, ex.getMessage());
-				}
+				releasePortSafely(ftpPort);
 			}
-			// Não falha a instanciação se o FTP falhar, apenas registra o erro
+			return null;
 		}
+	}
 
-		// Cria servidor WebDAV reutilizando as mesmas credenciais do FTP
-		// Usa o mesmo volume da instância que o container principal e o FTP usam
-		if (ftpInfo != null) {
-			int webDavPort = -1;
-			try {
-				webDavPort = portManager.allocatePort();
-				if (webDavPort == -1) {
-					log.warn("Não foi possível alocar porta para WebDAV de {}", instanceName);
-				} else {
-					log.info("Criando servidor WebDAV para container {} na porta {} com volume {}", instanceName, webDavPort, instanceVolumePath);
-					webDavInfo = webDavService.createWebDavServer(
-						instanceName,
-						instanceVolumePath,
-						webDavPort,
-						ftpInfo.ftpUser(),
-						ftpInfo.ftpPassword()
-					);
-				}
-			} catch (Exception e) {
-				log.error("Falha ao criar servidor WebDAV para container {}: {}", instanceName, e.getMessage(), e);
-				if (webDavPort != -1) {
-					try {
-						portManager.releasePort(webDavPort);
-					} catch (Exception ex) {
-						log.warn("Falha ao liberar porta WebDAV {}: {}", webDavPort, ex.getMessage());
-					}
-				}
+	/**
+	 * Configura servidor WebDAV para a instância.
+	 */
+	private WebDavServerInfo setupWebDavServer(String instanceName, String volumePath, FtpServerInfo ftpInfo) {
+		if (ftpInfo == null) {
+			return null;
+		}
+		
+		int webDavPort = -1;
+		try {
+			webDavPort = portManager.allocatePort();
+			if (webDavPort == -1) {
+				log.warn("Não foi possível alocar porta para WebDAV de {}", instanceName);
+				return null;
 			}
+			
+			log.info("Criando servidor WebDAV para container {} na porta {} com volume {}", instanceName, webDavPort, volumePath);
+			return webDavService.createWebDavServer(
+				instanceName,
+				volumePath,
+				webDavPort,
+				ftpInfo.ftpUser(),
+				ftpInfo.ftpPassword()
+			);
+		} catch (Exception e) {
+			log.error("Falha ao criar servidor WebDAV para container {}: {}", instanceName, e.getMessage(), e);
+			if (webDavPort != -1) {
+				releasePortSafely(webDavPort);
+			}
+			return null;
 		}
+	}
 
-		return new InstantiationResult(containerId, ports, ftpInfo, webDavInfo);
+	/**
+	 * Libera uma porta de forma segura.
+	 */
+	private void releasePortSafely(int port) {
+		try {
+			portManager.releasePort(port);
+			log.debug("Porta {} liberada", port);
+		} catch (Exception ex) {
+			log.warn("Falha ao liberar porta {}: {}", port, ex.getMessage());
+		}
 	}
 
 	private ComposeServiceSpec readFirstService(Path composeFile) throws IOException {
@@ -447,7 +532,7 @@ public class TemplateInstantiationService {
 			try {
 				// Cria o diretório do volume da instância
 				Files.createDirectories(instanceVolumePath);
-				log.info("📦 Volume específico da instância criado: {}", instanceVolumePath);
+				log.info("Volume específico da instância criado: {}", instanceVolumePath);
 				
 				// Copia arquivos do template para o volume da instância
 				if (Files.exists(mainVolume) && Files.isDirectory(mainVolume)) {
@@ -459,13 +544,13 @@ public class TemplateInstantiationService {
 					
 					if (hasFiles) {
 						copyDirectory(mainVolume, instanceVolumePath);
-						log.info("✅ Arquivos do template copiados de {} para {} ({} arquivos)", 
+						log.info("Arquivos do template copiados de {} para {} ({} arquivos)", 
 							mainVolume, instanceVolumePath, countFiles(instanceVolumePath));
 					} else {
-						log.warn("⚠️ Diretório do template {} está vazio, nenhum arquivo para copiar", mainVolume);
+						log.warn("Diretório do template {} está vazio, nenhum arquivo para copiar", mainVolume);
 					}
 				} else {
-					log.warn("⚠️ Diretório do template {} não existe ou não é um diretório", mainVolume);
+					log.warn("Diretório do template {} não existe ou não é um diretório", mainVolume);
 				}
 				
 				// Ajustar permissões do volume para o UID/GID do cluster
@@ -475,7 +560,7 @@ public class TemplateInstantiationService {
 				
 				return instanceVolumePath.toString();
 			} catch (Exception e) {
-				log.error("❌ Falha ao criar volume específico da instância {}: {}", instanceName, e.getMessage(), e);
+				log.error("Falha ao criar volume específico da instância {}: {}", instanceName, e.getMessage(), e);
 				// Retorna o volume original se falhar
 				return mainVolumePath;
 			}
@@ -485,7 +570,7 @@ public class TemplateInstantiationService {
 		if (Files.exists(mainVolume) && Files.isDirectory(mainVolume)) {
 			try (var stream = Files.list(mainVolume)) {
 				long fileCount = stream.count();
-				log.info("📁 Volume da instância {} já existe com {} arquivos", mainVolume, fileCount);
+				log.info("Volume da instância {} já existe com {} arquivos", mainVolume, fileCount);
 			} catch (Exception e) {
 				log.warn("Erro ao verificar arquivos no volume {}: {}", mainVolume, e.getMessage());
 			}

@@ -2,10 +2,12 @@ package com.kryptforge.clusterforge.docker;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
 
 import com.github.dockerjava.api.model.Container;
@@ -21,6 +23,8 @@ import com.kryptforge.clusterforge.docker.dto.ContainerStats;
  * Mapper dedicado para converter modelos do docker-java em DTOs estáveis.
  */
 public final class ContainerMapper {
+
+	private static final Logger log = LoggerFactory.getLogger(ContainerMapper.class);
 
 	private ContainerMapper() {}
 
@@ -103,7 +107,8 @@ public final class ContainerMapper {
 			if (cpuDelta > 0 && systemDelta > 0) {
 				cpuPercent = (cpuDelta.doubleValue() / systemDelta.doubleValue()) * cpuCount * 100.0d;
 			}
-		} catch (Exception ignored) {
+		} catch (Exception e) {
+			log.trace("Erro ao calcular CPU percent para container {}: {}", containerId, e.getMessage());
 			cpuPercent = 0.0d;
 		}
 

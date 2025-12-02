@@ -105,7 +105,9 @@ public class ContinuousMetricCollectionService {
 					logger.debug("Parando coleta de métricas para container {} (não está mais ativo)", containerId);
 					try {
 						entry.getValue().close();
-					} catch (Exception ignored) {}
+					} catch (Exception e) {
+						logger.trace("Erro ao fechar callback de métricas: {}", e.getMessage());
+					}
 					return true;
 				}
 				return false;
@@ -155,7 +157,9 @@ public class ContinuousMetricCollectionService {
 					closed = true;
 					try {
 						this.close();
-					} catch (Exception ignored) {}
+					} catch (Exception e) {
+						logger.trace("Erro ao fechar callback: {}", e.getMessage());
+					}
 				}
 			};
 
@@ -182,7 +186,9 @@ public class ContinuousMetricCollectionService {
 		if (callback != null) {
 			try {
 				callback.close();
-			} catch (Exception ignored) {}
+			} catch (Exception e) {
+				logger.trace("Erro ao fechar callback ao parar coleta: {}", e.getMessage());
+			}
 			logger.debug("Parada coleta de métricas para container {}", containerId);
 		}
 	}
@@ -194,7 +200,9 @@ public class ContinuousMetricCollectionService {
 		activeCallbacks.forEach((containerId, callback) -> {
 			try {
 				callback.close();
-			} catch (Exception ignored) {}
+			} catch (Exception e) {
+				logger.trace("Erro ao fechar callback do container {}: {}", containerId, e.getMessage());
+			}
 		});
 		activeCallbacks.clear();
 		logger.info("Todas as coletas de métricas foram paradas");

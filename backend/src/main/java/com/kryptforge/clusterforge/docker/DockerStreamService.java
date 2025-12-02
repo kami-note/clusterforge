@@ -8,7 +8,12 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -17,6 +22,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Statistics;
+import com.kryptforge.clusterforge.clusters.ClusterConstants;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
 import com.kryptforge.clusterforge.clusters.ClusterRepository;
 import com.kryptforge.clusterforge.docker.dto.ContainerLogEvent;
@@ -31,6 +37,8 @@ import com.kryptforge.clusterforge.monitoring.LogStorageService;
  */
 @Service
 public class DockerStreamService {
+
+	private static final Logger log = LoggerFactory.getLogger(DockerStreamService.class);
 
 	private final DockerClient dockerClient;
 	private final ClusterRepository clusterRepository;
@@ -67,7 +75,7 @@ public class DockerStreamService {
 
 		emitter.onCompletion(() -> executor.shutdown());
 		emitter.onTimeout(() -> {
-			try { emitter.complete(); } catch (Exception ignored) {}
+			try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 			executor.shutdown();
 		});
 		emitter.onError(ex -> executor.shutdown());
@@ -88,20 +96,20 @@ public class DockerStreamService {
 								// Nota: Métricas são coletadas continuamente pelo ContinuousMetricCollectionService
 								// Não persistir aqui para evitar duplicação
 							} catch (IOException e) {
-								try { emitter.completeWithError(e); } catch (Exception ignored) {}
+								try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
 								closeQuietly();
 							}
 						}
 
 						@Override
 						public void onError(Throwable throwable) {
-							try { emitter.completeWithError(throwable); } catch (Exception ignored) {}
+							try { emitter.completeWithError(throwable); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 							closeQuietly();
 						}
 
 						@Override
 						public void onComplete() {
-							try { emitter.complete(); } catch (Exception ignored) {}
+							try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 							closeQuietly();
 						}
 
@@ -111,11 +119,11 @@ public class DockerStreamService {
 							try {
 								// Adapter has close() which cancels the stream
 								this.close();
-							} catch (IOException ignored) {}
+							} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
 						}
 					});
 			} catch (Exception e) {
-				try { emitter.completeWithError(e); } catch (Exception ignored) {}
+				try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
 			}
 		});
 
@@ -151,7 +159,7 @@ public class DockerStreamService {
 			activeCallbacks.values().forEach(callback -> {
 				try {
 					callback.close();
-				} catch (IOException ignored) {}
+				} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
 			});
 			activeCallbacks.clear();
 			executor.shutdown();
@@ -161,10 +169,10 @@ public class DockerStreamService {
 			activeCallbacks.values().forEach(callback -> {
 				try {
 					callback.close();
-				} catch (IOException ignored) {}
+				} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
 			});
 			activeCallbacks.clear();
-			try { emitter.complete(); } catch (Exception ignored) {}
+			try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 			executor.shutdown();
 		});
 
@@ -172,7 +180,7 @@ public class DockerStreamService {
 			activeCallbacks.values().forEach(callback -> {
 				try {
 					callback.close();
-				} catch (IOException ignored) {}
+				} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
 			});
 			activeCallbacks.clear();
 			executor.shutdown();
@@ -186,7 +194,7 @@ public class DockerStreamService {
 		if (validClusters.isEmpty()) {
 			try {
 				emitter.complete();
-			} catch (Exception ignored) {}
+			} catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 			return emitter;
 		}
 
@@ -212,7 +220,7 @@ public class DockerStreamService {
 								// Nota: Métricas são coletadas continuamente pelo ContinuousMetricCollectionService
 								// Não persistir aqui para evitar duplicação
 							} catch (Exception e) {
-								// Ignorar erro individual, continuar com outros containers
+								log.trace("Erro ao processar stats do container {}: {}", containerId, e.getMessage());
 							}
 						}
 
@@ -233,63 +241,83 @@ public class DockerStreamService {
 							closed = true;
 							try {
 								this.close();
-							} catch (IOException ignored) {}
+							} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
 						}
 					};
 
 					activeCallbacks.put(containerId, callback);
 					dockerClient.statsCmd(containerId).withNoStream(false).exec(callback);
 				} catch (Exception e) {
-					// Ignorar erro ao iniciar stats para este container
+					log.debug("Erro ao iniciar stats para container {}: {}", containerId, e.getMessage());
 					activeCallbacks.remove(containerId);
 				}
 			});
 		}
 
-		// Thread separada para enviar métricas agregadas periodicamente
-		executor.submit(() -> {
-			try {
-				// Aguardar um pouco para coletar métricas iniciais
-				Thread.sleep(1000);
-
-				// Flag para controlar loop
-				boolean shouldContinue = true;
+		// Thread separada para enviar métricas agregadas periodicamente usando ScheduledExecutorService
+		ScheduledExecutorService metricsScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+			Thread t = new Thread(r, "docker-stats-scheduler");
+			t.setDaemon(true);
+			return t;
+		});
+		
+		// Flag atômica para controlar loop
+		AtomicBoolean shouldContinue = new AtomicBoolean(true);
+		
+		// Tarefa para enviar métricas
+		// Nota: NÃO chamar metricsScheduler.shutdown() de dentro desta tarefa
+		// pois isso causa race condition. O shutdown é feito nos callbacks onCompletion/onError.
+		Runnable sendMetricsTask = () -> {
+			if (!shouldContinue.get() || activeCallbacks.isEmpty()) {
+				// Apenas sinaliza para parar; o shutdown é feito externamente
+				shouldContinue.set(false);
+				return;
+			}
+			
+			for (ClusterInstance cluster : validClusters) {
+				UUID clusterId = cluster.getId();
+				ContainerStats stats = lastMetrics.get(clusterId);
 				
-				while (shouldContinue && activeCallbacks.size() > 0) {
-					// Enviar métricas de todos os clusters coletadas
-					for (ClusterInstance cluster : validClusters) {
-						UUID clusterId = cluster.getId();
-						ContainerStats stats = lastMetrics.get(clusterId);
-						
-						if (stats != null) {
-							try {
-								ClusterMetricsEvent event = ClusterMetricsEvent.from(clusterId, stats);
-								emitter.send(SseEmitter.event()
-									.name("stats")
-									.data(event, MediaType.APPLICATION_JSON));
-								// Nota: A métrica já foi persistida no onNext quando recebida do Docker (linha 222)
-								// Não persistir novamente aqui para evitar duplicação
-							} catch (IOException e) {
-								// Cliente desconectou, sair do loop
-								shouldContinue = false;
-								break;
-							}
-						}
-					}
-
-					if (shouldContinue) {
-						// Aguardar intervalo antes de próxima atualização
-						Thread.sleep(intervalMillis);
+				if (stats != null) {
+					try {
+						ClusterMetricsEvent event = ClusterMetricsEvent.from(clusterId, stats);
+						emitter.send(SseEmitter.event()
+							.name("stats")
+							.data(event, MediaType.APPLICATION_JSON));
+					} catch (IOException e) {
+						// Cliente desconectou, sinaliza para parar
+						// O shutdown do scheduler é feito no callback onError
+						shouldContinue.set(false);
+						return;
 					}
 				}
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-			} catch (Exception e) {
-				try {
-					emitter.completeWithError(e);
-				} catch (Exception ignored) {}
 			}
-		});
+		};
+		
+		// Agendar envio periódico de métricas com delay inicial
+		metricsScheduler.scheduleAtFixedRate(
+			sendMetricsTask, 
+			ClusterConstants.INITIAL_METRICS_DELAY_MS, 
+			intervalMillis, 
+			TimeUnit.MILLISECONDS
+		);
+		
+		// Encerrar scheduler e fechar callbacks quando emitter for completado
+		Runnable cleanup = () -> {
+			shouldContinue.set(false);
+			metricsScheduler.shutdown();
+			// Fechar todos os callbacks ativos para liberar recursos
+			activeCallbacks.values().forEach(callback -> {
+				try {
+					callback.close();
+				} catch (Exception e) {
+					log.trace("Erro ao fechar callback de stats: {}", e.getMessage());
+				}
+			});
+			activeCallbacks.clear();
+		};
+		emitter.onCompletion(cleanup);
+		emitter.onError(ex -> cleanup.run());
 
 		return emitter;
 	}
@@ -322,7 +350,7 @@ public class DockerStreamService {
 
 		emitter.onCompletion(() -> executor.shutdown());
 		emitter.onTimeout(() -> {
-			try { emitter.complete(); } catch (Exception ignored) {}
+			try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 			executor.shutdown();
 		});
 		emitter.onError(ex -> executor.shutdown());
@@ -362,20 +390,20 @@ public class DockerStreamService {
 								}
 							}
 						} catch (IOException e) {
-							try { emitter.completeWithError(e); } catch (Exception ignored) {}
+							try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
 							closeQuietly();
 						}
 					}
 
 					@Override
 					public void onError(Throwable throwable) {
-						try { emitter.completeWithError(throwable); } catch (Exception ignored) {}
+						try { emitter.completeWithError(throwable); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 						closeQuietly();
 					}
 
 					@Override
 					public void onComplete() {
-						try { emitter.complete(); } catch (Exception ignored) {}
+						try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
 						closeQuietly();
 					}
 
@@ -384,11 +412,11 @@ public class DockerStreamService {
 						closed = true;
 						try {
 							this.close();
-						} catch (IOException ignored) {}
+						} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
 					}
 				});
 			} catch (Exception e) {
-				try { emitter.completeWithError(e); } catch (Exception ignored) {}
+				try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
 			}
 		});
 

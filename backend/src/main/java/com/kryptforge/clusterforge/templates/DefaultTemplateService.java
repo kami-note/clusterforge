@@ -14,6 +14,8 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -27,6 +29,8 @@ import com.kryptforge.clusterforge.templates.dto.TemplateSummary;
 
 @Service
 public class DefaultTemplateService implements TemplateService {
+
+	private static final Logger log = LoggerFactory.getLogger(DefaultTemplateService.class);
 
 	private static final String COMPOSE_FILE = "docker-compose.yml";
 	private static final String METADATA_FILE = "metadata.json";
@@ -136,7 +140,9 @@ public class DefaultTemplateService implements TemplateService {
 						String rel = root.relativize(p).toString();
 						long size = Files.size(p);
 						list.add(new TemplateFileEntry(rel, size));
-					} catch (IOException ignored) {}
+					} catch (IOException e) {
+						log.trace("Erro ao ler tamanho do arquivo {}: {}", p, e.getMessage());
+					}
 				});
 		}
 		list.sort(Comparator.comparing(TemplateFileEntry::relativePath));
@@ -170,7 +176,6 @@ public class DefaultTemplateService implements TemplateService {
 		return o instanceof String s ? s : null;
 	}
 
-	@SuppressWarnings("unchecked")
 	private List<String> readAsStringList(Object o) {
 		if (o instanceof List<?> l) {
 			return l.stream().filter(String.class::isInstance).map(String.class::cast).collect(Collectors.toList());
@@ -178,7 +183,6 @@ public class DefaultTemplateService implements TemplateService {
 		return null;
 	}
 
-	@SuppressWarnings("unchecked")
 	private Map<String, String> readAsStringMap(Object o) {
 		if (o instanceof Map<?, ?> m) {
 			return m.entrySet().stream()
@@ -188,7 +192,6 @@ public class DefaultTemplateService implements TemplateService {
 		return null;
 	}
 
-	@SuppressWarnings("unchecked")
 	private List<Integer> readAsIntegerList(Object o) {
 		if (o instanceof List<?> l) {
 			return l.stream()
@@ -196,7 +199,8 @@ public class DefaultTemplateService implements TemplateService {
 					if (v instanceof Number n) return n.intValue();
 					try {
 						return Integer.parseInt(String.valueOf(v));
-					} catch (Exception ignored) {
+					} catch (Exception e) {
+						log.trace("Erro ao converter '{}' para Integer: {}", v, e.getMessage());
 						return null;
 					}
 				})

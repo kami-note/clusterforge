@@ -98,7 +98,9 @@ public class ContinuousLogCollectionService {
 					logger.debug("Parando coleta de logs para container {} (não está mais ativo)", containerId);
 					try {
 						entry.getValue().close();
-					} catch (IOException ignored) {}
+					} catch (IOException e) {
+						logger.trace("Erro ao fechar callback de logs: {}", e.getMessage());
+					}
 					lastCollectedTimestamp.remove(containerId);
 					return true;
 				}
@@ -168,7 +170,9 @@ public class ContinuousLogCollectionService {
 					closed = true;
 					try {
 						this.close();
-					} catch (IOException ignored) {}
+					} catch (IOException e) {
+						logger.trace("Erro ao fechar callback: {}", e.getMessage());
+					}
 				}
 			};
 
@@ -218,7 +222,9 @@ public class ContinuousLogCollectionService {
 		if (callback != null) {
 			try {
 				callback.close();
-			} catch (IOException ignored) {}
+			} catch (IOException e) {
+				logger.trace("Erro ao fechar callback ao parar coleta: {}", e.getMessage());
+			}
 			lastCollectedTimestamp.remove(containerId);
 			logger.debug("Parada coleta de logs para container {}", containerId);
 		}
@@ -231,7 +237,9 @@ public class ContinuousLogCollectionService {
 		activeCallbacks.forEach((containerId, callback) -> {
 			try {
 				callback.close();
-			} catch (IOException ignored) {}
+			} catch (IOException e) {
+				logger.trace("Erro ao fechar callback do container {}: {}", containerId, e.getMessage());
+			}
 		});
 		activeCallbacks.clear();
 		lastCollectedTimestamp.clear();

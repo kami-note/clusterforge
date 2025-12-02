@@ -2,39 +2,43 @@ package com.kryptforge.clusterforge.web;
 
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
+import java.util.ArrayList;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import jakarta.validation.Valid;
-
-import com.kryptforge.clusterforge.templates.TemplateService;
-import com.kryptforge.clusterforge.templates.TemplateInstantiationService;
-import com.kryptforge.clusterforge.templates.InstantiationResult;
 import com.github.dockerjava.api.model.Container;
-import com.kryptforge.clusterforge.docker.DockerEngineService;
-import com.kryptforge.clusterforge.clusters.ClusterService;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
-import com.kryptforge.clusterforge.clusters.ClusterStatus;
 import com.kryptforge.clusterforge.clusters.ClusterRepository;
+import com.kryptforge.clusterforge.clusters.ClusterService;
+import com.kryptforge.clusterforge.clusters.ClusterStatus;
+import com.kryptforge.clusterforge.docker.DockerEngineService;
+import com.kryptforge.clusterforge.templates.InstantiationResult;
+import com.kryptforge.clusterforge.templates.TemplateInstantiationService;
+import com.kryptforge.clusterforge.templates.TemplateService;
 import com.kryptforge.clusterforge.templates.dto.TemplateDetail;
-import com.kryptforge.clusterforge.templates.dto.TemplateSummary;
 import com.kryptforge.clusterforge.templates.dto.TemplateInstantiateRequest;
 import com.kryptforge.clusterforge.templates.dto.TemplateInstantiateResponse;
-import java.util.ArrayList;
+import com.kryptforge.clusterforge.templates.dto.TemplateSummary;
+
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping(path = "/api/templates", produces = MediaType.APPLICATION_JSON_VALUE)
 public class TemplateController {
+
+	private static final Logger log = LoggerFactory.getLogger(TemplateController.class);
 
 	private final TemplateService templateService;
 	private final TemplateInstantiationService instantiationService;
@@ -114,8 +118,8 @@ public class TemplateController {
 					if (parts.length >= 1) {
 						try {
 							hostPorts.add(Integer.parseInt(parts[0].trim()));
-						} catch (NumberFormatException ignored) {
-							// ignora portas inválidas
+						} catch (NumberFormatException e) {
+							log.debug("Formato de porta inválido ignorado: {}", portMapping);
 						}
 					}
 				}
@@ -163,41 +167,37 @@ public class TemplateController {
 			return ResponseEntity.status(HttpStatus.CREATED)
 				.body(new TemplateInstantiateResponse(result.containerId(), request.name()));
 		} catch (IllegalArgumentException e) {
-			// Se a instância foi criada mas houve erro, marca como ERROR
-			try {
-				clusterService.list().stream()
-					.filter(c -> request.name().equals(c.getName()))
-					.findFirst()
-					.ifPresent(instance -> clusterService.updateStatus(instance.getId(), ClusterStatus.ERROR));
-			} catch (Exception ignored) {
-				// Ignora erros ao atualizar status
-			}
+			markInstanceAsErrorIfExists(request.name());
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
 		} catch (NoSuchFileException e) {
-			// Se a instância foi criada mas o template não existe, marca como ERROR
-			try {
-				clusterService.list().stream()
-					.filter(c -> request.name().equals(c.getName()))
-					.findFirst()
-					.ifPresent(instance -> clusterService.updateStatus(instance.getId(), ClusterStatus.ERROR));
-			} catch (Exception ignored) {
-				// Ignora erros ao atualizar status
-			}
+			markInstanceAsErrorIfExists(request.name());
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage(), e);
 		} catch (Exception e) {
-			// Se a instância foi criada mas houve erro na criação do container, marca como ERROR
-			try {
-				clusterService.list().stream()
-					.filter(c -> request.name().equals(c.getName()))
-					.findFirst()
-					.ifPresent(instance -> clusterService.updateStatus(instance.getId(), ClusterStatus.ERROR));
-			} catch (Exception ignored) {
-				// Ignora erros ao atualizar status
-			}
+			markInstanceAsErrorIfExists(request.name());
 			if (e instanceof IOException) {
 				throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Falha ao instanciar template", e);
 			}
 			throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Erro inesperado: " + e.getMessage(), e);
+		}
+	}
+
+	/**
+	 * Marca uma instância como ERROR se ela existir no banco.
+	 * Usado para cleanup em caso de falha durante a instanciação.
+	 * 
+	 * @param instanceName Nome da instância a marcar como erro
+	 */
+	private void markInstanceAsErrorIfExists(String instanceName) {
+		try {
+			clusterService.list().stream()
+				.filter(c -> instanceName.equals(c.getName()))
+				.findFirst()
+				.ifPresent(instance -> {
+					log.warn("Marcando instância '{}' como ERROR devido a falha na instanciação", instanceName);
+					clusterService.updateStatus(instance.getId(), ClusterStatus.ERROR);
+				});
+		} catch (Exception e) {
+			log.warn("Falha ao marcar instância '{}' como ERROR: {}", instanceName, e.getMessage());
 		}
 	}
 }
