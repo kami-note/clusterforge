@@ -6,7 +6,7 @@ import { clusterService } from '@/services/cluster.service';
 import { templateService } from '@/services/template.service';
 import { Cluster } from '@/types';
 import { mapClusterStatus, formatTemplateName } from '@/utils/cluster.utils';
-import { memoryMbToGb, cpuCoresToPercent } from '@/utils/cluster.utils';
+import { memoryMbToGb } from '@/utils/cluster.utils';
 import { handleError, safeConsoleError } from '@/utils/error.utils';
 import { useAuth } from '@/hooks/useAuth';
 import { authService } from '@/services/auth.service';
@@ -101,7 +101,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               id: typeof details.id === 'string' ? details.id : details.id.toString(),
               name: details.name,
               status: mapClusterStatus(details.status), // Status sempre vem da API
-              cpu: details.cpuLimit ? cpuCoresToPercent(details.cpuLimit) : 0,
+              cpu: details.cpuLimitPercent ?? 0,
               memory: details.memoryLimit ? memoryMbToGb(details.memoryLimit) : 0,
               storage: details.diskLimit || 0,
               lastUpdate: details.updatedAt || details.createdAt || 'desconhecido',
@@ -122,7 +122,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
               id: typeof cluster.id === 'string' ? cluster.id : cluster.id.toString(),
               name: cluster.name,
               status: mapClusterStatus(cluster.status),
-              cpu: cluster.cpuLimit ? cpuCoresToPercent(cluster.cpuLimit) : 0,
+              cpu: cluster.cpuLimitPercent ?? 0,
               memory: cluster.memoryLimit ? memoryMbToGb(cluster.memoryLimit) : 0,
               storage: cluster.diskLimit || 0,
               lastUpdate: cluster.updatedAt || cluster.createdAt || 'desconhecido',
@@ -177,7 +177,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         name: clusterData.name,
         env: {
           // Converter recursos para variáveis de ambiente se necessário
-          ...(clusterData.resources.cpu && { CPU_LIMIT: clusterData.resources.cpu.toString() }),
+          ...(clusterData.resources.cpu && { CPU_LIMIT_PERCENT: clusterData.resources.cpu.toString() }),
           ...(clusterData.resources.ram && { MEMORY_LIMIT: (clusterData.resources.ram * 1024).toString() }), // GB para MB
           ...(clusterData.resources.disk && { DISK_LIMIT: clusterData.resources.disk.toString() }),
         },
@@ -210,7 +210,7 @@ export function ClustersProvider({ children }: { children: ReactNode }) {
         id: typeof clusterDetails.id === 'string' ? clusterDetails.id : clusterDetails.id.toString(),
         name: clusterDetails.name,
         status: mapClusterStatus(clusterDetails.status),
-        cpu: clusterDetails.cpuLimit ? cpuCoresToPercent(clusterDetails.cpuLimit) : 0,
+        cpu: clusterDetails.cpuLimitPercent ?? 0,
         memory: clusterDetails.memoryLimit ? memoryMbToGb(clusterDetails.memoryLimit) : 0,
         storage: clusterDetails.diskLimit || 0,
         lastUpdate: clusterDetails.updatedAt || clusterDetails.createdAt || 'desconhecido',

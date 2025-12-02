@@ -198,7 +198,7 @@ export interface ClusterListItem {
   owner?: {
     userId: number;
   };
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
   templateName?: string;
@@ -234,7 +234,7 @@ export interface ClusterDetailsResponse {
     username: string;
     role: string;
   };
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;
@@ -245,7 +245,7 @@ export interface ClusterDetailsResponse {
 export interface CreateClusterRequest {
   templateName: string;
   baseName?: string;
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;

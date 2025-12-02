@@ -84,7 +84,7 @@ class DockerControllerIntegrationTest {
 		adminCluster = clusterService.create(
 			"admin-cluster",
 			"webserver-php",
-			new ClusterService.ClusterParams(null, null, null)
+			new ClusterService.ClusterParams(null, null, null, null, null, null, null)
 		);
 		adminCluster.setContainerId("container-admin-123");
 		adminCluster.setStatus(ClusterStatus.ACTIVE);
@@ -95,7 +95,7 @@ class DockerControllerIntegrationTest {
 		userCluster = clusterService.create(
 			"user-cluster",
 			"webserver-php",
-			new ClusterService.ClusterParams(null, null, null)
+			new ClusterService.ClusterParams(null, null, null, null, null, null, null)
 		);
 		userCluster.setContainerId("container-user-456");
 		userCluster.setStatus(ClusterStatus.ACTIVE);
@@ -231,7 +231,7 @@ class DockerControllerIntegrationTest {
 		ClusterInstance clusterWithoutContainer = clusterService.create(
 			"cluster-no-container",
 			"webserver-php",
-			new ClusterService.ClusterParams(null, null, null)
+			new ClusterService.ClusterParams(null, null, null, null, null, null, null)
 		);
 		clusterWithoutContainer.setContainerId(null);
 		clusterRepository.save(clusterWithoutContainer);

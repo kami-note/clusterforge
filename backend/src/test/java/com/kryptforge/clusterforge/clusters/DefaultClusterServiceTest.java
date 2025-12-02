@@ -74,7 +74,7 @@ class DefaultClusterServiceTest {
 			.thenReturn(new TemplateDetail("webserver-php", "webserver-php", true, List.of(new TemplateFileEntry("a", 1)), null));
 		when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-		var params = new ClusterService.ClusterParams(Map.of("A","1"), List.of(8080), List.of("./vol:/data"));
+		var params = new ClusterService.ClusterParams(Map.of("A","1"), List.of(8080), List.of("./vol:/data"), null, null, null, null);
 		ClusterInstance created = service.create("c1", "webserver-php", params);
 		assertEquals("c1", created.getName());
 		assertEquals("webserver-php", created.getTemplateName());
@@ -97,7 +97,7 @@ class DefaultClusterServiceTest {
 		var updatedStatus = service.updateStatus(UUID.randomUUID(), ClusterStatus.ACTIVE);
 		assertEquals(ClusterStatus.ACTIVE, updatedStatus.getStatus());
 
-		var updatedParams = service.updateParams(UUID.randomUUID(), new ClusterService.ClusterParams(Map.of("B","2"), List.of(80,80,443), List.of("/v:/v")));
+		var updatedParams = service.updateParams(UUID.randomUUID(), new ClusterService.ClusterParams(Map.of("B","2"), List.of(80,80,443), List.of("/v:/v"), null, null, null, null));
 		assertEquals(Map.of("B","2"), updatedParams.getEnv());
 		assertEquals(List.of(80,443), updatedParams.getPorts());
 	}

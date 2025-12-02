@@ -71,7 +71,11 @@ public interface ClusterService {
 	record ClusterParams(
 		java.util.Map<String,String> env,
 		java.util.List<Integer> ports,
-		java.util.List<String> volumes
+		java.util.List<String> volumes,
+		Integer cpuLimitPercent,
+		Long memoryLimit,
+		Integer diskLimit,
+		Integer networkLimit
 	) {}
 }
 

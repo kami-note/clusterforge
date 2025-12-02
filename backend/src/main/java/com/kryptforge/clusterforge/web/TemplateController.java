@@ -126,7 +126,11 @@ public class TemplateController {
 				new ClusterService.ClusterParams(
 					request.env(),
 					hostPorts,
-					request.binds()
+					request.binds(),
+					null,
+					null,
+					null,
+					null
 				)
 			);
 

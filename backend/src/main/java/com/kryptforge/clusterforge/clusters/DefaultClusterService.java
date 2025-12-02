@@ -75,6 +75,7 @@ public class DefaultClusterService implements ClusterService {
 			c.setEnv(params.env());
 			c.setPorts(normalizePorts(params.ports()));
 			c.setVolumes(params.volumes());
+			applyResourceLimits(c, params);
 		}
 		return repository.save(c);
 	}
@@ -142,6 +143,7 @@ public class DefaultClusterService implements ClusterService {
 			if (params.env() != null) c.setEnv(params.env());
 			if (params.ports() != null) c.setPorts(normalizePorts(params.ports()));
 			if (params.volumes() != null) c.setVolumes(params.volumes());
+			applyResourceLimits(c, params);
 		}
 		return repository.save(c);
 	}
@@ -167,6 +169,22 @@ public class DefaultClusterService implements ClusterService {
 		}
 
 		return repository.save(cluster);
+	}
+
+	private void applyResourceLimits(ClusterInstance instance, ClusterParams params) {
+		if (params == null) return;
+		if (params.cpuLimitPercent() != null) {
+			instance.setCpuLimitPercent(params.cpuLimitPercent());
+		}
+		if (params.memoryLimit() != null) {
+			instance.setMemoryLimitMb(params.memoryLimit());
+		}
+		if (params.diskLimit() != null) {
+			instance.setDiskLimitGb(params.diskLimit());
+		}
+		if (params.networkLimit() != null) {
+			instance.setNetworkLimitMbps(params.networkLimit());
+		}
 	}
 
 	// Métodos updateContainerId, updateFtpInfo e updateWebDavInfo removidos da interface pública

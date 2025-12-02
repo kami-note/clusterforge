@@ -144,6 +144,10 @@ class DockerEventsListenerIntegrationTest {
 			new ClusterService.ClusterParams(
 				Map.of("VAR1", "value1"),
 				null,
+				null,
+				null,
+				null,
+				null,
 				null
 			)
 		);
@@ -184,6 +188,10 @@ class DockerEventsListenerIntegrationTest {
 			new ClusterService.ClusterParams(
 				Map.of("VAR1", "value1"),
 				hostPorts,
+				null,
+				null,
+				null,
+				null,
 				null
 			)
 		);

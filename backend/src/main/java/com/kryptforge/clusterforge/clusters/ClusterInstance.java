@@ -67,6 +67,18 @@ public class ClusterInstance {
 	@Column(length = 64)
 	private String containerId;
 
+	@Column(name = "cpu_limit_percent")
+	private Integer cpuLimitPercent;
+
+	@Column(name = "memory_limit_mb")
+	private Long memoryLimitMb;
+
+	@Column(name = "disk_limit_gb")
+	private Integer diskLimitGb;
+
+	@Column(name = "network_limit_mbps")
+	private Integer networkLimitMbps;
+
 	@JdbcTypeCode(SqlTypes.VARCHAR)
 	@Column(name = "owner_id", length = 36)
 	private UUID ownerId;
@@ -173,6 +185,38 @@ public class ClusterInstance {
 
 	public void setContainerId(String containerId) {
 		this.containerId = containerId;
+	}
+
+	public Integer getCpuLimitPercent() {
+		return cpuLimitPercent;
+	}
+
+	public void setCpuLimitPercent(Integer cpuLimitPercent) {
+		this.cpuLimitPercent = cpuLimitPercent;
+	}
+
+	public Long getMemoryLimitMb() {
+		return memoryLimitMb;
+	}
+
+	public void setMemoryLimitMb(Long memoryLimitMb) {
+		this.memoryLimitMb = memoryLimitMb;
+	}
+
+	public Integer getDiskLimitGb() {
+		return diskLimitGb;
+	}
+
+	public void setDiskLimitGb(Integer diskLimitGb) {
+		this.diskLimitGb = diskLimitGb;
+	}
+
+	public Integer getNetworkLimitMbps() {
+		return networkLimitMbps;
+	}
+
+	public void setNetworkLimitMbps(Integer networkLimitMbps) {
+		this.networkLimitMbps = networkLimitMbps;
 	}
 
 	public UUID getOwnerId() {

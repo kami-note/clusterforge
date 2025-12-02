@@ -17,20 +17,28 @@ public final class ClusterDtos {
 		String templateName,
 		Map<String,String> env,
 		List<Integer> ports,
-		List<String> volumes
+		List<String> volumes,
+		Integer cpuLimitPercent,
+		Long memoryLimit,
+		Integer diskLimit,
+		Integer networkLimit
 	) {
 		public ClusterParams toParams() {
-			return new ClusterParams(env, ports, volumes);
+			return new ClusterParams(env, ports, volumes, cpuLimitPercent, memoryLimit, diskLimit, networkLimit);
 		}
 	}
 
 	public record ClusterUpdateParamsRequest(
 		Map<String,String> env,
 		List<Integer> ports,
-		List<String> volumes
+		List<String> volumes,
+		Integer cpuLimitPercent,
+		Long memoryLimit,
+		Integer diskLimit,
+		Integer networkLimit
 	) {
 		public ClusterParams toParams() {
-			return new ClusterParams(env, ports, volumes);
+			return new ClusterParams(env, ports, volumes, cpuLimitPercent, memoryLimit, diskLimit, networkLimit);
 		}
 	}
 
@@ -52,7 +60,11 @@ public final class ClusterDtos {
 		AccessInfo ftp,
 		AccessInfo webDav,
 		UUID ownerId,
-		String ownerUsername
+		String ownerUsername,
+		Integer cpuLimitPercent,
+		Long memoryLimit,
+		Integer diskLimit,
+		Integer networkLimit
 	) {
 		public static ClusterResponse from(ClusterInstance c) {
 			return from(c, c.getStatus(), null);
@@ -77,7 +89,11 @@ public final class ClusterDtos {
 				new AccessInfo(c.getFtpContainerId(), c.getFtpPort(), c.getFtpUser(), c.getFtpPassword()),
 				new AccessInfo(c.getWebDavContainerId(), c.getWebDavPort(), c.getWebDavUser(), c.getWebDavPassword()),
 				c.getOwnerId(),
-				ownerUsername
+				ownerUsername,
+				c.getCpuLimitPercent(),
+				c.getMemoryLimitMb(),
+				c.getDiskLimitGb(),
+				c.getNetworkLimitMbps()
 			);
 		}
 	}

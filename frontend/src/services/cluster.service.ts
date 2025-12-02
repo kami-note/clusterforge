@@ -26,7 +26,7 @@ export interface UserCredentials {
 }
 
 export interface UpdateClusterLimitsRequest {
-  cpuLimit?: number;
+  cpuLimitPercent?: number;
   memoryLimit?: number;
   diskLimit?: number;
   networkLimit?: number;
@@ -78,7 +78,7 @@ class ClusterService {
         userId: c.userId,
         ownerId: c.ownerId,
         ownerUsername: c.ownerUsername,
-        cpuLimit: c.cpuLimit,
+        cpuLimitPercent: c.cpuLimitPercent,
         memoryLimit: c.memoryLimit,
         diskLimit: c.diskLimit,
         ftp: c.ftp,
@@ -108,7 +108,7 @@ class ClusterService {
             userId: c.userId,
             ownerId: c.ownerId,
             ownerUsername: c.ownerUsername,
-            cpuLimit: c.cpuLimit,
+            cpuLimitPercent: c.cpuLimitPercent,
             memoryLimit: c.memoryLimit,
             diskLimit: c.diskLimit,
             ftp: c.ftp,
@@ -160,8 +160,8 @@ class ClusterService {
     // Novo backend usa ClusterUpdateParamsRequest com env, ports, volumes
     // Converter limites para env se necessário
     const env: Record<string, string> = {};
-    if (request.cpuLimit !== undefined) {
-      env.CPU_LIMIT = request.cpuLimit.toString();
+    if (request.cpuLimitPercent !== undefined) {
+      env.CPU_LIMIT_PERCENT = request.cpuLimitPercent.toString();
     }
     if (request.memoryLimit !== undefined) {
       env.MEMORY_LIMIT = request.memoryLimit.toString();

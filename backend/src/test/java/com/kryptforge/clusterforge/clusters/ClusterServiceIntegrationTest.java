@@ -144,6 +144,10 @@ class ClusterServiceIntegrationTest {
 			new ClusterService.ClusterParams(
 				Map.of("VAR1", "value1"),
 				null, // Portas serão alocadas automaticamente
+				null,
+				null,
+				null,
+				null,
 				null
 			)
 		);
@@ -184,6 +188,10 @@ class ClusterServiceIntegrationTest {
 			new ClusterService.ClusterParams(
 				Map.of("VAR1", "value1"),
 				hostPorts,
+				null,
+				null,
+				null,
+				null,
 				null
 			)
 		);
@@ -289,7 +297,7 @@ class ClusterServiceIntegrationTest {
 		ClusterInstance instance = clusterService.create(
 			testInstanceName,
 			"test-template",
-			new ClusterService.ClusterParams(null, null, null)
+			new ClusterService.ClusterParams(null, null, null, null, null, null, null)
 		);
 		UUID id = instance.getId();
 
