@@ -123,6 +123,6 @@ public final class ClusterConstants {
 	public static final String ERROR_USER_NOT_FOUND = "usuário não encontrado";
 	public static final String ERROR_ACCESS_DENIED = "acesso negado: cluster não pertence ao usuário";
 	public static final String ERROR_ONLY_ADMIN_CAN_CHANGE_OWNER = "apenas administradores podem alterar o proprietário de um cluster";
-	public static final String ERROR_NO_CONTAINER_ID = "Instância não possui containerId";
+	public static final String ERROR_NO_CONTAINER_ID = "Instância '%s' não possui containerId";
 }
 
