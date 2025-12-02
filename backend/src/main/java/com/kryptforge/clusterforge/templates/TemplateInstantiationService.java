@@ -65,7 +65,9 @@ public class TemplateInstantiationService {
 							  String instanceName,
 							  Map<String, String> overrideEnv,
 							  List<String> overridePorts,
-							  List<String> overrideBinds) throws IOException {
+							  List<String> overrideBinds,
+							  Integer cpuLimitPercent,
+							  Long memoryLimitMb) throws IOException {
 		requireText(templateName, "templateName");
 		requireText(instanceName, "instanceName");
 		// valida caracteres do nome (aproximação simples; Docker exige [a-zA-Z0-9][a-zA-Z0-9_.-]*)
@@ -214,7 +216,9 @@ public class TemplateInstantiationService {
 				spec.workingDir,
 				spec.stdinOpen,
 				spec.tty,
-				spec.restart
+				spec.restart,
+				cpuLimitPercent,
+				memoryLimitMb
 			);
 			dockerEngineService.startContainer(containerId);
 		} catch (Exception e) {

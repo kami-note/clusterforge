@@ -19,6 +19,11 @@ import { toast } from 'sonner';
 import { useClusters } from '@/hooks/useClusters';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { clusterService } from '@/services/cluster.service';
+import {
+  calculateCpuUsageRelativeToLimit,
+  calculateMemoryUsageRelativeToLimit,
+  calculateDiskUsageRelativeToLimit
+} from '@/utils/cluster.utils';
 
 interface UsageData {
   name: string;
@@ -107,21 +112,36 @@ export function ClientDashboard() {
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
 
       if (metrics) {
-        // CPU: média das porcentagens de uso
-        if (metrics.cpuUsagePercent !== undefined) {
-          totalCpuPercent += Math.max(0, Math.min(100, metrics.cpuUsagePercent));
+        // CPU: calcular porcentagem relativa ao limite do cluster
+        const cpuRelative = calculateCpuUsageRelativeToLimit(
+          metrics.cpuUsagePercent,
+          cluster.cpuLimitPercent
+        );
+        if (cpuRelative !== undefined) {
+          totalCpuPercent += Math.max(0, Math.min(100, cpuRelative));
           validCpuCount++;
         }
 
-        // Memória: média das porcentagens de uso
-        if (metrics.memoryUsagePercent !== undefined) {
-          totalMemoryPercent += Math.max(0, Math.min(100, metrics.memoryUsagePercent));
+        // Memória: calcular porcentagem relativa ao limite do cluster
+        // cluster.memoryLimit está em MB (vem do backend como memoryLimitMb)
+        const memoryRelative = calculateMemoryUsageRelativeToLimit(
+          metrics.memoryUsagePercent,
+          metrics.memoryUsageMb,
+          cluster.memoryLimit || metrics.memoryLimitMb
+        );
+        if (memoryRelative !== undefined) {
+          totalMemoryPercent += Math.max(0, Math.min(100, memoryRelative));
           validMemoryCount++;
         }
 
-        // Disco: média das porcentagens de uso
-        if (metrics.diskUsagePercent !== undefined) {
-          totalDiskPercent += Math.max(0, Math.min(100, metrics.diskUsagePercent));
+        // Disco: calcular porcentagem relativa ao limite do cluster
+        const diskRelative = calculateDiskUsageRelativeToLimit(
+          metrics.diskUsagePercent,
+          metrics.diskUsageMb,
+          cluster.diskLimit ? cluster.diskLimit * 1024 : metrics.diskLimitMb
+        );
+        if (diskRelative !== undefined) {
+          totalDiskPercent += Math.max(0, Math.min(100, diskRelative));
           validDiskCount++;
         }
 

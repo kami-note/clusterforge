@@ -1,10 +1,17 @@
 package com.kryptforge.clusterforge.monitoring;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -20,32 +27,70 @@ import jakarta.annotation.PreDestroy;
 
 /**
  * Serviço para armazenar métricas dos containers no banco de dados.
- * Usa processamento assíncrono para não bloquear o stream SSE.
+ * Usa processamento assíncrono com buffer para batch inserts, reduzindo
+ * o número de transações e melhorando a performance.
  */
 @Service
 public class MetricStorageService {
 
 	private static final Logger logger = LoggerFactory.getLogger(MetricStorageService.class);
+	
+	// Tamanho do buffer para batch inserts (flush quando atingir este tamanho)
+	private static final int BATCH_SIZE = 50;
+	// Intervalo máximo para flush do buffer (em milissegundos)
+	private static final long FLUSH_INTERVAL_MS = 5000; // 5 segundos
+	// Capacidade máxima do buffer (evita memory leak)
+	private static final int MAX_BUFFER_SIZE = 1000;
 
 	private final ClusterMetricRepository metricRepository;
 	private final ExecutorService executor;
 	private final TransactionTemplate transactionTemplate;
+	
+	// Buffer thread-safe para acumular métricas antes de fazer batch insert
+	// Limite de capacidade para evitar memory leak
+	private final BlockingQueue<MetricEntry> metricBuffer = new LinkedBlockingQueue<>(MAX_BUFFER_SIZE);
+	private final ScheduledExecutorService flushScheduler;
 
 	public MetricStorageService(ClusterMetricRepository metricRepository, PlatformTransactionManager transactionManager) {
 		this.metricRepository = metricRepository;
-		// Thread pool para processamento assíncrono de métricas
-		this.executor = Executors.newFixedThreadPool(3, r -> {
+		// Thread pool reduzido para processamento assíncrono (batch inserts são mais eficientes)
+		this.executor = Executors.newFixedThreadPool(2, r -> {
 			Thread t = new Thread(r, "metric-storage");
 			t.setDaemon(true);
 			return t;
 		});
 		// TransactionTemplate para gerenciar transações em threads assíncronas
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
+		
+		// Scheduler para flush periódico do buffer
+		this.flushScheduler = Executors.newScheduledThreadPool(1, r -> {
+			Thread t = new Thread(r, "metric-flush");
+			t.setDaemon(true);
+			return t;
+		});
+		
+		// Iniciar flush periódico
+		this.flushScheduler.scheduleWithFixedDelay(this::flushBuffer, FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
+	}
+	
+	/**
+	 * Entrada no buffer de métricas.
+	 */
+	private static class MetricEntry {
+		final UUID clusterId;
+		final String containerId;
+		final ContainerStats stats;
+		
+		MetricEntry(UUID clusterId, String containerId, ContainerStats stats) {
+			this.clusterId = clusterId;
+			this.containerId = containerId;
+			this.stats = stats;
+		}
 	}
 
 	/**
-	 * Armazena uma métrica de forma assíncrona.
-	 * Usa TransactionTemplate para garantir transações funcionem em threads assíncronas.
+	 * Armazena uma métrica de forma assíncrona usando buffer.
+	 * Métricas são acumuladas em buffer e persistidas em batch para melhor performance.
 	 * 
 	 * @param clusterId ID do cluster
 	 * @param containerId ID do container
@@ -56,16 +101,69 @@ public class MetricStorageService {
 			return;
 		}
 
-		CompletableFuture.runAsync(() -> {
-			try {
-				// Usar TransactionTemplate para garantir transação em thread assíncrona
-				transactionTemplate.executeWithoutResult(status -> {
-					storeMetricInternal(clusterId, containerId, stats);
-				});
-			} catch (Exception e) {
-				logger.error("Erro ao armazenar métrica do cluster {}: {}", clusterId, e.getMessage(), e);
+		// Adicionar ao buffer (não bloqueante)
+		boolean added = metricBuffer.offer(new MetricEntry(clusterId, containerId, stats));
+		if (!added) {
+			logger.warn("Buffer de métricas está cheio ({}), descartando métrica do cluster {}", MAX_BUFFER_SIZE, clusterId);
+			return;
+		}
+		
+		// Se o buffer atingir o tamanho do batch, fazer flush imediato
+		// O flushBuffer() já está sincronizado, então múltiplas chamadas são seguras
+		if (metricBuffer.size() >= BATCH_SIZE) {
+			CompletableFuture.runAsync(this::flushBuffer, executor);
+		}
+	}
+	
+	/**
+	 * Faz flush do buffer de métricas, persistindo todas as métricas acumuladas em batch.
+	 * Thread-safe: pode ser chamado por múltiplas threads, mas apenas uma execução ocorre por vez.
+	 */
+	private void flushBuffer() {
+		// Verificação rápida antes de sincronizar
+		if (metricBuffer.isEmpty()) {
+			return;
+		}
+		
+		// Sincronizar para evitar flush duplicado simultâneo
+		synchronized (this) {
+			if (metricBuffer.isEmpty()) {
+				return;
 			}
-		}, executor);
+			
+			List<MetricEntry> entries = new ArrayList<>();
+			// Drenar até BATCH_SIZE entradas do buffer (operação atômica)
+			metricBuffer.drainTo(entries, BATCH_SIZE);
+			
+			if (entries.isEmpty()) {
+				return;
+			}
+			
+			// Agrupar por (clusterId, containerId) para fazer batch inserts otimizados
+			Map<Map.Entry<UUID, String>, List<ContainerStats>> grouped = new HashMap<>();
+			for (MetricEntry entry : entries) {
+				Map.Entry<UUID, String> key = Map.entry(entry.clusterId, entry.containerId);
+				grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(entry.stats);
+			}
+			
+			// Processar todos os grupos em uma única transação para evitar esgotamento do pool de conexões
+			// Isso é mais eficiente e evita criar múltiplas transações concorrentes
+			CompletableFuture.runAsync(() -> {
+				try {
+					transactionTemplate.executeWithoutResult(status -> {
+						// Processar todos os grupos dentro da mesma transação
+						for (Map.Entry<Map.Entry<UUID, String>, List<ContainerStats>> group : grouped.entrySet()) {
+							UUID clusterId = group.getKey().getKey();
+							String containerId = group.getKey().getValue();
+							List<ContainerStats> statsList = group.getValue();
+							storeMetricsBatchInternal(clusterId, containerId, statsList);
+						}
+					});
+				} catch (Exception e) {
+					logger.error("Erro ao armazenar métricas em batch: {}", e.getMessage(), e);
+				}
+			}, executor);
+		}
 	}
 
 	/**
@@ -125,20 +223,19 @@ public class MetricStorageService {
 	}
 
 	/**
-	 * Armazena múltiplas métricas em batch para melhor performance.
+	 * Implementação interna para armazenar múltiplas métricas em batch.
 	 * 
 	 * @param clusterId ID do cluster
 	 * @param containerId ID do container
 	 * @param statsList Lista de estatísticas
 	 */
-	@Transactional
-	public void storeMetricsBatch(UUID clusterId, String containerId, java.util.List<ContainerStats> statsList) {
+	private void storeMetricsBatchInternal(UUID clusterId, String containerId, List<ContainerStats> statsList) {
 		if (clusterId == null || containerId == null || statsList == null || statsList.isEmpty()) {
 			return;
 		}
 
 		try {
-			java.util.List<ClusterMetric> metrics = statsList.stream()
+			List<ClusterMetric> metrics = statsList.stream()
 				.map(stats -> {
 					Instant timestamp;
 					try {
@@ -170,6 +267,18 @@ public class MetricStorageService {
 			throw e;
 		}
 	}
+	
+	/**
+	 * Armazena múltiplas métricas em batch para melhor performance.
+	 * 
+	 * @param clusterId ID do cluster
+	 * @param containerId ID do container
+	 * @param statsList Lista de estatísticas
+	 */
+	@Transactional
+	public void storeMetricsBatch(UUID clusterId, String containerId, java.util.List<ContainerStats> statsList) {
+		storeMetricsBatchInternal(clusterId, containerId, statsList);
+	}
 
 	/**
 	 * Limpa métricas antigas de um cluster (retenção de dados).
@@ -195,11 +304,53 @@ public class MetricStorageService {
 	}
 
 	/**
-	 * Encerra o ExecutorService quando o bean for destruído.
+	 * Encerra os ExecutorServices quando o bean for destruído.
 	 * Garante que todas as tarefas pendentes sejam concluídas antes do encerramento da aplicação.
 	 */
 	@PreDestroy
 	public void shutdown() {
+		logger.info("Iniciando shutdown do MetricStorageService...");
+		
+		// Parar o scheduler primeiro para evitar novos flushes agendados
+		if (flushScheduler != null && !flushScheduler.isShutdown()) {
+			logger.info("Encerrando ScheduledExecutorService de flush de métricas...");
+			flushScheduler.shutdown();
+			try {
+				if (!flushScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+					flushScheduler.shutdownNow();
+					if (!flushScheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+						logger.warn("ScheduledExecutorService não terminou após shutdownNow");
+					}
+				}
+			} catch (InterruptedException e) {
+				flushScheduler.shutdownNow();
+				Thread.currentThread().interrupt();
+			}
+		}
+		
+		// Fazer flush final do buffer antes de encerrar o executor
+		logger.info("Fazendo flush final do buffer de métricas ({} entradas restantes)...", metricBuffer.size());
+		int flushCount = 0;
+		while (!metricBuffer.isEmpty() && flushCount < 10) { // Limite de 10 flushes para evitar loop infinito
+			flushBuffer();
+			flushCount++;
+			
+			// Aguardar um pouco entre flushes para permitir processamento
+			if (!metricBuffer.isEmpty()) {
+				try {
+					Thread.sleep(500);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					break;
+				}
+			}
+		}
+		
+		if (!metricBuffer.isEmpty()) {
+			logger.warn("Buffer ainda contém {} métricas após flush final. Algumas métricas podem ser perdidas.", metricBuffer.size());
+		}
+		
+		// Encerrar executor e aguardar conclusão de todas as tarefas
 		if (executor != null && !executor.isShutdown()) {
 			logger.info("Encerrando ExecutorService de armazenamento de métricas...");
 			executor.shutdown();
@@ -221,6 +372,8 @@ public class MetricStorageService {
 				Thread.currentThread().interrupt();
 			}
 		}
+		
+		logger.info("Shutdown do MetricStorageService concluído");
 	}
 }
 

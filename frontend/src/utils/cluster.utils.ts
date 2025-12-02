@@ -97,4 +97,129 @@ export function hasClusterAlerts(metrics: {
   );
 }
 
+/**
+ * Calcula a porcentagem de uso de CPU relativa ao limite do cluster.
+ * Se o limite é 50% da máquina e o uso é 50% da máquina, retorna 100% (100% do limite).
+ * 
+ * @param cpuUsagePercent Percentual de uso de CPU do total da máquina (0-100%+)
+ * @param cpuLimitPercent Limite de CPU do cluster em percentual do total da máquina (1-100)
+ * @returns Percentual de uso relativo ao limite do cluster (0-100%+)
+ */
+export function calculateCpuUsageRelativeToLimit(
+  cpuUsagePercent: number | undefined | null,
+  cpuLimitPercent: number | undefined | null
+): number | undefined {
+  if (cpuUsagePercent === null || cpuUsagePercent === undefined || isNaN(cpuUsagePercent)) {
+    return undefined;
+  }
+  
+  if (cpuLimitPercent === null || cpuLimitPercent === undefined || cpuLimitPercent <= 0) {
+    // Se não há limite definido, retorna o uso absoluto (limitado a 100%)
+    return Math.min(100, Math.max(0, cpuUsagePercent));
+  }
+  
+  // Calcula: (uso absoluto / limite) * 100
+  // Exemplo: uso = 50%, limite = 50% -> (50/50) * 100 = 100%
+  // Exemplo: uso = 25%, limite = 50% -> (25/50) * 100 = 50%
+  const relativePercent = (cpuUsagePercent / cpuLimitPercent) * 100;
+  return Math.max(0, relativePercent);
+}
+
+/**
+ * Calcula a porcentagem de uso de memória relativa ao limite do cluster.
+ * O backend já calcula como percentual do limite, mas esta função garante consistência.
+ * 
+ * @param memoryUsagePercent Percentual de uso de memória do limite do container (0-100)
+ * @param memoryUsageMb Uso de memória em MB
+ * @param memoryLimitMb Limite de memória do cluster em MB
+ * @returns Percentual de uso relativo ao limite do cluster (0-100%+)
+ */
+export function calculateMemoryUsageRelativeToLimit(
+  memoryUsagePercent: number | undefined | null,
+  memoryUsageMb: number | undefined | null,
+  memoryLimitMb: number | undefined | null
+): number | undefined {
+  // Se temos uso e limite em MB, calcular diretamente
+  if (memoryUsageMb !== null && memoryUsageMb !== undefined && 
+      memoryLimitMb !== null && memoryLimitMb !== undefined && 
+      memoryLimitMb > 0) {
+    const calculated = (memoryUsageMb / memoryLimitMb) * 100;
+    return Math.max(0, calculated);
+  }
+  
+  // Caso contrário, usar o percentual já calculado pelo backend
+  if (memoryUsagePercent !== null && memoryUsagePercent !== undefined && !isNaN(memoryUsagePercent)) {
+    return Math.max(0, memoryUsagePercent);
+  }
+  
+  return undefined;
+}
+
+/**
+ * Calcula a porcentagem de uso de disco relativa ao limite do cluster.
+ * Similar à memória, o backend já calcula como percentual do limite.
+ * 
+ * @param diskUsagePercent Percentual de uso de disco do limite do container (0-100)
+ * @param diskUsageMb Uso de disco em MB
+ * @param diskLimitMb Limite de disco do cluster em MB
+ * @returns Percentual de uso relativo ao limite do cluster (0-100%+)
+ */
+export function calculateDiskUsageRelativeToLimit(
+  diskUsagePercent: number | undefined | null,
+  diskUsageMb: number | undefined | null,
+  diskLimitMb: number | undefined | null
+): number | undefined {
+  // Se temos uso e limite em MB, calcular diretamente
+  if (diskUsageMb !== null && diskUsageMb !== undefined && 
+      diskLimitMb !== null && diskLimitMb !== undefined && 
+      diskLimitMb > 0) {
+    const calculated = (diskUsageMb / diskLimitMb) * 100;
+    return Math.max(0, calculated);
+  }
+  
+  // Caso contrário, usar o percentual já calculado pelo backend
+  if (diskUsagePercent !== null && diskUsagePercent !== undefined && !isNaN(diskUsagePercent)) {
+    return Math.max(0, diskUsagePercent);
+  }
+  
+  return undefined;
+}
+
+/**
+ * Calcula a porcentagem de uso de rede relativa ao limite do cluster.
+ * 
+ * @param networkRxBytes Bytes recebidos
+ * @param networkTxBytes Bytes enviados
+ * @param networkLimitMbps Limite de rede em Mbps
+ * @returns Percentual de uso relativo ao limite do cluster (0-100%+)
+ */
+export function calculateNetworkUsageRelativeToLimit(
+  networkRxBytes: number | undefined | null,
+  networkTxBytes: number | undefined | null,
+  networkLimitMbps: number | undefined | null
+): number | undefined {
+  if ((networkRxBytes === null || networkRxBytes === undefined) &&
+      (networkTxBytes === null || networkTxBytes === undefined)) {
+    return undefined;
+  }
+  
+  const totalBytes = (networkRxBytes || 0) + (networkTxBytes || 0);
+  
+  if (networkLimitMbps === null || networkLimitMbps === undefined || networkLimitMbps <= 0) {
+    return undefined;
+  }
+  
+  // Converter limite de Mbps para bytes por segundo (assumindo intervalo de 1 segundo)
+  // 1 Mbps = 1,000,000 bits/s = 125,000 bytes/s
+  const limitBytesPerSecond = networkLimitMbps * 125000;
+  
+  if (limitBytesPerSecond <= 0) {
+    return undefined;
+  }
+  
+  // Calcular percentual (assumindo que totalBytes é por segundo)
+  const percent = (totalBytes / limitBytesPerSecond) * 100;
+  return Math.max(0, percent);
+}
+
 

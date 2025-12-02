@@ -146,6 +146,8 @@ class TemplateControllerIntegrationTest {
 			"", // name vazio
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
@@ -160,6 +162,8 @@ class TemplateControllerIntegrationTest {
 	void instantiate_returns403WhenTemplateNotFound() throws Exception {
 		TemplateInstantiateRequest request = new TemplateInstantiateRequest(
 			testContainerName,
+			null,
+			null,
 			null,
 			null,
 			null
@@ -180,6 +184,8 @@ class TemplateControllerIntegrationTest {
 
 		TemplateInstantiateRequest request = new TemplateInstantiateRequest(
 			testContainerName,
+			null,
+			null,
 			null,
 			null,
 			null
@@ -209,7 +215,9 @@ class TemplateControllerIntegrationTest {
 			testContainerName,
 			Map.of("VAR2", "override"),
 			List.of("9090:80"),
-			List.of("/host:/container")
+			List.of("/host:/container"),
+			null,
+			null
 		);
 
 		mockMvc.perform(post("/api/templates/test-template/instantiate")

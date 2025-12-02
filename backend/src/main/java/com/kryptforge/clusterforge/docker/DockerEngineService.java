@@ -21,6 +21,27 @@ public interface DockerEngineService {
 
 	// Containers
 	List<Container> listContainers(boolean showAll);
+	
+	/**
+	 * Cria um container Docker com configurações opcionais de limites de recursos.
+	 * 
+	 * @param image nome da imagem Docker
+	 * @param command comando a ser executado no container (opcional)
+	 * @param environment variáveis de ambiente (opcional)
+	 * @param portBindings mapeamento de portas no formato "hostPort:containerPort" (opcional)
+	 * @param bindMounts montagens de volumes no formato "hostPath:containerPath" (opcional)
+	 * @param name nome do container (opcional)
+	 * @param workingDir diretório de trabalho (opcional)
+	 * @param stdinOpen se stdin deve estar aberto (opcional)
+	 * @param tty se deve alocar um pseudo-TTY (opcional)
+	 * @param restart política de restart (opcional: "no", "always", "on-failure", "unless-stopped")
+	 * @param cpuLimitPercent limite de CPU em percentual (1-100). Se null ou <= 0, não aplica limite.
+	 *                       Valores > 100 são rejeitados.
+	 * @param memoryLimitMb limite de memória em megabytes (1-32768). Se null ou <= 0, não aplica limite.
+	 *                      Valores > 32768 (32 GB) são rejeitados.
+	 * @return ID do container criado
+	 * @throws IllegalArgumentException se os limites de recursos forem inválidos
+	 */
 	String createContainer(String image,
 						   List<String> command,
 						   Map<String, String> environment,
@@ -30,7 +51,9 @@ public interface DockerEngineService {
 						   String workingDir,
 						   Boolean stdinOpen,
 						   Boolean tty,
-						   String restart);
+						   String restart,
+						   Integer cpuLimitPercent,
+						   Long memoryLimitMb);
 	void startContainer(String containerId);
 	void stopContainer(String containerId, int timeoutSeconds);
 	void removeContainer(String containerId, boolean force, boolean removeVolumes);

@@ -33,7 +33,12 @@ import { clusterService } from '@/services/cluster.service';
 import { toast } from 'sonner';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 import { TIMEOUTS } from '@/constants';
-import { mapClusterStatus } from '@/utils/cluster.utils';
+import {
+  mapClusterStatus,
+  calculateCpuUsageRelativeToLimit,
+  calculateMemoryUsageRelativeToLimit,
+  calculateDiskUsageRelativeToLimit
+} from '@/utils/cluster.utils';
 
 interface Cluster {
   id: string;
@@ -260,23 +265,45 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         status = mappedStatus as 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
       }
       
-      // Usar métricas em tempo real se disponíveis, senão usar valores da API
-      // IMPORTANTE: cpuUsagePercent já vem normalizado (0-100%) do backend, não precisa recalcular
-      const cpuUsagePercent = realtimeMetrics?.cpuUsagePercent;
-      const cpuUsage = cpuUsagePercent !== undefined ? cpuUsagePercent : (cluster.cpu || 0);
-      const cpuLimit = 100; // Sempre 100% pois cpuUsagePercent já é normalizado
+      // Calcular porcentagens relativas ao limite do cluster
+      // cluster.cpuLimitPercent está disponível em ClusterListItem
+      const cpuUsageRelativeToLimit = calculateCpuUsageRelativeToLimit(
+        realtimeMetrics?.cpuUsagePercent,
+        cluster.cpuLimitPercent
+      );
       
-      const memoryUsageMb = realtimeMetrics?.memoryUsageMb || cluster.memory || 0;
-      const memoryLimitMb = realtimeMetrics?.memoryLimitMb || cluster.memory || 4096; // Default 4GB
+      // cluster.memoryLimit está em MB na interface ClusterListItem
+      const memoryUsageRelativeToLimit = calculateMemoryUsageRelativeToLimit(
+        realtimeMetrics?.memoryUsagePercent,
+        realtimeMetrics?.memoryUsageMb,
+        cluster.memoryLimit ? cluster.memoryLimit : realtimeMetrics?.memoryLimitMb
+      );
+      
+      // cluster.diskLimit está em GB na interface ClusterListItem, converter para MB
+      const diskUsageRelativeToLimit = calculateDiskUsageRelativeToLimit(
+        realtimeMetrics?.diskUsagePercent,
+        realtimeMetrics?.diskUsageMb,
+        cluster.diskLimit ? cluster.diskLimit * 1024 : realtimeMetrics?.diskLimitMb
+      );
+      
+      // Usar métricas relativas ao limite para exibição
+      const cpuUsagePercent = cpuUsageRelativeToLimit;
+      const cpuUsage = cpuUsagePercent !== undefined ? cpuUsagePercent : (cluster.cpu || 0);
+      const cpuLimit = 100; // Sempre 100% pois agora é relativo ao limite do cluster
+      
+      const memoryUsageMb = realtimeMetrics?.memoryUsageMb || 0;
+      // cluster.memoryLimit está em MB na interface ClusterListItem
+      const memoryLimitMb = cluster.memoryLimit || realtimeMetrics?.memoryLimitMb || 4096;
       
       const diskUsageMb = realtimeMetrics?.diskUsageMb || 0;
-      const diskLimitMb = realtimeMetrics?.diskLimitMb || (cluster.storage ? cluster.storage * 1024 : 20480); // Default 20GB
+      // cluster.diskLimit está em GB na interface ClusterListItem, converter para MB
+      const diskLimitMb = cluster.diskLimit ? cluster.diskLimit * 1024 : (realtimeMetrics?.diskLimitMb || 20480);
       
-      // Verificar se há alertas baseado nas métricas (sem usar healthState)
+      // Verificar se há alertas baseado nas métricas relativas ao limite (sem usar healthState)
       const hasAlert = realtimeMetrics ? (
-        (realtimeMetrics.cpuUsagePercent && realtimeMetrics.cpuUsagePercent > 90) ||
-        (realtimeMetrics.memoryUsagePercent && realtimeMetrics.memoryUsagePercent > 90) ||
-        (realtimeMetrics.diskUsagePercent && realtimeMetrics.diskUsagePercent > 90)
+        (cpuUsageRelativeToLimit !== undefined && cpuUsageRelativeToLimit > 90) ||
+        (memoryUsageRelativeToLimit !== undefined && memoryUsageRelativeToLimit > 90) ||
+        (diskUsageRelativeToLimit !== undefined && diskUsageRelativeToLimit > 90)
       ) : false;
       
       return {

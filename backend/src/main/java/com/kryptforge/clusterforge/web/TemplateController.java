@@ -101,7 +101,9 @@ public class TemplateController {
 				request.name(),
 				request.env(),
 				request.ports(),
-				request.binds()
+				request.binds(),
+				request.cpuLimitPercent(),
+				request.memoryLimitMb()
 			);
 
 			// extrai portas do host das portas mapeadas (formato "hostPort:containerPort")
@@ -127,8 +129,8 @@ public class TemplateController {
 					request.env(),
 					hostPorts,
 					request.binds(),
-					null,
-					null,
+					request.cpuLimitPercent(),
+					request.memoryLimitMb(),
 					null,
 					null
 				)

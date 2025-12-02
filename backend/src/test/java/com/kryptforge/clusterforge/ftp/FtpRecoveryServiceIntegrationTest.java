@@ -73,6 +73,8 @@ class FtpRecoveryServiceIntegrationTest {
 			null,
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 		dockerEngineService.startContainer(testContainerId);

@@ -387,6 +387,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     // O frontend não deve especificar portas - o PortManager aloca automaticamente
     const request: TemplateInstantiateRequest = {
       name: clusterName,
+      // Limites de recursos: CPU em percentual (1-100), RAM em MB (convertido de GB)
+      cpuLimitPercent: cpuAllocation[0],
+      memoryLimitMb: ramAllocation[0] * 1024, // Converte GB para MB
       // ports removido - PortManager aloca portas automaticamente do template
       // env e binds removidos por enquanto
     };

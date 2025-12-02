@@ -111,6 +111,8 @@ class TemplateInstantiationServiceIntegrationTest {
 			testContainerName,
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
@@ -143,6 +145,8 @@ class TemplateInstantiationServiceIntegrationTest {
 			testContainerName,
 			overrides,
 			null,
+			null,
+			null,
 			null
 		);
 
@@ -174,6 +178,8 @@ class TemplateInstantiationServiceIntegrationTest {
 			testContainerName,
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
@@ -189,7 +195,7 @@ class TemplateInstantiationServiceIntegrationTest {
 	@DisplayName("Deve falhar quando template não existe")
 	void instantiate_throwsWhenTemplateNotFound() {
 		assertThrows(IOException.class, () -> {
-			templateInstantiationService.instantiate("not-exists", testContainerName, null, null, null);
+			templateInstantiationService.instantiate("not-exists", testContainerName, null, null, null, null, null);
 		});
 	}
 
@@ -204,7 +210,7 @@ class TemplateInstantiationServiceIntegrationTest {
 			"    image: alpine:latest\n");
 
 		assertThrows(IllegalArgumentException.class, () -> {
-			templateInstantiationService.instantiate("test", "-invalid-name", null, null, null);
+			templateInstantiationService.instantiate("test", "-invalid-name", null, null, null, null, null);
 		});
 	}
 
@@ -219,7 +225,7 @@ class TemplateInstantiationServiceIntegrationTest {
 			"    # sem image\n");
 
 		assertThrows(IllegalStateException.class, () -> {
-			templateInstantiationService.instantiate("no-image", testContainerName, null, null, null);
+			templateInstantiationService.instantiate("no-image", testContainerName, null, null, null, null, null);
 		});
 	}
 }

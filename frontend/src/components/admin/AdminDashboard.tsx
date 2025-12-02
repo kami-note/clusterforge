@@ -23,7 +23,11 @@ import {
 import { clusterService } from '@/services/cluster.service';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { ClusterListItem } from '@/types';
-import { mapClusterStatus } from '@/utils/cluster.utils';
+import {
+  mapClusterStatus,
+  calculateCpuUsageRelativeToLimit,
+  calculateMemoryUsageRelativeToLimit
+} from '@/utils/cluster.utils';
 
 const AdminDashboard: React.FC = () => {
   const [clusters, setClusters] = useState<ClusterListItem[]>([]);
@@ -83,11 +87,24 @@ const AdminDashboard: React.FC = () => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
       if (metrics) {
-        if (metrics.cpuUsagePercent !== undefined) {
-          totalCpu += Math.max(0, Math.min(100, metrics.cpuUsagePercent));
+        // CPU: calcular porcentagem relativa ao limite do cluster
+        const cpuRelative = calculateCpuUsageRelativeToLimit(
+          metrics.cpuUsagePercent,
+          cluster.cpuLimitPercent
+        );
+        if (cpuRelative !== undefined) {
+          totalCpu += Math.max(0, Math.min(100, cpuRelative));
         }
-        if (metrics.memoryUsagePercent !== undefined) {
-          totalMemory += Math.max(0, Math.min(100, metrics.memoryUsagePercent));
+        
+        // Memória: calcular porcentagem relativa ao limite do cluster
+        // cluster.memoryLimit está em MB (vem do backend como memoryLimitMb)
+        const memoryRelative = calculateMemoryUsageRelativeToLimit(
+          metrics.memoryUsagePercent,
+          metrics.memoryUsageMb,
+          cluster.memoryLimit || metrics.memoryLimitMb
+        );
+        if (memoryRelative !== undefined) {
+          totalMemory += Math.max(0, Math.min(100, memoryRelative));
         }
         validCount++;
       }
@@ -116,10 +133,22 @@ const AdminDashboard: React.FC = () => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
       
+      // Calcular porcentagens relativas ao limite do cluster
+      const cpuRelative = calculateCpuUsageRelativeToLimit(
+        metrics?.cpuUsagePercent,
+        cluster.cpuLimitPercent
+      );
+      
+      const memoryRelative = calculateMemoryUsageRelativeToLimit(
+        metrics?.memoryUsagePercent,
+        metrics?.memoryUsageMb,
+        cluster.memoryLimit ? cluster.memoryLimit * 1024 : metrics?.memoryLimitMb
+      );
+      
       return {
         cluster: cluster.name || `Cluster ${index + 1}`,
-        cpu: metrics?.cpuUsagePercent ? Math.round(metrics.cpuUsagePercent) : 0,
-        memory: metrics?.memoryUsagePercent ? Math.round(metrics.memoryUsagePercent) : 0,
+        cpu: cpuRelative !== undefined ? Math.round(cpuRelative) : 0,
+        memory: memoryRelative !== undefined ? Math.round(memoryRelative) : 0,
       };
     });
   }, [clusters, realtimeMetrics]);

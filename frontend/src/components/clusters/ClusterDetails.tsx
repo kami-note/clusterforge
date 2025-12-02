@@ -38,6 +38,12 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Trash2 } from 'lucide-react';
+import {
+  calculateCpuUsageRelativeToLimit,
+  calculateMemoryUsageRelativeToLimit,
+  calculateDiskUsageRelativeToLimit,
+  calculateNetworkUsageRelativeToLimit
+} from '@/utils/cluster.utils';
 
 interface ClusterDetailsProps {
   clusterId: string;
@@ -604,23 +610,52 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       });
     }
     
+    // Calcular porcentagens relativas ao limite do cluster
+    // CPU: se limite é 50% da máquina e uso é 50% da máquina, então é 100% do limite
+    // cluster.cpu já é cpuLimitPercent (em percentual 1-100)
+    const cpuUsageRelativeToLimit = calculateCpuUsageRelativeToLimit(
+      sseMetrics.cpuUsagePercent,
+      cluster?.cpu // cluster.cpu já é cpuLimitPercent
+    );
+    
+    // Memory: já vem como percentual do limite, mas garantir consistência
+    // cluster.memory é o limite em GB, converter para MB
+    const memoryUsageRelativeToLimit = calculateMemoryUsageRelativeToLimit(
+      sseMetrics.memoryUsagePercent,
+      sseMetrics.memoryUsageMb,
+      cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb // Converter GB para MB
+    );
+    
+    // Disk: similar à memória
+    // cluster.storage é o limite em GB, converter para MB
+    const diskUsageRelativeToLimit = calculateDiskUsageRelativeToLimit(
+      sseMetrics.diskUsagePercent,
+      sseMetrics.diskUsageMb,
+      cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb // Converter GB para MB
+    );
+    
+    // Network: calcular relativo ao limite (não temos networkLimit na interface Cluster)
+    const networkUsageRelativeToLimit = calculateNetworkUsageRelativeToLimit(
+      sseMetrics.networkRxBytes,
+      sseMetrics.networkTxBytes,
+      sseMetrics.networkLimitMbps
+    );
+    
     // Usar TODOS os campos disponíveis do SSE (ContainerStats)
     const metrics: ClusterMetrics = {
-      // CPU - usar diretamente do SSE
-      cpuUsagePercent: sseMetrics.cpuUsagePercent ?? undefined,
+      // CPU - usar porcentagem relativa ao limite do cluster
+      cpuUsagePercent: cpuUsageRelativeToLimit,
       cpuLimitCores: sseMetrics.cpuLimitCores ?? undefined,
       
-      // Memory - usar diretamente do SSE
-      memoryUsagePercent: sseMetrics.memoryUsagePercent ?? undefined,
+      // Memory - usar porcentagem relativa ao limite do cluster
+      memoryUsagePercent: memoryUsageRelativeToLimit,
       memoryUsageMb: sseMetrics.memoryUsageMb ?? undefined,
-      memoryLimitMb: sseMetrics.memoryLimitMb ?? undefined,
+      memoryLimitMb: cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb, // Converter GB para MB
       
-      // Disk - usar diretamente do SSE
-      diskUsagePercent: sseMetrics.diskUsagePercent !== null && sseMetrics.diskUsagePercent !== undefined 
-        ? sseMetrics.diskUsagePercent 
-        : undefined,
+      // Disk - usar porcentagem relativa ao limite do cluster
+      diskUsagePercent: diskUsageRelativeToLimit,
       diskUsageMb: sseMetrics.diskUsageMb ?? undefined,
-      diskLimitMb: sseMetrics.diskLimitMb ?? undefined,
+      diskLimitMb: cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb, // Converter GB para MB
       diskReadBytes: sseMetrics.diskReadBytes ?? undefined,
       diskWriteBytes: sseMetrics.diskWriteBytes ?? undefined,
       

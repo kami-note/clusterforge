@@ -116,6 +116,8 @@ class TemplateInstantiationWithFtpIntegrationTest {
 			testContainerName,
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
@@ -160,6 +162,8 @@ class TemplateInstantiationWithFtpIntegrationTest {
 			testContainerName,
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
@@ -188,6 +192,8 @@ class TemplateInstantiationWithFtpIntegrationTest {
 		InstantiationResult result = templateInstantiationService.instantiate(
 			"ftp-fail-test",
 			testContainerName,
+			null,
+			null,
 			null,
 			null,
 			null

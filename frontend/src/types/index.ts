@@ -257,6 +257,8 @@ export interface TemplateInstantiateRequest {
   env?: Record<string, string>;
   ports?: string[];
   binds?: string[];
+  cpuLimitPercent?: number;
+  memoryLimitMb?: number;
 }
 
 // Response da instanciação de template (novo backend)

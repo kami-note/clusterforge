@@ -117,7 +117,9 @@ class TemplateControllerTest {
 			"my-instance",
 			Map.of("VAR", "value"),
 			List.of("8080:80"),
-			List.of("/host:/container")
+			List.of("/host:/container"),
+			null,
+			null
 		);
 
 		// simula container não existente
@@ -125,6 +127,8 @@ class TemplateControllerTest {
 		when(instantiationService.instantiate(
 			eq("template1"),
 			eq("my-instance"),
+			any(),
+			any(),
 			any(),
 			any(),
 			any()
@@ -151,6 +155,8 @@ class TemplateControllerTest {
 			"existing-name",
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
@@ -162,7 +168,7 @@ class TemplateControllerTest {
 		ResponseEntity<TemplateInstantiateResponse> response = controller.instantiate("template1", request);
 
 		assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
-		verify(instantiationService, never()).instantiate(anyString(), anyString(), any(), any(), any());
+		verify(instantiationService, never()).instantiate(anyString(), anyString(), any(), any(), any(), any(), any());
 	}
 
 	@Test
@@ -171,11 +177,13 @@ class TemplateControllerTest {
 			"my-instance",
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
 		when(dockerEngineService.listContainers(true)).thenReturn(new ArrayList<>());
-		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any()))
+		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any(), any(), any()))
 			.thenThrow(new IllegalArgumentException("invalid name"));
 
 		ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> {
@@ -191,11 +199,13 @@ class TemplateControllerTest {
 			"my-instance",
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
 		when(dockerEngineService.listContainers(true)).thenReturn(new ArrayList<>());
-		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any()))
+		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any(), any(), any()))
 			.thenThrow(new NoSuchFileException("template not found"));
 
 		ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> {
@@ -211,11 +221,13 @@ class TemplateControllerTest {
 			"my-instance",
 			null,
 			null,
+			null,
+			null,
 			null
 		);
 
 		when(dockerEngineService.listContainers(true)).thenReturn(new ArrayList<>());
-		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any()))
+		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any(), any(), any()))
 			.thenThrow(new IOException("IO error"));
 
 		ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> {
@@ -231,11 +243,13 @@ class TemplateControllerTest {
 			"my-instance",
 			Map.of("VAR1", "value1"),
 			List.of("9090:80"),
-			List.of("/custom:/path")
+			List.of("/custom:/path"),
+			null,
+			null
 		);
 
 		when(dockerEngineService.listContainers(true)).thenReturn(new ArrayList<>());
-		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any()))
+		when(instantiationService.instantiate(anyString(), anyString(), any(), any(), any(), any(), any()))
 			.thenReturn(new InstantiationResult("cid", List.of()));
 		
 		// Mock do ClusterService e ClusterRepository
@@ -253,7 +267,9 @@ class TemplateControllerTest {
 			eq("my-instance"),
 			eq(request.env()),
 			eq(request.ports()),
-			eq(request.binds())
+			eq(request.binds()),
+			eq(request.cpuLimitPercent()),
+			eq(request.memoryLimitMb())
 		);
 	}
 }

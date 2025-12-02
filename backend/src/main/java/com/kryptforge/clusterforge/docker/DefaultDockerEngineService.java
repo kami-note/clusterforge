@@ -72,7 +72,9 @@ public class DefaultDockerEngineService implements DockerEngineService {
 								  String workingDir,
 								  Boolean stdinOpen,
 								  Boolean tty,
-								  String restart) {
+								  String restart,
+								  Integer cpuLimitPercent,
+								  Long memoryLimitMb) {
 		requireText(image, "image");
 
 		List<Bind> binds = new ArrayList<>();
@@ -131,6 +133,56 @@ public class DefaultDockerEngineService implements DockerEngineService {
 			if (restartPolicy != null) {
 				hostConfig = hostConfig.withRestartPolicy(restartPolicy);
 			}
+		}
+
+		// Aplica limites de CPU se especificado
+		if (cpuLimitPercent != null && cpuLimitPercent > 0) {
+			// Validação: CPU deve estar entre 1% e 100%
+			if (cpuLimitPercent < 1 || cpuLimitPercent > 100) {
+				throw new IllegalArgumentException(
+					String.format("cpuLimitPercent deve estar entre 1 e 100, mas foi %d", cpuLimitPercent));
+			}
+			
+			// Usa CPU quota e period para limitar CPU
+			// Period padrão: 100000 microssegundos (100ms)
+			// Quota: percentual * period / 100
+			// Exemplo: 30% = 30000 microssegundos por período de 100ms
+			long cpuPeriod = 100_000L; // 100ms em microssegundos
+			// Usa long para evitar overflow: cpuLimitPercent é Integer (max 2^31-1)
+			// cpuLimitPercent * cpuPeriod pode ser até 100 * 100000 = 10_000_000 (seguro)
+			long cpuQuota = (cpuLimitPercent.longValue() * cpuPeriod) / 100L;
+			hostConfig = hostConfig.withCpuPeriod(cpuPeriod)
+				.withCpuQuota(cpuQuota);
+			log.debug("Limite de CPU configurado: {}% (quota: {} microssegundos, period: {} microssegundos)", 
+				cpuLimitPercent, cpuQuota, cpuPeriod);
+		}
+
+		// Aplica limites de memória se especificado
+		// Usa estratégia de soft limit (memory-reservation) + hard limit (memory)
+		// para evitar que o OOM Killer mate o container
+		if (memoryLimitMb != null && memoryLimitMb > 0) {
+			// Validação: memória deve estar entre 1 MB e 32 GB (32768 MB)
+			// Valores muito pequenos (< 1 MB) não fazem sentido para containers
+			// Valores muito grandes (> 32 GB) podem ser perigosos e devem ser limitados
+			if (memoryLimitMb < 1 || memoryLimitMb > 32_768L) {
+				throw new IllegalArgumentException(
+					String.format("memoryLimitMb deve estar entre 1 e 32768 (32 GB), mas foi %d", memoryLimitMb));
+			}
+			
+			// Converte MB para bytes usando aritmética inteira para evitar problemas de precisão
+			long memoryBytes = memoryLimitMb * 1024L * 1024L; // MB para bytes
+			
+			// Hard limit: valor máximo que o container pode usar
+			hostConfig = hostConfig.withMemory(memoryBytes);
+			
+			// Soft limit (memory-reservation): valor desejado, permite picos até o hard limit
+			// Define como 70% do limite máximo para dar margem de segurança
+			// Usa aritmética inteira: (memoryBytes * 70) / 100 para evitar problemas de precisão com double
+			long memoryReservationBytes = (memoryBytes * 70L) / 100L;
+			hostConfig = hostConfig.withMemoryReservation(memoryReservationBytes);
+			
+			log.debug("Limite de memória configurado: {} MB (hard limit: {} bytes, soft limit: {} bytes)", 
+				memoryLimitMb, memoryBytes, memoryReservationBytes);
 		}
 
 		var createCmd = dockerClient.createContainerCmd(image)

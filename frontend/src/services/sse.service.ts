@@ -44,7 +44,7 @@ interface AllClustersConnection {
 
 // Constantes configuráveis
 const SSE_CONFIG = {
-  FETCH_TIMEOUT_MS: 10000, // Timeout para conexão inicial (10 segundos)
+  FETCH_TIMEOUT_MS: 30000, // Timeout para conexão inicial (30 segundos - aumentado para tolerar delays do backend)
   RECONNECT_DELAY_MS: 3000, // Delay entre tentativas de reconexão (3 segundos)
   MAX_RECONNECT_ATTEMPTS: 5, // Número máximo de tentativas de reconexão
   STREAM_TIMEOUT_MS: 300000, // Timeout do stream SSE (5 minutos)

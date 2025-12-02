@@ -72,11 +72,13 @@ class TemplateInstantiationServiceTest {
 			any(),
 			any(),
 			any(),
+			any(),
+			any(),
 			any()
 		)).thenReturn("container-id-123");
 		doNothing().when(dockerEngineService).startContainer("container-id-123");
 
-		InstantiationResult result = service.instantiate("webserver-php", "my-instance", null, null, null);
+		InstantiationResult result = service.instantiate("webserver-php", "my-instance", null, null, null, null, null);
 
 		assertEquals("container-id-123", result.containerId());
 		verify(dockerEngineService).pullImage("php:8.2-apache");
@@ -87,6 +89,8 @@ class TemplateInstantiationServiceTest {
 			anyList(),
 			anyList(),
 			eq("my-instance"),
+			any(),
+			any(),
 			any(),
 			any(),
 			any(),
@@ -107,12 +111,12 @@ class TemplateInstantiationServiceTest {
 			"      VAR1: value1\n" +
 			"      VAR2: value2\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
 		Map<String, String> overrides = Map.of("VAR2", "override", "VAR3", "new");
-		service.instantiate("app", "instance", overrides, null, null);
+		service.instantiate("app", "instance", overrides, null, null, null, null);
 
 		verify(dockerEngineService).createContainer(
 			eq("nginx:latest"),
@@ -126,6 +130,8 @@ class TemplateInstantiationServiceTest {
 			anyList(),
 			anyList(),
 			anyString(),
+			any(),
+			any(),
 			any(),
 			any(),
 			any(),
@@ -145,11 +151,11 @@ class TemplateInstantiationServiceTest {
 			"    volumes:\n" +
 			"      - ./src:/var/www/html:ro\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
-		service.instantiate("app", "instance", null, null, null);
+		service.instantiate("app", "instance", null, null, null, null, null);
 
 		verify(dockerEngineService).createContainer(
 			anyString(),
@@ -161,6 +167,8 @@ class TemplateInstantiationServiceTest {
 				return b.size() == 1 && b.get(0).contains("src") && b.get(0).endsWith(":ro");
 			}),
 			anyString(),
+			any(),
+			any(),
 			any(),
 			any(),
 			any(),
@@ -179,11 +187,11 @@ class TemplateInstantiationServiceTest {
 			"    volumes:\n" +
 			"      - data:/var/data\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
-		service.instantiate("app", "instance", null, null, null);
+		service.instantiate("app", "instance", null, null, null, null, null);
 
 		verify(dockerEngineService).createContainer(
 			anyString(),
@@ -195,6 +203,8 @@ class TemplateInstantiationServiceTest {
 				return b.size() == 1 && b.get(0).contains("volumes");
 			}),
 			anyString(),
+			any(),
+			any(),
 			any(),
 			any(),
 			any(),
@@ -215,14 +225,14 @@ class TemplateInstantiationServiceTest {
 			"    volumes:\n" +
 			"      - ./old:/old\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
 		List<String> overridePorts = List.of("9090:80");
 		List<String> overrideBinds = List.of("/host:/container:rw");
 
-		service.instantiate("app", "instance", null, overridePorts, overrideBinds);
+		service.instantiate("app", "instance", null, overridePorts, overrideBinds, null, null);
 
 		verify(dockerEngineService).createContainer(
 			anyString(),
@@ -231,6 +241,8 @@ class TemplateInstantiationServiceTest {
 			eq(overridePorts),
 			eq(overrideBinds),
 			anyString(),
+			any(),
+			any(),
 			any(),
 			any(),
 			any(),
@@ -250,11 +262,11 @@ class TemplateInstantiationServiceTest {
 			"      - KEY1=value1\n" +
 			"      - KEY2=value2\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
-		service.instantiate("app", "instance", null, null, null);
+		service.instantiate("app", "instance", null, null, null, null, null);
 
 		verify(dockerEngineService).createContainer(
 			anyString(),
@@ -269,6 +281,8 @@ class TemplateInstantiationServiceTest {
 			any(),
 			any(),
 			any(),
+			any(),
+			any(),
 			any()
 		);
 	}
@@ -276,7 +290,7 @@ class TemplateInstantiationServiceTest {
 	@Test
 	void instantiate_throwsWhenTemplateNotFound() {
 		assertThrows(IOException.class, () -> {
-			service.instantiate("not-exists", "instance", null, null, null);
+			service.instantiate("not-exists", "instance", null, null, null, null, null);
 		});
 	}
 
@@ -286,7 +300,7 @@ class TemplateInstantiationServiceTest {
 		assertDoesNotThrow(() -> Files.createDirectories(templateDir));
 
 		assertThrows(IOException.class, () -> {
-			service.instantiate("no-compose", "instance", null, null, null);
+			service.instantiate("no-compose", "instance", null, null, null, null, null);
 		});
 	}
 
@@ -302,14 +316,14 @@ class TemplateInstantiationServiceTest {
 		});
 
 		assertThrows(IllegalStateException.class, () -> {
-			service.instantiate("no-image", "instance", null, null, null);
+			service.instantiate("no-image", "instance", null, null, null, null, null);
 		});
 	}
 
 	@Test
 	void instantiate_throwsWhenInstanceNameEmpty() {
 		assertThrows(IllegalArgumentException.class, () -> {
-			service.instantiate("template", "", null, null, null);
+			service.instantiate("template", "", null, null, null, null, null);
 		});
 	}
 
@@ -326,15 +340,15 @@ class TemplateInstantiationServiceTest {
 		// "123-invalid" é válido (pode começar com número)
 		// "-invalid" é inválido (não pode começar com hífen)
 		assertThrows(IllegalArgumentException.class, () -> {
-			service.instantiate("template", "-invalid", null, null, null);
+			service.instantiate("template", "-invalid", null, null, null, null, null);
 		});
 		// "invalid@name" é inválido (caractere @ não permitido)
 		assertThrows(IllegalArgumentException.class, () -> {
-			service.instantiate("template", "invalid@name", null, null, null);
+			service.instantiate("template", "invalid@name", null, null, null, null, null);
 		});
 		// "invalid name" é inválido (espaço não permitido)
 		assertThrows(IllegalArgumentException.class, () -> {
-			service.instantiate("template", "invalid name", null, null, null);
+			service.instantiate("template", "invalid name", null, null, null, null, null);
 		});
 	}
 
@@ -348,15 +362,15 @@ class TemplateInstantiationServiceTest {
 			"    image: nginx:latest\n");
 
 		doThrow(new RuntimeException("Network error")).when(dockerEngineService).pullImage(anyString());
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
 		// pull falha mas continua (log de warning)
-		InstantiationResult result = service.instantiate("app", "instance", null, null, null);
+		InstantiationResult result = service.instantiate("app", "instance", null, null, null, null, null);
 		assertEquals("cid", result.containerId());
 		verify(dockerEngineService).pullImage("nginx:latest");
-		verify(dockerEngineService).createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any());
+		verify(dockerEngineService).createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any());
 	}
 
 	@Test
@@ -368,12 +382,12 @@ class TemplateInstantiationServiceTest {
 			"  app:\n" +
 			"    image: nginx:latest\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doThrow(new RuntimeException("Start failed")).when(dockerEngineService).startContainer("cid");
 
 		assertThrows(RuntimeException.class, () -> {
-			service.instantiate("app", "instance", null, null, null);
+			service.instantiate("app", "instance", null, null, null, null, null);
 		});
 	}
 
@@ -387,11 +401,11 @@ class TemplateInstantiationServiceTest {
 			"    image: nginx:latest\n" +
 			"    command: [\"nginx\", \"-g\", \"daemon off;\"]\n");
 
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer(anyString());
 
-		service.instantiate("app", "instance", null, null, null);
+		service.instantiate("app", "instance", null, null, null, null, null);
 
 		verify(dockerEngineService).createContainer(
 			anyString(),
@@ -403,6 +417,8 @@ class TemplateInstantiationServiceTest {
 			anyList(),
 			anyList(),
 			anyString(),
+			any(),
+			any(),
 			any(),
 			any(),
 			any(),
@@ -424,7 +440,7 @@ class TemplateInstantiationServiceTest {
 			"      - ./data:/app\n");
 
 		when(portManager.allocatePort()).thenReturn(9000, 9100, -1);
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer("cid");
 
@@ -434,7 +450,7 @@ class TemplateInstantiationServiceTest {
 		WebDavServerInfo webDavInfo = new WebDavServerInfo("webdav-container", 9100, "ftpuser", "ftppass", dataDir.toString());
 		when(webDavService.createWebDavServer(anyString(), anyString(), eq(9100), any(), any())).thenReturn(webDavInfo);
 
-		InstantiationResult result = service.instantiate("ftp-webdav", "instance", null, null, null);
+		InstantiationResult result = service.instantiate("ftp-webdav", "instance", null, null, null, null, null);
 
 		assertNotNull(result.ftpInfo());
 		assertNotNull(result.webDavInfo());
@@ -464,11 +480,11 @@ class TemplateInstantiationServiceTest {
 			// Retorna portas mapeadas simuladas
 			return List.of("9000:80", "9001:443", "9002:3000");
 		});
-		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any()))
+		when(dockerEngineService.createContainer(anyString(), anyList(), anyMap(), anyList(), anyList(), anyString(), any(), any(), any(), any(), any(), any()))
 			.thenReturn("cid");
 		doNothing().when(dockerEngineService).startContainer("cid");
 
-		service.instantiate("protocol-ports", "instance", null, null, null);
+		service.instantiate("protocol-ports", "instance", null, null, null, null, null);
 
 		// Verifica que mapPorts foi chamado com portas sem protocolo
 		verify(portManager).mapPorts(argThat(ports -> {

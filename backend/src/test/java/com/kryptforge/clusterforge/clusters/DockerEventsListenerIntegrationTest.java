@@ -159,6 +159,8 @@ class DockerEventsListenerIntegrationTest {
 			testInstanceName,
 			Map.of("VAR1", "value1"),
 			null,
+			null,
+			null,
 			null
 		);
 
