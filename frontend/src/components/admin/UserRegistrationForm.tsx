@@ -8,10 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useClusters } from '@/hooks/useClusters';
-import { clusterService } from '@/services/cluster.service';
+import { useClustersQuery } from '@/features/clusters/hooks/use-clusters';
+import * as clusterApi from '@/features/clusters/api/cluster-api';
 import { userService, type UserSummary } from '@/services/user.service';
-import { Cluster, ClusterStatus } from '@/types';
+import { ClusterListItem, ClusterStatus } from '@/types';
 import { formatRelativeTime } from '@/utils/format.utils';
 import { handleError } from '@/utils/error.utils';
 
@@ -47,7 +47,7 @@ const statusOptions: Array<{ value: 'all' | ClusterStatus; label: string }> = [
 ];
 
 const UserRegistrationForm: React.FC = () => {
-  const { clusters, loading: clustersLoading, reloadClusters } = useClusters();
+  const { data: clusters = [], isLoading: clustersLoading, refetch: reloadClusters } = useClustersQuery();
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
@@ -113,20 +113,20 @@ const UserRegistrationForm: React.FC = () => {
       const matchesSearch =
         !searchTerm ||
         cluster.name.toLowerCase().includes(searchTerm) ||
-        (cluster.serviceType && cluster.serviceType.toLowerCase().includes(searchTerm)) ||
-        (cluster.owner && cluster.owner.toLowerCase().includes(searchTerm));
+        (cluster.templateName && cluster.templateName.toLowerCase().includes(searchTerm)) ||
+        (cluster.ownerUsername && cluster.ownerUsername.toLowerCase().includes(searchTerm));
       const matchesStatus = statusFilter === 'all' || cluster.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
   }, [clusters, selectedUserId, clusterSearch, statusFilter]);
 
-  const handleClusterToggle = async (cluster: Cluster, assignToUser: boolean) => {
+  const handleClusterToggle = async (cluster: ClusterListItem, assignToUser: boolean) => {
     if (!selectedUserId) return;
     setPendingClusterId(cluster.id);
     setActionError(null);
     setActionMessage(null);
     try {
-      await clusterService.updateClusterOwner(cluster.id, assignToUser ? selectedUserId : null);
+      await clusterApi.updateClusterOwner(cluster.id, assignToUser ? selectedUserId : null);
       await reloadClusters();
       const actionLabel = assignToUser ? 'atribuído' : 'removido';
       const targetUser = selectedUser?.username ? ` para ${selectedUser.username}` : '';
@@ -225,10 +225,10 @@ const UserRegistrationForm: React.FC = () => {
                               <div>
                                 <p className="font-medium text-foreground">{cluster.name}</p>
                                 <p className="text-xs">
-                                  {cluster.serviceType}{' '}
-                                  {cluster.lastUpdate && (
+                                  {cluster.templateName || 'N/A'}{' '}
+                                  {cluster.updatedAt && (
                                     <>
-                                      • Atualizado {formatRelativeTime(cluster.lastUpdate)}
+                                      • Atualizado {formatRelativeTime(cluster.updatedAt)}
                                     </>
                                   )}
                                 </p>
@@ -294,15 +294,15 @@ const UserRegistrationForm: React.FC = () => {
                               <div>
                                 <p className="font-semibold">{cluster.name}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {cluster.serviceType || 'Serviço personalizado'}
+                                  {cluster.templateName || 'Serviço personalizado'}
                                 </p>
                               </div>
-                              <Badge variant={statusVariant[cluster.status] ?? 'secondary'}>
-                                {statusLabels[cluster.status]}
+                              <Badge variant={statusVariant[(cluster.status as ClusterStatus) || 'pending'] ?? 'secondary'}>
+                                {statusLabels[(cluster.status as ClusterStatus) || 'pending'] || cluster.status}
                               </Badge>
                             </div>
                             <div className="text-sm text-muted-foreground space-y-1">
-                              <p>{cluster.owner ? `Responsável atual: ${cluster.owner}` : 'Sem responsável definido'}</p>
+                              <p>{cluster.ownerUsername ? `Responsável atual: ${cluster.ownerUsername}` : 'Sem responsável definido'}</p>
                               {cluster.port && <p>Porta principal: {cluster.port}</p>}
                             </div>
                             <Button

@@ -1,13 +1,13 @@
 "use client";
 
-import { ClusterCreation, ClusterData } from "@/components/clusters/ClusterCreation";
+import { ClusterCreation, ClusterData } from "@/features/clusters/components/ClusterCreation";
 import { useRouter } from 'next/navigation';
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { useClusters } from "@/hooks/useClusters";
+// import { useClusters } from "@/hooks/useClusters";
 
 export default function ClientClusterCreationPage() {
   const router = useRouter();
-  const { addCluster } = useClusters();
+  // const { addCluster } = useClusters();
 
   const handleBack = () => {
     router.back();
@@ -15,16 +15,16 @@ export default function ClientClusterCreationPage() {
 
   const handleSubmit = (clusterData: ClusterData) => {
     console.log("Client Cluster Data Submitted:", clusterData);
-    addCluster(clusterData);
-    router.push('/client/dashboard'); 
+    // addCluster(clusterData); // Handled internally by ClusterCreation
+    // router.push('/client/dashboard'); // Handled internally by ClusterCreation
   };
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
-      <ClusterCreation 
-        userType="client" 
-        onBack={handleBack} 
-        onSubmit={handleSubmit} 
+      <ClusterCreation
+        userType="client"
+        onBack={handleBack}
+        onSubmit={handleSubmit}
       />
     </ProtectedRoute>
   );

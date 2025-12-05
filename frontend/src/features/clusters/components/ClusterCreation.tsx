@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { templateService } from '@/services/template.service';
-import { clusterService } from '@/services/cluster.service';
+import * as clusterApi from '../api/cluster-api';
 import type { TemplateInstantiateRequest } from '@/types';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 import { TIMEOUTS } from '@/constants';
@@ -75,6 +75,29 @@ export interface ServiceTemplate {
   };
 }
 
+const iconMap: { [key: string]: React.ComponentType<{ className?: string }> } = {
+  'test-alpine': Package,
+  'webserver-php': Code,
+  'wordpress': FileText,
+  'nginx': Globe,
+  'apache': Globe,
+  'mysql': Database,
+  'postgres': Database,
+  'redis': CircuitBoard,
+  'nodejs': Zap,
+  'python': Code,
+  'java': Box,
+  'minecraft': Gamepad2,
+  'docker': Layers,
+  'kubernetes': Rocket,
+  'default': Cloud
+};
+
+const availableIcons = [
+  Gamepad2, FileText, Zap, Globe, Database, CircuitBoard,
+  Package, Code, Cloud, Box, Layers, Rocket, Server, Cpu
+];
+
 export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationProps) {
   const router = useRouter();
   const [clusterName, setClusterName] = useState('');
@@ -86,15 +109,15 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   const [customPort, setCustomPort] = useState('');
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isCreating, setIsCreating] = useState(false); 
-  const [creatingClusterName, setCreatingClusterName] = useState<string | null>(null); 
-  const [creationProgress, setCreationProgress] = useState(0); 
-  const [creationStage, setCreationStage] = useState<string>(''); 
+  const [isCreating, setIsCreating] = useState(false);
+  const [creatingClusterName, setCreatingClusterName] = useState<string | null>(null);
+  const [creationProgress, setCreationProgress] = useState(0);
+  const [creationStage, setCreationStage] = useState<string>('');
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [errorDetails, setErrorDetails] = useState<DockerErrorDetails | null>(null);
 
-  
+
   useEffect(() => {
     if (creationProgress >= 95) {
       const redirectPath = userType === 'admin' ? '/admin/clusters' : '/client/dashboard';
@@ -103,70 +126,48 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     }
   }, [creationProgress, userType, router]);
 
-  
-  const iconMap: { [key: string]: React.ComponentType<{ className?: string }> } = {
-    'test-alpine': Package,
-    'webserver-php': Code,
-    'wordpress': FileText,
-    'nginx': Globe,
-    'apache': Globe,
-    'mysql': Database,
-    'postgres': Database,
-    'redis': CircuitBoard,
-    'nodejs': Zap,
-    'python': Code,
-    'java': Box,
-    'minecraft': Gamepad2,
-    'docker': Layers,
-    'kubernetes': Rocket,
-    'default': Cloud
-  };
 
-  
-  const availableIcons = [
-    Gamepad2, FileText, Zap, Globe, Database, CircuitBoard,
-    Package, Code, Cloud, Box, Layers, Rocket, Server, Cpu
-  ];
 
-  
-  
+
+
+
   const getDefaultResourcesForTemplate = (templateName: string): { cpu: number; ram: number; disk: number } => {
     const lowerName = templateName.toLowerCase();
 
-    
+
     if (lowerName.includes('test') || lowerName.includes('alpine')) {
-      return { cpu: 15, ram: 0.5, disk: 2 }; 
+      return { cpu: 15, ram: 0.5, disk: 2 };
     }
     if (lowerName.includes('php') || lowerName.includes('webserver') || lowerName.includes('wordpress')) {
-      return { cpu: 30, ram: 2, disk: 5 }; 
+      return { cpu: 30, ram: 2, disk: 5 };
     }
     if (lowerName.includes('minecraft') || lowerName.includes('game')) {
-      return { cpu: 50, ram: 4, disk: 10 }; 
+      return { cpu: 50, ram: 4, disk: 10 };
     }
     if (lowerName.includes('database') || lowerName.includes('mysql') || lowerName.includes('postgres')) {
-      return { cpu: 40, ram: 4, disk: 20 }; 
+      return { cpu: 40, ram: 4, disk: 20 };
     }
     if (lowerName.includes('node') || lowerName.includes('api')) {
-      return { cpu: 25, ram: 1, disk: 3 }; 
+      return { cpu: 25, ram: 1, disk: 3 };
     }
     if (lowerName.includes('nginx') || lowerName.includes('apache')) {
-      return { cpu: 20, ram: 1, disk: 2 }; 
+      return { cpu: 20, ram: 1, disk: 2 };
     }
     if (lowerName.includes('redis') || lowerName.includes('cache')) {
-      return { cpu: 15, ram: 1, disk: 1 }; 
+      return { cpu: 15, ram: 1, disk: 1 };
     }
 
-    
-    return { cpu: 25, ram: 2, disk: 10 }; 
+
+    return { cpu: 25, ram: 2, disk: 10 };
   };
 
-  
+
   const parseDockerError = (message: string): DockerErrorDetails | null => {
     if (!message) return null;
 
     const lowerMessage = message.toLowerCase();
 
-    
+
     let errorType = 'UNKNOWN';
     let resolvable = false;
 
@@ -199,7 +200,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       resolvable = false;
     }
 
-    
+
     let logs: string | undefined;
     let exitCode: string | undefined;
 
@@ -217,7 +218,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       }
     }
 
-    
+
     const resolved = message.includes('resolvido automaticamente') ||
       message.includes('após resolver') ||
       message.includes('resolvido com sucesso');
@@ -232,41 +233,41 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     };
   };
 
-  
-  
+
+
   const getIconForTemplate = useCallback((templateName: string): React.ComponentType<{ className?: string }> => {
     const lowerName = templateName.toLowerCase();
 
-    
+
     for (const [key, icon] of Object.entries(iconMap)) {
       if (lowerName.includes(key)) {
         return icon;
       }
     }
 
-    
+
     let hash = 0;
     for (let i = 0; i < templateName.length; i++) {
       hash = ((hash << 5) - hash) + templateName.charCodeAt(i);
       hash = hash & hash;
     }
     return availableIcons[Math.abs(hash) % availableIcons.length];
-    
-    
+
+
   }, []);
 
-  
+
   useEffect(() => {
     const loadTemplates = async () => {
       try {
         setLoadingTemplates(true);
         const templates = await templateService.listTemplates();
 
-        
+
         const formattedTemplates: ServiceTemplate[] = templates.map((template) => {
           const Icon = getIconForTemplate(template.name);
 
-          
+
           const defaultResources = getDefaultResourcesForTemplate(template.name);
 
           return {
@@ -279,7 +280,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           };
         });
 
-        
+
         if (formattedTemplates.length === 0) {
           const fallbackTemplates: ServiceTemplate[] = [
             {
@@ -296,13 +297,13 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           setServiceTemplates(formattedTemplates);
         }
       } catch (error) {
-        
-        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+
+        if (!(error as unknown as { name?: string })?.name || (error as unknown as { name?: string }).name !== 'BackendOffline') {
           console.error('Error fetching templates:', error);
         }
         toast.error('Não foi possível carregar os tipos de serviço. Tente atualizar a página.');
 
-        
+
         setServiceTemplates([{
           id: 'docker-app',
           name: 'Aplicação Docker',
@@ -382,58 +383,58 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
     console.log('Iniciando criação do cluster em background...');
     setLoading(true);
-    setIsCreating(true); 
-    setCreatingClusterName(clusterName); 
-    setCreationProgress(0); 
-    setCreationStage('Iniciando criação...'); 
-    setErrorDetails(null); 
+    setIsCreating(true);
+    setCreatingClusterName(clusterName);
+    setCreationProgress(0);
+    setCreationStage('Iniciando criação...');
+    setErrorDetails(null);
 
-    
+
     toast.info('Iniciando criação do cluster...', { duration: 2000 });
 
     const templateName = selectedService?.name || '';
 
-    
-    
-    
+
+
+
     const request: TemplateInstantiateRequest = {
       name: clusterName,
-      
+
       cpuLimitPercent: cpuAllocation[0],
-      memoryLimitMb: ramAllocation[0] * 1024, 
-      
-      
+      memoryLimitMb: ramAllocation[0] * 1024,
+
+
     };
 
     console.log('Request:', request);
 
-    
-    
+
+
     const timeout1 = setTimeout(() => {
       setCreationProgress(10);
       setCreationStage('Preparando ambiente...');
       toast.info('Preparando ambiente...', { duration: 2000 });
     }, 500);
 
-    
+
     const timeout2 = setTimeout(() => {
       setCreationProgress(30);
       setCreationStage('Baixando imagem Docker...');
       toast.info('Baixando imagem Docker (isso pode levar alguns minutos)...', { duration: 4000 });
     }, 2000);
 
-    
+
     const cleanupTimeouts = () => {
       clearTimeout(timeout1);
       clearTimeout(timeout2);
     };
 
-    
+
     templateService.instantiateTemplate(templateName, request)
       .then(async (response) => {
         console.log('Response:', response);
 
-        cleanupTimeouts(); 
+        cleanupTimeouts();
 
         if (!response.containerId || !response.name) {
           toast.error('Erro ao criar cluster: resposta inválida do servidor');
@@ -445,27 +446,27 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           return;
         }
 
-        
+
         setCreationProgress(70);
         setCreationStage('Container criado! Iniciando...');
         toast.success('Container criado com sucesso!', { duration: 2000 });
 
-        
+
         setCreationProgress(85);
         setCreationStage('Iniciando container...');
         toast.info('Iniciando container...', { duration: 2000 });
 
-        
-        
+
+
         let foundCluster = await pollClusterByName(response.name);
 
-        
+
         if (foundCluster?.id) {
           setCreationProgress(90);
           setCreationStage('Verificando status do cluster...');
           await pollClusterStatus(foundCluster.id);
         } else {
-          
+
           setTimeout(async () => {
             foundCluster = await pollClusterByName(response.name);
             if (foundCluster?.id) {
@@ -476,8 +477,8 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           }, 3000);
         }
 
-        
-        
+
+
         const clusterData = {
           name: clusterName,
           service: selectedService,
@@ -487,10 +488,10 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             disk: diskAllocation[0]
           },
           startupCommand,
-          
+
         };
 
-        
+
         setCreationProgress(100);
         setCreationStage('Cluster criado com sucesso!');
         toast.success(`Cluster "${clusterName}" criado e em execução!`, { duration: 5000 });
@@ -498,7 +499,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         onSubmit(clusterData);
         setLoading(false);
 
-        
+
         setTimeout(() => {
           setIsCreating(false);
           setCreatingClusterName(null);
@@ -507,38 +508,38 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         }, 3000);
       })
       .catch((error: unknown) => {
-        cleanupTimeouts(); 
+        cleanupTimeouts();
 
-        
-        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+
+        if (!(error as unknown as { name?: string })?.name || (error as unknown as { name?: string }).name !== 'BackendOffline') {
           console.error('Error creating cluster:', error);
         }
 
-        
+
         let errorMessage = 'Não foi possível criar o cluster. Tente novamente.';
 
         if (error instanceof Error) {
           errorMessage = error.message;
         } else if (typeof error === 'object' && error !== null) {
-          
-          const apiError = error as any;
+
+          const apiError = error as { message?: string; error?: string };
           if (apiError.message) {
             errorMessage = apiError.message;
           } else if (apiError.error) {
             errorMessage = apiError.error;
           } else {
-            
+
             errorMessage = JSON.stringify(error) || errorMessage;
           }
         }
 
-        
-        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+
+        if (!(error as unknown as { name?: string })?.name || (error as unknown as { name?: string }).name !== 'BackendOffline') {
           console.error('Mensagem de erro extraída:', errorMessage);
         }
 
-        
-        const apiError = error as any;
+
+        const apiError = error as { name?: string };
         if (apiError.name === 'TimeoutError') {
           toast.warning(
             'A criação do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
@@ -547,7 +548,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             }
           );
 
-          
+
           setTimeout(async () => {
             const foundCluster = await pollClusterByName(clusterName);
             if (foundCluster?.id) {
@@ -555,8 +556,8 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             }
           }, 5000);
 
-          
-          
+
+
           const clusterData = {
             name: clusterName,
             service: selectedService,
@@ -566,7 +567,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               disk: diskAllocation[0]
             },
             startupCommand,
-            
+
           };
 
           onSubmit(clusterData);
@@ -595,15 +596,15 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       });
   };
 
-  
-  
+
+
   const pollClusterStatus = async (clusterId: string | number) => {
     const pollInterval = TIMEOUTS.CLUSTER_CREATE_POLL;
     const maxAttempts = TIMEOUTS.CLUSTER_CREATE_MAX_ATTEMPTS;
     let attempts = 0;
     let isReady = false;
 
-    
+
     setCreationProgress(90);
     setCreationStage('Aguardando cluster ficar pronto...');
 
@@ -611,9 +612,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       await new Promise(resolve => setTimeout(resolve, pollInterval));
 
       try {
-        const clusterDetails = await clusterService.getCluster(clusterId);
+        const clusterDetails = await clusterApi.getCluster(clusterId);
 
-        
+
         if (clusterDetails.status === 'RUNNING' || clusterDetails.status === 'STOPPED') {
           isReady = true;
           setCreationProgress(100);
@@ -630,8 +631,8 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           setErrorDetails(parseDockerError('Cluster entrou em estado de erro'));
           break;
         } else {
-          
-          
+
+
           const progress = Math.min(90 + (attempts * 5), 95);
           setCreationProgress(progress);
           setCreationStage(`Configurando cluster... (Status: ${clusterDetails.status})`);
@@ -639,7 +640,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
         attempts++;
       } catch (pollError: unknown) {
-        
+
         console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
         attempts++;
       }
@@ -654,11 +655,11 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     }
   };
 
-  
-  
+
+
   const pollClusterByName = async (name: string): Promise<{ id: string; name: string } | null> => {
     try {
-      const clusters = await clusterService.listClusters();
+      const clusters = await clusterApi.listClusters();
       const foundCluster = clusters.find(c => c.name === name || c.name.startsWith(name));
 
       if (foundCluster) {
@@ -668,8 +669,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         };
       }
       return null;
-    } catch (error) {
-      console.warn('Erro ao buscar cluster pelo nome:', error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error("Erro ao verificar status do cluster:", err);
       return null;
     }
   };
@@ -680,7 +682,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-4xl mx-auto space-y-6">
-        {}
+        { }
         <div className="flex items-center space-x-4">
           <Button variant="ghost" onClick={onBack} className="p-2">
             <ArrowLeft className="h-4 w-4" />
@@ -693,7 +695,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           </div>
         </div>
 
-        {}
+        { }
         {isCreating && creatingClusterName && (
           <Card className="border-primary bg-primary/5 shadow-lg">
             <CardContent className="pt-6 pb-6">
@@ -702,7 +704,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   <Loader2 className="h-5 w-5 text-primary animate-spin" />
                   <div className="flex-1">
                     <h3 className="font-semibold text-primary">
-                      Cluster "{creatingClusterName}" está sendo criado
+                      Cluster &quot;{creatingClusterName}&quot; está sendo criado
                     </h3>
                     <p className="text-sm text-muted-foreground mt-1">
                       {creationStage || 'A criação está sendo processada em segundo plano...'}
@@ -713,7 +715,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </Badge>
                 </div>
 
-                {}
+                { }
                 <div className="space-y-2">
                   <Progress value={creationProgress} className="h-2" />
                   <div className="flex justify-between text-xs text-muted-foreground">
@@ -736,7 +738,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           </Card>
         )}
 
-        {}
+        { }
         {errorDetails && (
           <DockerErrorDisplay
             error={errorDetails}
@@ -750,7 +752,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            {}
+            { }
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
@@ -762,7 +764,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {}
+                { }
                 <div className="space-y-2">
                   <Label htmlFor="cluster-name">Nome do Cluster</Label>
                   <Input
@@ -777,7 +779,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </p>
                 </div>
 
-                {}
+                { }
                 <div className="space-y-3">
                   <Label>Tipo de Serviço (Template)</Label>
                   {loadingTemplates ? (
@@ -832,7 +834,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               </CardContent>
             </Card>
 
-            {}
+            { }
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -854,7 +856,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </div>
               </CardHeader>
               <CardContent className="space-y-8">
-                {}
+                { }
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center space-x-2">
@@ -876,7 +878,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </p>
                 </div>
 
-                {}
+                { }
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center space-x-2">
@@ -898,7 +900,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </p>
                 </div>
 
-                {}
+                { }
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center space-x-2">
@@ -922,7 +924,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               </CardContent>
             </Card>
 
-            {}
+            { }
             <Card>
               <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
                 <CollapsibleTrigger asChild>
@@ -944,7 +946,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <CardContent className="space-y-6">
-                    {}
+                    { }
                     <div className="space-y-2">
                       <Label htmlFor="startup-command">Comando de Inicialização</Label>
                       <Textarea
@@ -954,12 +956,13 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                         onChange={(e) => setStartupCommand(e.target.value)}
                         rows={3}
                       />
-                      <p className="text-sm text-muted-foreground">
-                        Comando exato para iniciar seu serviço. Será preenchido automaticamente baseado no template.
+                      <p className="text-sm text-muted-foreground mt-2">
+                        Aguarde enquanto configuramos seu ambiente. Isso pode levar alguns minutos.
+                        Você será redirecionado automaticamente quando o cluster estiver pronto.
                       </p>
                     </div>
 
-                    {}
+                    { }
                     {userType === 'admin' && (
                       <div className="space-y-2">
                         <Label htmlFor="custom-port">Porta Personalizada</Label>
@@ -975,7 +978,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                       </div>
                     )}
 
-                    {}
+                    { }
                     {userType === 'admin' && (
                       <div className="space-y-2">
                         <div className="flex items-center space-x-2 text-sm text-muted-foreground">
@@ -990,7 +993,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             </Card>
           </div>
 
-          {}
+          { }
           <div className="space-y-6">
             <Card className="sticky top-6">
               <CardHeader>
@@ -1000,7 +1003,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {}
+                { }
                 <div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium">Nome:</span>
@@ -1010,7 +1013,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </div>
                 </div>
 
-                {}
+                { }
                 <div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium">Serviço:</span>
@@ -1022,7 +1025,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
                 <Separator />
 
-                {}
+                { }
                 <div className="space-y-2">
                   <h4 className="font-medium">Recursos Alocados:</h4>
 
@@ -1044,7 +1047,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
                 <Separator />
 
-                {}
+                { }
                 <div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium">Custo Estimado:</span>
@@ -1067,7 +1070,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
                 <Separator />
 
-                {}
+                { }
                 <div className="space-y-2">
                   <Button
                     onClick={handleSubmit}
@@ -1088,7 +1091,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                     variant="outline"
                     onClick={onBack}
                     className="w-full"
-                  
+
                   >
                     {isCreating ? 'Voltar (Criação em andamento)' : 'Cancelar'}
                   </Button>

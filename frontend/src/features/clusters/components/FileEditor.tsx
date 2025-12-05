@@ -42,13 +42,14 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
       const fileContent = await webDavService.readFileAsText(filePath);
       setContent(fileContent);
       setOriginalContent(fileContent);
-    } catch (err: any) {
-      setError(`Erro ao carregar arquivo: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(`Erro ao carregar arquivo: ${error.message}`);
       setContent("");
     } finally {
       setLoading(false);
     }
-    
+
   }, [filePath]);
 
   const hasChanges = content !== originalContent;
@@ -66,26 +67,27 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
       setOriginalContent(content);
       onSave?.();
       onClose();
-    } catch (err: any) {
-      setError(`Erro ao salvar arquivo: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(`Erro ao salvar arquivo: ${error.message}`);
     } finally {
       setSaving(false);
     }
   }, [content, originalContent, filePath, onClose, onSave]);
 
-  
+
   useEffect(() => {
     if (isOpen && filePath) {
       loadFile();
     } else {
-      
+
       setContent("");
       setOriginalContent("");
       setError(null);
     }
   }, [isOpen, filePath, loadFile]);
 
-  
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -102,9 +104,9 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, hasChanges, saving, loading, handleSave]);
 
-  if (!isOpen) return null;
 
-  
+
+
   const extension = fileName.split(".").pop()?.toLowerCase() || "";
   const isTextFile = !["jpg", "jpeg", "png", "gif", "webp", "pdf", "zip", "tar", "gz"].includes(extension);
 
@@ -143,10 +145,12 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
     return content.split(/\r?\n/).length;
   }, [content]);
 
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-background border rounded-lg shadow-lg w-[90vw] h-[90vh] max-w-6xl flex flex-col">
-        {}
+        { }
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">Editor de Arquivo</h2>
@@ -187,7 +191,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
           </div>
         </div>
 
-        {}
+        { }
         {error && (
           <div className="p-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800">
             <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
@@ -197,7 +201,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
           </div>
         )}
 
-        {}
+        { }
         <div className="flex-1 overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center h-full">
@@ -237,7 +241,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
           )}
         </div>
 
-        {}
+        { }
         <div className="p-3 border-t bg-muted/50 flex items-center justify-between text-xs text-muted-foreground">
           <div className="flex items-center gap-4">
             <span>Caminho: {filePath}</span>

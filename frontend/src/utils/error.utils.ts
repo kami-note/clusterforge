@@ -7,15 +7,15 @@ export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  
+
   if (typeof error === 'string') {
     return error;
   }
-  
+
   if (error && typeof error === 'object' && 'message' in error) {
     return String(error.message);
   }
-  
+
   return 'Erro desconhecido';
 }
 
@@ -42,19 +42,19 @@ export function getHttpErrorMessage(status: number): string {
     500: 'Ocorreu um problema no servidor. Aguarde alguns minutos e tente novamente.',
     503: 'O serviço está temporariamente indisponível. Tente novamente em alguns minutos.',
   };
-  
+
   return messages[status] || 'Algo deu errado. Tente novamente em alguns instantes.';
 }
 
 
 export function handleError(error: unknown): string {
-  
+
   if (error && typeof error === 'object') {
-    const err = error as any;
+    const err = error as { name?: string; message?: string };
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       return 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.';
     }
-    
+
     if (err.name === 'BackendOffline') {
       return 'O servidor está temporariamente indisponível. Verifique se o backend está em execução.';
     }
@@ -62,9 +62,9 @@ export function handleError(error: unknown): string {
       return 'Sem conexão com a internet. Verifique se você está online e tente novamente.';
     }
   }
-  
+
   if (isApiError(error)) {
-    
+
     if (error.message && !error.message.includes('Error') && !error.message.includes('Exception')) {
       return error.message;
     }
@@ -72,57 +72,55 @@ export function handleError(error: unknown): string {
       return getHttpErrorMessage(error.status);
     }
   }
-  
-  
+
+
   const genericMessage = getErrorMessage(error);
   if (genericMessage.includes('Error') || genericMessage.includes('Exception') || genericMessage.includes('timeout')) {
     return 'Algo deu errado. Tente novamente em alguns instantes. Se o problema continuar, entre em contato com o suporte.';
   }
-  
+
   return genericMessage;
 }
 
 
 function shouldSuppressError(error: unknown): boolean {
   if (error && typeof error === 'object') {
-    const err = error as any;
-    
-    
+    const err = error as { name?: string; message?: string };
+
+
     if (err.name === 'BackendOffline') {
       return true;
     }
-    
-    
+
+
     const message = String(err.message || '').toLowerCase();
     if (message.includes('servidor está temporariamente indisponível') ||
-        message.includes('backend está em execução') ||
-        message.includes('backend offline')) {
+      message.includes('backend está em execução') ||
+      message.includes('backend offline')) {
       return true;
     }
-    
-    
-    if (typeof err === 'string' && err.toLowerCase().includes('backend offline')) {
-      return true;
-    }
+
+
+
   }
-  
-  
+
+
   if (typeof error === 'string' && error.toLowerCase().includes('backend offline')) {
     return true;
   }
-  
+
   return false;
 }
 
 
 export function safeConsoleError(...args: unknown[]): void {
-  
+
   const shouldSuppress = args.some(arg => shouldSuppressError(arg));
-  
+
   if (!shouldSuppress) {
     console.error(...args);
   }
-  
+
 }
 
 

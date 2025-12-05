@@ -18,7 +18,7 @@ export const parseDockerError = (
 
     const lowerMessage = message.toLowerCase();
 
-    
+
     let errorType = 'UNKNOWN';
     let resolvable = false;
 
@@ -62,7 +62,7 @@ export const parseDockerError = (
         resolvable = false;
     }
 
-    
+
     let logs: string | undefined;
     let exitCode: string | undefined;
 
@@ -80,7 +80,7 @@ export const parseDockerError = (
         }
     }
 
-    
+
     const resolved =
         message.includes('resolvido automaticamente') ||
         message.includes('após resolver') ||
@@ -110,16 +110,16 @@ export const getUniqueValues = <T>(
 
 
 export const normalizeClusterStatus = (apiStatus: string): 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted' => {
-    
-    let status = apiStatus.toLowerCase();
 
-    
+    const status = apiStatus.toLowerCase();
+
+
     if (status === 'running') return 'active';
     if (status === 'restarting') return 'reinstalling';
     if (status === 'pending') return 'pending';
     if (status === 'deleted') return 'stopped';
     if (status === 'failed') return 'error';
 
-    
-    return status as any;
+
+    return status as 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted';
 };

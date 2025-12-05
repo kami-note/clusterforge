@@ -12,9 +12,9 @@ export interface User {
 }
 
 export interface AuthResponse {
-  token: string; 
-  refreshToken?: string; 
-  expiresIn?: number; 
+  token: string;
+  refreshToken?: string;
+  expiresIn?: number;
 }
 
 export interface LoginRequest {
@@ -53,12 +53,12 @@ export interface Cluster {
   service: ServiceTemplate | null;
   startupCommand: string;
   port?: string;
-  cpuLimitPercent?: number;  
-  memoryLimit?: number;       
-  diskLimit?: number;         
+  cpuLimitPercent?: number;
+  memoryLimit?: number;
+  diskLimit?: number;
   ftp?: ClusterAccessInfo;
   webDav?: ClusterAccessInfo;
-  containerId?: string; 
+  containerId?: string;
 }
 
 export interface ClusterData {
@@ -91,24 +91,24 @@ export interface ServiceTemplate {
 
 
 export interface ClusterMetrics {
-  clusterId?: number | string; 
+  clusterId?: number | string;
   clusterName?: string;
   timestamp?: string;
 
-  
+
   cpuUsage?: number;
   cpuUsagePercent?: number;
   cpuLimitCores?: number;
   cpuThrottledTime?: number;
 
-  
+
   memoryUsage?: number;
   memoryUsageMb?: number;
   memoryLimitMb?: number;
   memoryUsagePercent?: number;
   memoryCacheMb?: number;
 
-  
+
   diskUsage?: number;
   diskUsageMb?: number;
   diskLimitMb?: number;
@@ -116,7 +116,7 @@ export interface ClusterMetrics {
   diskReadBytes?: number;
   diskWriteBytes?: number;
 
-  
+
   networkUsage?: number;
   networkRxBytes?: number;
   networkTxBytes?: number;
@@ -124,24 +124,24 @@ export interface ClusterMetrics {
   networkTxPackets?: number;
   networkLimitMbps?: number;
 
-  
+
   applicationResponseTimeMs?: number;
   applicationStatusCode?: number;
   applicationUptimeSeconds?: number;
 
-  
+
   containerRestartCount?: number;
   containerUptimeSeconds?: number;
   containerStatus?: string;
 
-  
+
   healthState?: string;
   errorMessage?: string;
 }
 
 export interface ClusterStatsMessage {
   timestamp: number;
-  clusters: Record<number | string, ClusterMetrics>; 
+  clusters: Record<number | string, ClusterMetrics>;
   systemStats?: {
     totalClusters: number;
     healthyClusters: number;
@@ -154,7 +154,7 @@ export interface ClusterStatsMessage {
 }
 
 export interface ClusterHealthStatus {
-  clusterId: number | string; 
+  clusterId: number | string;
   status: 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN';
   lastCheck?: string;
   details?: Record<string, unknown>;
@@ -188,7 +188,7 @@ export interface ApiError {
 }
 
 export interface ClusterListItem {
-  id: string; 
+  id: string;
   name: string;
   status?: string;
   port?: number;
@@ -208,13 +208,13 @@ export interface ClusterListItem {
   env?: Record<string, string>;
   ports?: number[];
   volumes?: string[];
-  containerId?: string; 
+  containerId?: string;
   ftp?: ClusterAccessInfo;
   webDav?: ClusterAccessInfo;
 }
 
 export interface ClusterDetailsResponse {
-  id: string; 
+  id: string;
   name: string;
   status?: string;
   templateName?: string;
@@ -223,10 +223,10 @@ export interface ClusterDetailsResponse {
   env?: Record<string, string>;
   ports?: number[];
   volumes?: string[];
-  containerId?: string; 
+  containerId?: string;
   ownerId?: string;
   ownerUsername?: string;
-  
+
   port?: number;
   rootPath?: string;
   userId?: number;
@@ -270,7 +270,7 @@ export interface TemplateInstantiateResponse {
 
 
 export interface CreateClusterResponse {
-  clusterId: string | null; 
+  clusterId: string | null;
   clusterName: string;
   port: number;
   ftpPort?: number;
@@ -295,3 +295,15 @@ export interface CompactMetricProps {
   realtime?: boolean;
 }
 
+
+export interface UpdateClusterLimitsRequest {
+  cpuLimitPercent?: number;
+  memoryLimit?: number;
+  diskLimit?: number;
+  networkLimit?: number;
+}
+
+export interface ContainerLogsResponse {
+  logs: string;
+  lastTimestamp?: number;
+}

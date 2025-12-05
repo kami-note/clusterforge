@@ -1,49 +1,61 @@
+
 "use client";
 
-import { useState, useMemo, useEffect, useDeferredValue, useTransition } from 'react';
+import { useState, useEffect, useTransition, useMemo, useDeferredValue } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import Skeleton from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+// import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
+  // Search,
   Plus,
-  RotateCw,
-  Edit,
-  Trash2,
-  AlertTriangle,
-  Play,
-  Square,
-  Eye,
+  // MoreVertical,
+  // Power,
+  // RefreshCw,
+  // Terminal,
+  // Settings,
+  // Filter,
+  // LayoutGrid,
+  // List,
+  // Server,
+  // Database,
+  // Globe,
+  // Zap,
+  // Clock,
+  // CheckCircle2,
+  // XCircle,
+  // AlertCircle,
+  // Loader2,
+  // ChevronRight,
+  // ChevronDown,
   Wifi,
-  WifiOff,
-  Cpu,
-  MemoryStick,
-  HardDrive
+  WifiOff
 } from 'lucide-react';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { useRouter } from 'next/navigation';
-import { useClusters } from '@/hooks/useClusters';
-import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
-import { useDebounce } from '@/hooks/useDebounce';
-import { clusterService } from '@/services/cluster.service';
+// import {
+//   DropdownMenu,
+//   DropdownMenuContent,
+//   DropdownMenuItem,
+//   DropdownMenuLabel,
+//   DropdownMenuSeparator,
+//   DropdownMenuTrigger,
+// } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
-import { ClusterStatusBadge } from './ClusterStatusBadge';
-import { CompactMetric } from './CompactMetric';
-import { ClusterFilters } from './ClusterFilters';
-import { ClusterCard } from './ClusterCard';
+import { useClustersQuery } from '@/features/clusters/hooks/use-clusters';
 import { useClusterActions } from './useClusterActions';
-import { TIMEOUTS } from '@/constants';
-import { TOAST_MESSAGES, DEFAULT_FILTERS } from './cluster-management.constants';
-import { getResourcePercentage, getUniqueValues } from './cluster-management.utils';
-import type { Cluster, ClusterAction, ClusterManagementProps } from './cluster-management.types';
+import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
+import { ClusterFilters } from './ClusterFilters';
+import type { ClusterManagementProps } from './cluster-management.types';
 import { useClusterData } from './useClusterData';
+import { useDebounce } from '@/hooks/useDebounce';
+import { ClusterCard } from './ClusterCard';
 
 
 
 export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const router = useRouter();
-  const { clusters: apiClusters, loading, updateCluster } = useClusters();
+  const { data: apiClusters = [], isLoading: loading, refetch } = useClustersQuery();
   const { metrics, connected, error: wsError } = useRealtimeMetrics();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -53,16 +65,16 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   const [wsErrorShown, setWsErrorShown] = useState(false);
 
   const { processingClusters, clusterErrors, handleAction } = useClusterActions({
-    onClusterUpdate: (clusterId, updates) => updateCluster(clusterId, updates as any)
+    onClusterUpdate: () => refetch()
   });
 
-  
+
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
-  
-  const [isPending, startTransition] = useTransition();
 
-  
+  const [isPending] = useTransition();
+
+
   useEffect(() => {
     if (wsError && !wsErrorShown && !connected) {
       setWsErrorShown(true);
@@ -75,24 +87,24 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     }
   }, [wsError, wsErrorShown, connected]);
 
-  
+
   useEffect(() => {
     if (connected && wsErrorShown) {
       setWsErrorShown(false);
     }
   }, [connected, wsErrorShown]);
 
-  
+
   const clusters = useClusterData(apiClusters, metrics);
 
-  
+
   const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
   const deferredStatusFilter = useDeferredValue(statusFilter);
   const deferredOwnerFilter = useDeferredValue(ownerFilter);
   const deferredServiceFilter = useDeferredValue(serviceFilter);
   const deferredAlertFilter = useDeferredValue(alertFilter);
 
-  
+
   const owners = useMemo(() => {
     const uniqueOwners = Array.from(
       new Set(
@@ -104,7 +116,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     return ['Todos os Donos', ...uniqueOwners];
   }, [clusters]);
 
-  
+
   const serviceTypes = useMemo(() => {
     const uniqueServices = Array.from(
       new Set(clusters.map(cluster => cluster.service))
@@ -112,7 +124,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     return ['Todos os Serviços', ...uniqueServices];
   }, [clusters]);
 
-  
+
   const filteredClusters = useMemo(() => {
     return clusters.filter(cluster => {
       const matchesSearch =
@@ -133,7 +145,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
     });
   }, [clusters, deferredSearchTerm, deferredStatusFilter, deferredOwnerFilter, deferredServiceFilter, deferredAlertFilter]);
 
-  
+
   if (loading) {
     return (
       <div className="p-6 space-y-6">
@@ -184,7 +196,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   };
 
   const handleViewDetails = (clusterId: string) => {
-    router.push(`/admin/clusters/${clusterId}`);
+    router.push('/admin/clusters/' + clusterId);
   };
 
   const clearFilters = () => {
@@ -205,12 +217,12 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-      {}
+      { }
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center space-x-2">
             <h1>Gerenciamento de Clusters</h1>
-            {}
+            { }
             {connected ? (
               <Badge variant="outline" className="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800 flex items-center space-x-1">
                 <Wifi className="h-3 w-3" />
@@ -236,7 +248,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
       </div>
 
 
-      {}
+      { }
       <ClusterFilters
         searchTerm={searchTerm}
         statusFilter={statusFilter}
@@ -254,7 +266,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
         onClearFilters={clearFilters}
       />
 
-      {}
+      { }
       <div className="space-y-2">
         {loading ? (
           <div className="space-y-2">
@@ -297,6 +309,6 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
           </div>
         )}
       </div>
-    </div >
+    </div>
   );
 }

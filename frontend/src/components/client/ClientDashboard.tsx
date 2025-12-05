@@ -10,15 +10,16 @@ import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent
+  // ChartLegend,
+  // ChartLegendContent
 } from '@/components/ui/chart';
 import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick, AlertCircle, Loader2 } from 'lucide-react';
-import { useAuth } from '@/hooks/useAuth';
+// import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { useClusters } from '@/hooks/useClusters';
+import { useClustersQuery, useClusterActionMutation } from '@/features/clusters/hooks/use-clusters';
+import { ClusterListItem } from '@/types';
+// import * as clusterApi from '@/features/clusters/api/cluster-api';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
-import { clusterService } from '@/services/cluster.service';
 import {
   calculateCpuUsageRelativeToLimit,
   calculateMemoryUsageRelativeToLimit,
@@ -30,34 +31,19 @@ interface UsageData {
   value: number;
 }
 
-const performClusterAction = async (clusterId: string, action: 'start' | 'stop' | 'restart'): Promise<boolean> => {
-  try {
-    if (action === 'start') {
-      await clusterService.startCluster(clusterId);
-      return true;
-    } else if (action === 'stop') {
-      await clusterService.stopCluster(clusterId);
-      return true;
-    } else if (action === 'restart') {
-      await clusterService.restartCluster(clusterId);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('Erro ao executar ação no cluster:', error);
-    return false;
-  }
-};
+
 
 export function ClientDashboard() {
   const router = useRouter();
-  const { } = useAuth(); 
-  const { clusters, updateCluster } = useClusters();
+  // const { } = useAuth(); 
+  // const { } = useAuth(); 
+  const { data: clusters = [], refetch } = useClustersQuery();
+  const { mutateAsync: performAction } = useClusterActionMutation();
   const { metrics: realtimeMetrics } = useRealtimeMetrics();
 
-  
+
   const aggregatedMetrics = useMemo(() => {
-    const runningClusters = clusters.filter(c =>
+    const runningClusters = clusters.filter((c: ClusterListItem) =>
       c.status === 'running' || c.status === 'active'
     );
 
@@ -70,8 +56,8 @@ export function ClientDashboard() {
       };
     }
 
-    
-    const clustersWithMetrics = runningClusters.filter(cluster => {
+
+    const clustersWithMetrics = runningClusters.filter((cluster: ClusterListItem) => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
       return metrics && (
@@ -81,23 +67,23 @@ export function ClientDashboard() {
       );
     });
 
-    
+
     if (clustersWithMetrics.length === 0) {
-      
-      const avgCpu = runningClusters.reduce((sum, c) => {
-        
-        return sum + (c.cpu || 0);
+
+      const avgCpu = runningClusters.reduce((sum: number, c: ClusterListItem) => {
+
+        return sum + (c.cpuLimitPercent || 0);
       }, 0) / runningClusters.length;
 
       return {
-        cpuPercent: Math.min(avgCpu * 0.3, 100), 
-        memoryPercent: 35, 
-        storagePercent: 40, 
-        networkPercent: 15, 
+        cpuPercent: Math.min(avgCpu * 0.3, 100),
+        memoryPercent: 35,
+        storagePercent: 40,
+        networkPercent: 15,
       };
     }
 
-    
+
     let totalCpuPercent = 0;
     let totalMemoryPercent = 0;
     let totalDiskPercent = 0;
@@ -107,12 +93,12 @@ export function ClientDashboard() {
     let validDiskCount = 0;
     let validNetworkCount = 0;
 
-    clustersWithMetrics.forEach(cluster => {
+    clustersWithMetrics.forEach((cluster: ClusterListItem) => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
 
       if (metrics) {
-        
+
         const cpuRelative = calculateCpuUsageRelativeToLimit(
           metrics.cpuUsagePercent,
           cluster.cpuLimitPercent
@@ -122,8 +108,8 @@ export function ClientDashboard() {
           validCpuCount++;
         }
 
-        
-        
+
+
         const memoryRelative = calculateMemoryUsageRelativeToLimit(
           metrics.memoryUsagePercent,
           metrics.memoryUsageMb,
@@ -134,7 +120,7 @@ export function ClientDashboard() {
           validMemoryCount++;
         }
 
-        
+
         const diskRelative = calculateDiskUsageRelativeToLimit(
           metrics.diskUsagePercent,
           metrics.diskUsageMb,
@@ -145,13 +131,13 @@ export function ClientDashboard() {
           validDiskCount++;
         }
 
-        
-        
-        
+
+
+
         if (metrics.networkRxBytes !== undefined && metrics.networkTxBytes !== undefined) {
-          
-          const hasTraffic = (metrics.networkRxBytes + metrics.networkTxBytes) > 1024 * 1024; 
-          const estimatedPercent = hasTraffic ? 15 : 5; 
+
+          const hasTraffic = (metrics.networkRxBytes + metrics.networkTxBytes) > 1024 * 1024;
+          const estimatedPercent = hasTraffic ? 15 : 5;
           totalNetworkPercent += estimatedPercent;
           validNetworkCount++;
         }
@@ -166,7 +152,7 @@ export function ClientDashboard() {
     };
   }, [clusters, realtimeMetrics]);
 
-  
+
   const usageData: UsageData[] = useMemo(() => [
     { name: 'CPU', value: Math.round(aggregatedMetrics.cpuPercent) },
     { name: 'Memória', value: Math.round(aggregatedMetrics.memoryPercent) },
@@ -178,33 +164,15 @@ export function ClientDashboard() {
     router.push(`/client/clusters/${clusterId}`);
   };
 
-  const handleClusterAction = (clusterId: string, action: 'start' | 'stop' | 'restart') => {
-    
-    updateCluster(clusterId, { status: action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting' });
-
-    
-    performClusterAction(clusterId, action)
-      .then((success) => {
-        if (!success) {
-          
-          updateCluster(clusterId, {
-            status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running'
-          });
-          toast.error(`Falha ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
-        }
-        
-      })
-      .catch((err) => {
-        
-        updateCluster(clusterId, {
-          status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running'
-        });
-        toast.error(`Erro ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
-        
-        if (!(err as any)?.name || (err as any).name !== 'BackendOffline') {
-          console.error(`Error performing cluster action:`, err);
-        }
-      });
+  const handleClusterAction = async (clusterId: string, action: 'start' | 'stop' | 'restart') => {
+    try {
+      await performAction({ action, clusterId });
+      toast.success(`Cluster ${action === 'start' ? 'iniciado' : action === 'stop' ? 'parado' : 'reiniciado'} com sucesso`);
+      refetch();
+    } catch (error) {
+      console.error(`Error performing cluster action:`, error);
+      toast.error(`Erro ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -248,7 +216,7 @@ export function ClientDashboard() {
       case 'failed':
         return 'Erro';
       default:
-        
+
         if (status) {
           const upperStatus = status.toUpperCase();
           if (['PENDING', 'ACTIVE', 'STOPPED', 'DELETED', 'ERROR'].includes(upperStatus)) {
@@ -275,7 +243,7 @@ export function ClientDashboard() {
         </div>
       </div>
 
-      {}
+      { }
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6 md:mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -319,13 +287,13 @@ export function ClientDashboard() {
             <Server className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{clusters.filter(c => c.status === 'running' || c.status === 'active').length}/{clusters.length}</div>
+            <div className="text-2xl font-bold">{clusters.filter((c: ClusterListItem) => c.status === 'running' || c.status === 'active').length}/{clusters.length}</div>
             <p className="text-xs text-muted-foreground">clusters em execução</p>
           </CardContent>
         </Card>
       </div>
 
-      {}
+      { }
       <Card>
         <CardHeader>
           <CardTitle>Uso de Recursos</CardTitle>
@@ -344,7 +312,7 @@ export function ClientDashboard() {
         </CardContent>
       </Card>
 
-      {}
+      { }
       <Card>
         <CardHeader>
           <CardTitle>Seus Clusters</CardTitle>
@@ -359,32 +327,32 @@ export function ClientDashboard() {
             </div>
           ) : (
             <div className="space-y-3 md:space-y-4">
-              {clusters.map((cluster) => (
+              {clusters.map((cluster: ClusterListItem) => (
                 <div key={cluster.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-lg gap-3 sm:gap-4">
                   <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
-                    <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 sm:mt-0 ${getStatusColor(cluster.status)}`} />
+                    <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 sm:mt-0 ${getStatusColor(cluster.status || 'unknown')}`} />
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium truncate text-sm sm:text-base">{cluster.name}</h3>
                       <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-xs sm:text-sm text-muted-foreground mt-1">
-                        <span>{getStatusText(cluster.status)}</span>
+                        <span>{getStatusText(cluster.status || 'unknown')}</span>
                         <span className="hidden sm:inline">•</span>
-                        <span className="truncate">{cluster.lastUpdate}</span>
+                        <span className="truncate">{cluster.updatedAt ? new Date(cluster.updatedAt as string).toLocaleDateString() : 'N/A'}</span>
                         <span className="hidden sm:inline">•</span>
-                        <span className="truncate">{cluster.serviceType}</span>
+                        <span className="truncate">{cluster.templateName || 'Custom'}</span>
                       </div>
-                      {}
+                      { }
                       <div className="sm:hidden text-xs text-muted-foreground mt-2">
-                        CPU: {cluster.cpu}% | RAM: {cluster.memory}% | Storage: {cluster.storage}%
+                        CPU: {cluster.cpuLimitPercent}% | RAM: {cluster.memoryLimit}GB | Storage: {cluster.diskLimit}GB
                       </div>
                     </div>
                   </div>
 
-                  {}
+                  { }
                   <div className="hidden sm:block text-sm text-muted-foreground flex-shrink-0">
-                    CPU: {cluster.cpu}% | RAM: {cluster.memory}% | Storage: {cluster.storage}%
+                    CPU: {cluster.cpuLimitPercent}% | RAM: {cluster.memoryLimit}GB | Storage: {cluster.diskLimit}GB
                   </div>
 
-                  {}
+                  { }
                   <div className="flex gap-2 flex-wrap sm:flex-nowrap">
                     {cluster.status === 'stopped' ? (
                       <Button

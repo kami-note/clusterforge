@@ -42,13 +42,13 @@ interface AllClustersConnection {
 
 
 const SSE_CONFIG = {
-  FETCH_TIMEOUT_MS: 30000, 
-  RECONNECT_DELAY_MS: 3000, 
-  MAX_RECONNECT_ATTEMPTS: 5, 
-  STREAM_TIMEOUT_MS: 300000, 
-  DISCONNECT_DELAY_MS: 100, 
-  RETRY_NETWORK_ERROR_DELAY_MS: 2000, 
-  SAFE_DISCONNECT_GRACE_MS: 1500, 
+  FETCH_TIMEOUT_MS: 30000,
+  RECONNECT_DELAY_MS: 3000,
+  MAX_RECONNECT_ATTEMPTS: 5,
+  STREAM_TIMEOUT_MS: 300000,
+  DISCONNECT_DELAY_MS: 100,
+  RETRY_NETWORK_ERROR_DELAY_MS: 2000,
+  SAFE_DISCONNECT_GRACE_MS: 1500,
 } as const;
 
 
@@ -78,16 +78,16 @@ class SseService {
   private pendingAllClustersDisconnect: NodeJS.Timeout | null = null;
   private allClustersConnectPromise: Promise<void> | null = null;
 
-  
+
   async connect(clusterId: string | number, containerId?: string): Promise<void> {
-    
+
     const existingConnection = this.connections.get(clusterId);
     if (existingConnection?.connected) {
       debugLog(`✅ SSE já está conectado para cluster ${clusterId}`);
       return;
     }
 
-    
+
     const token = this.getToken();
     if (!token) {
       console.warn(`⚠️ Token JWT não encontrado. Não é possível conectar SSE para cluster ${clusterId}.`);
@@ -98,13 +98,13 @@ class SseService {
       return;
     }
 
-    
+
     if (existingConnection) {
       this.disconnect(clusterId);
-      
+
       await new Promise(resolve => setTimeout(resolve, SSE_CONFIG.DISCONNECT_DELAY_MS));
 
-      
+
       const newToken = this.getToken();
       if (!newToken) {
         console.warn(`⚠️ Token JWT não encontrado após desconectar. Não é possível conectar SSE para cluster ${clusterId}.`);
@@ -113,7 +113,7 @@ class SseService {
       }
     }
 
-    
+
     let actualContainerId: string;
     try {
       if (!containerId) {
@@ -130,14 +130,14 @@ class SseService {
         actualContainerId = containerId;
       }
 
-      
+
       const sseUrl = `${config.api.baseUrl}/docker/containers/${actualContainerId}/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}`;
 
       debugLog(`🔌 Tentando conectar SSE para cluster ${clusterId} com containerId ${actualContainerId}`);
       debugLog(`🔗 URL do SSE: ${sseUrl}`);
       debugLog(`🔑 Token disponível: ${token ? `Sim (${token.length} chars)` : 'Não'}`);
 
-      
+
       const fetchAbortController = new AbortController();
       const fetchTimeout = setTimeout(() => {
         console.warn(`⏱️ Timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s atingido para conexão SSE do cluster ${clusterId}. Abortando...`);
@@ -146,7 +146,7 @@ class SseService {
 
       let response: Response;
       try {
-        
+
         debugLog(`📡 Iniciando fetch para SSE (timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s)...`);
         const startTime = Date.now();
         response = await fetch(sseUrl, {
@@ -173,13 +173,13 @@ class SseService {
         const errorText = await response.text().catch(() => '');
         console.error(`❌ SSE falhou para cluster ${clusterId} - Status: ${response.status} ${response.statusText}`, errorText);
 
-        
+
         if (response.status === 401) {
           console.warn(`⚠️ SSE retornou 401 (não autorizado) para cluster ${clusterId}. Verificando token...`);
           const newToken = this.getToken();
           if (newToken && newToken !== token) {
             debugLog(`🔄 Token atualizado, tentando reconectar SSE para cluster ${clusterId}...`);
-            
+
             const retryResponse = await fetch(sseUrl, {
               headers: {
                 Authorization: `Bearer ${newToken}`,
@@ -194,7 +194,7 @@ class SseService {
             }
 
             debugLog(`✅ Retry SSE bem-sucedido para cluster ${clusterId} com novo token`);
-            
+
             const abortController = new AbortController();
             const connection: SseConnection = {
               eventSource: abortController,
@@ -224,7 +224,7 @@ class SseService {
         reconnectTimeout: null,
       };
 
-      
+
       debugLog(`✅ Resposta SSE recebida para cluster ${clusterId} - Status: ${response.status} ${response.statusText}`);
       this.processSseStream(response, clusterId, connection, actualContainerId, abortController.signal);
 
@@ -233,45 +233,45 @@ class SseService {
     } catch (error: unknown) {
       const err = error as Error & { name?: string; message?: string; stack?: string; containerId?: string };
 
-      
+
       if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
         debugLog(`ℹ️ Conexão SSE cancelada para cluster ${clusterId}:`, err?.message || 'Abortado manualmente');
         return;
       }
 
-      
+
       console.error(`❌ Erro ao criar conexão SSE para cluster ${clusterId}:`, err);
       if (process.env.NODE_ENV === 'development') {
         console.error(`   Tipo do erro: ${err?.name || 'Unknown'}`);
         console.error(`   Mensagem: ${err?.message || 'No message'}`);
         console.error(`   Stack: ${err?.stack || 'No stack'}`);
 
-        
+
         try {
           const containerIdForError = err?.containerId || containerId || 'unknown';
           const sseUrl = `${config.api.baseUrl}/docker/containers/${containerIdForError}/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}`;
           console.error(`   URL tentada: ${sseUrl}`);
-        } catch (urlError) {
+        } catch {
           console.error(`   ContainerId: ${containerId || 'unknown'}`);
         }
       }
 
       this.notifyConnectionCallbacks(clusterId, false);
 
-      
-      
+
+
       if (err?.name === 'TypeError' && err?.message?.includes('fetch')) {
         debugLog(`🔄 Tentando reconectar SSE para cluster ${clusterId} após NetworkError...`);
         setTimeout(() => {
           this.connect(clusterId, actualContainerId).catch(() => {
-            
+
           });
         }, SSE_CONFIG.RETRY_NETWORK_ERROR_DELAY_MS);
       }
     }
   }
 
-  
+
   disconnect(clusterId: string | number): void {
     const connection = this.connections.get(clusterId);
     if (!connection) return;
@@ -296,14 +296,14 @@ class SseService {
     this.notifyConnectionCallbacks(clusterId, false);
   }
 
-  
+
   disconnectAll(): void {
     const clusterIds = Array.from(this.connections.keys());
     clusterIds.forEach((clusterId) => this.disconnect(clusterId));
     this.disconnectAllClusters({ force: true, clearSubscribers: true });
   }
 
-  
+
   async connectAllClusters(intervalMillis: number = 5000): Promise<void> {
     if (this.allClustersConnection?.connected) {
       debugLog('✅ SSE já está conectado para todos os clusters');
@@ -435,7 +435,7 @@ class SseService {
     await this.connectAllClusters(intervalMillis);
   }
 
-  
+
   disconnectAllClusters(options: { subscriberId?: string; force?: boolean; clearSubscribers?: boolean } = {}): void {
     const { subscriberId, force = false } = options;
     const clearSubscribers = options.clearSubscribers ?? (!subscriberId || force);
@@ -490,7 +490,7 @@ class SseService {
     debugLog(`🔌 SSE desconectado para todos os clusters`);
   }
 
-  
+
   private async processAllClustersSseStream(
     response: Response,
     connection: AllClustersConnection,
@@ -553,7 +553,7 @@ class SseService {
               eventCount++;
               try {
                 const jsonData = JSON.parse(data.trim());
-                
+
                 const clusterId = jsonData.clusterId || jsonData.id;
                 const metrics: ClusterMetrics = this.mapClusterMetricsEventToClusterMetrics(clusterId, jsonData);
 
@@ -572,7 +572,8 @@ class SseService {
           }
         }
       }
-    } catch (error: any) {
+    } catch (err: unknown) {
+      const error = err as Error & { name?: string; message?: string };
       if (signal.aborted) {
         return;
       }
@@ -591,7 +592,7 @@ class SseService {
       connection.connected = false;
       this.notifyAllClustersConnectionChange(false);
 
-      
+
       if (connection.reconnectAttempts < this.maxReconnectAttempts) {
         this.scheduleAllClustersReconnect(connection);
       } else {
@@ -601,7 +602,7 @@ class SseService {
     }
   }
 
-  
+
   private scheduleAllClustersReconnect(connection: AllClustersConnection): void {
     if (connection.reconnectTimeout) {
       clearTimeout(connection.reconnectTimeout);
@@ -622,7 +623,7 @@ class SseService {
     }, this.reconnectDelay);
   }
 
-  
+
   private mapClusterMetricsEventToClusterMetrics(
     clusterId: string | number,
     event: {
@@ -638,6 +639,7 @@ class SseService {
       blkReadBytes?: number;
       blkWriteBytes?: number;
       pidsCurrent?: number;
+      uptimeSeconds?: number;
     }
   ): ClusterMetrics {
     return {
@@ -651,12 +653,13 @@ class SseService {
       networkTxBytes: event.netOutputBytes,
       diskReadBytes: event.blkReadBytes,
       diskWriteBytes: event.blkWriteBytes,
+      containerUptimeSeconds: event.uptimeSeconds,
     };
   }
 
-  
+
   private notifyAllClustersConnectionChange(connected: boolean): void {
-    
+
     this.connections.forEach((_, clusterId) => {
       this.notifyConnectionCallbacks(clusterId, connected);
     });
@@ -670,18 +673,18 @@ class SseService {
     });
   }
 
-  
+
   isConnected(clusterId: string | number): boolean {
     const connection = this.connections.get(clusterId);
     return connection?.connected ?? false;
   }
 
-  
+
   isAllClustersConnected(): boolean {
     return this.allClustersConnection?.connected ?? false;
   }
 
-  
+
   private async processSseStream(
     response: Response,
     clusterId: string | number,
@@ -689,8 +692,8 @@ class SseService {
     containerId: string,
     signal: AbortSignal
   ): Promise<void> {
-    
-    (connection as any).containerId = containerId;
+
+    (connection as unknown as { containerId: string }).containerId = containerId;
     try {
       debugLog(`📡 Iniciando processamento do stream SSE para cluster ${clusterId}...`);
 
@@ -703,7 +706,7 @@ class SseService {
 
       debugLog(`✅ Reader SSE criado para cluster ${clusterId}. Aguardando dados...`);
 
-      
+
       connection.connected = true;
       connection.reconnectAttempts = 0;
       console.log(`✅ SSE conectado e pronto para receber dados para cluster ${clusterId}`);
@@ -712,7 +715,7 @@ class SseService {
       let buffer = '';
       let eventCount = 0;
 
-      
+
 
       while (!signal.aborted) {
         const { done, value } = await reader.read();
@@ -722,18 +725,18 @@ class SseService {
           break;
         }
 
-        
+
         if (eventCount === 0 && value && process.env.NODE_ENV === 'development') {
           const firstChunk = decoder.decode(value, { stream: true });
           debugLog(`📥 Primeiro chunk SSE recebido para cluster ${clusterId} (${firstChunk.length} bytes):`, firstChunk.substring(0, 200));
         }
 
-        
+
         buffer += decoder.decode(value, { stream: true });
 
-        
+
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; 
+        buffer = lines.pop() || '';
 
         let eventType = 'stats';
         let data = '';
@@ -744,21 +747,21 @@ class SseService {
           } else if (line.startsWith('data:')) {
             const dataLine = line.substring(5).trim();
             if (dataLine) {
-              
+
               if (data) {
                 data += '\n';
               }
               data += dataLine;
             }
           } else if (line === '' || line === '\r') {
-            
+
             if (data && eventType === 'stats') {
               eventCount++;
               try {
                 const jsonData = JSON.parse(data.trim());
                 const metrics: ClusterMetrics = this.mapContainerStatsToClusterMetrics(clusterId, jsonData);
 
-                
+
                 if (process.env.NODE_ENV === 'development' && (eventCount === 1 || eventCount % 10 === 0)) {
                   debugLog(`📊 SSE evento ${eventCount} recebido para cluster ${clusterId} - CPU: ${metrics.cpuUsagePercent?.toFixed(2)}%, RAM: ${metrics.memoryUsagePercent?.toFixed(2)}%`);
                 }
@@ -769,15 +772,16 @@ class SseService {
                 console.error('Data recebida:', data.trim().substring(0, 500));
               }
             }
-            
+
             data = '';
             eventType = 'stats';
           }
         }
       }
-    } catch (error: any) {
+    } catch (err: unknown) {
+      const error = err as Error & { name?: string; message?: string };
       if (signal.aborted) {
-        
+
         return;
       }
 
@@ -785,8 +789,8 @@ class SseService {
       connection.connected = false;
       this.notifyConnectionCallbacks(clusterId, false);
 
-      
-      const storedContainerId = (connection as any).containerId as string | undefined;
+
+      const storedContainerId = (connection as unknown as { containerId: string }).containerId as string | undefined;
       if (connection.reconnectAttempts < this.maxReconnectAttempts && storedContainerId) {
         this.scheduleReconnect(clusterId, storedContainerId, connection);
       } else {
@@ -796,7 +800,7 @@ class SseService {
     }
   }
 
-  
+
   private scheduleReconnect(
     clusterId: string | number,
     containerId: string,
@@ -821,7 +825,7 @@ class SseService {
     }, this.reconnectDelay);
   }
 
-  
+
   private mapContainerStatsToClusterMetrics(
     clusterId: string | number,
     stats: {
@@ -836,6 +840,7 @@ class SseService {
       blkReadBytes: number;
       blkWriteBytes: number;
       pidsCurrent: number;
+      uptimeSeconds?: number;
     }
   ): ClusterMetrics {
     return {
@@ -849,34 +854,35 @@ class SseService {
       networkTxBytes: stats.netOutputBytes,
       diskReadBytes: stats.blkReadBytes,
       diskWriteBytes: stats.blkWriteBytes,
+      containerUptimeSeconds: stats.uptimeSeconds,
     };
   }
 
-  
+
   private getToken(): string | null {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem(STORAGE_KEYS.TOKEN) || localStorage.getItem(config.auth.tokenKey);
   }
 
-  
+
   onMetrics(callback: MetricsCallback): () => void {
     this.metricsCallbacks.add(callback);
     return () => this.metricsCallbacks.delete(callback);
   }
 
-  
+
   onConnectionChange(callback: ConnectionCallback): () => void {
     this.connectionCallbacks.add(callback);
     return () => this.connectionCallbacks.delete(callback);
   }
 
-  
+
   onAllClustersConnectionChange(callback: AllClustersConnectionCallback): () => void {
     this.allClustersConnectionCallbacks.add(callback);
     return () => this.allClustersConnectionCallbacks.delete(callback);
   }
 
-  
+
   private notifyMetricsCallbacks(clusterId: string | number, metrics: ClusterMetrics): void {
     this.metricsCallbacks.forEach((callback) => {
       try {
@@ -887,7 +893,7 @@ class SseService {
     });
   }
 
-  
+
   private notifyConnectionCallbacks(clusterId: string | number, connected: boolean): void {
     this.connectionCallbacks.forEach((callback) => {
       try {
@@ -898,7 +904,7 @@ class SseService {
     });
   }
 
-  
+
   async connectLogs(clusterId: string | number, containerId: string, sinceSeconds?: number): Promise<void> {
     const existingConnection = this.logConnections.get(clusterId);
     if (existingConnection?.connected) {
@@ -971,7 +977,8 @@ class SseService {
       debugLog(`✅ SSE de logs conectado para cluster ${clusterId}`);
 
       await this.processLogsStream(response, clusterId, connection, containerId, controller.signal);
-    } catch (error: any) {
+    } catch (err: unknown) {
+      const error = err as Error;
       if (error.name === 'AbortError') {
         debugLog(`🔌 SSE de logs desconectado manualmente para cluster ${clusterId}`);
         return;
@@ -982,7 +989,7 @@ class SseService {
     }
   }
 
-  
+
   disconnectLogs(clusterId: string | number): void {
     const connection = this.logConnections.get(clusterId);
     if (connection) {
@@ -997,7 +1004,7 @@ class SseService {
     }
   }
 
-  
+
   private async processLogsStream(
     response: Response,
     clusterId: string | number,
@@ -1034,7 +1041,7 @@ class SseService {
         }
 
         const lines = buffer.split('\n');
-        
+
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -1049,7 +1056,7 @@ class SseService {
               data += dataLine;
             }
           } else if (line === '' || line === '\r') {
-            
+
             if (data && eventType === 'log') {
               emitLogEvent(data);
             }
@@ -1058,31 +1065,32 @@ class SseService {
           }
         }
 
-        
+
         if (done) {
-          
+
           if (data && eventType === 'log') {
             emitLogEvent(data);
             data = '';
           }
 
-          
+
           if (buffer.trim()) {
-            
+
             if (buffer.startsWith('data:')) {
               const dataLine = buffer.substring(5).trim();
               if (dataLine) {
                 emitLogEvent(dataLine);
               }
             } else if (buffer.trim() && !buffer.startsWith('event:')) {
-              
+
               emitLogEvent(buffer.trim());
             }
           }
           break;
         }
       }
-    } catch (error: any) {
+    } catch (err: unknown) {
+      const error = err as Error;
       if (signal.aborted) {
         debugLog(`🔌 SSE de logs desconectado para cluster ${clusterId}`);
         return;
@@ -1098,7 +1106,7 @@ class SseService {
     }
   }
 
-  
+
   private scheduleLogsReconnect(
     clusterId: string | number,
     connection: LogsConnection
@@ -1107,7 +1115,7 @@ class SseService {
       clearTimeout(connection.reconnectTimeout);
     }
 
-    
+
     const containerId = connection.containerId;
     if (!containerId) {
       debugLog(`⚠️ Não é possível reconectar: containerId não disponível para cluster ${clusterId}`);
@@ -1134,23 +1142,23 @@ class SseService {
     }, this.reconnectDelay);
   }
 
-  
+
   onLogs(callback: LogsCallback): () => void {
     this.logsCallbacks.add(callback);
     return () => this.logsCallbacks.delete(callback);
   }
 
-  
+
   private parseLogEvent(rawData: string, containerId: string): ContainerLogEventPayload | null {
     if (!rawData || !rawData.trim()) {
       return null;
     }
 
-    
+
     try {
       const parsed = JSON.parse(rawData) as ContainerLogEventPayload;
 
-      
+
       if (Array.isArray(parsed)) {
         if (parsed.length === 0) {
           return null;
@@ -1161,7 +1169,7 @@ class SseService {
 
       return this.normalizeLogEvent(parsed, containerId);
     } catch (error) {
-      
+
       if (process.env.NODE_ENV === 'development') {
         debugLog('Falha ao converter evento de log SSE. Usando fallback de texto puro.', error);
       }
@@ -1173,7 +1181,7 @@ class SseService {
     }
   }
 
-  
+
   private normalizeLogEvent(parsed: ContainerLogEventPayload, containerId: string): ContainerLogEventPayload {
     const epochSecond =
       typeof parsed.epochSecond === 'number'
@@ -1195,7 +1203,8 @@ class SseService {
     this.logsCallbacks.forEach((callback) => {
       try {
         callback(clusterId, logEvent);
-      } catch (error) {
+      } catch (err: unknown) {
+        const error = err as Error;
         console.error('Erro em callback de logs:', error);
       }
     });

@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import ClientLayout from "./ClientLayout";
 import { STORAGE_KEYS } from "@/constants";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import ReactQueryProvider from "@/providers/react-query-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -151,7 +152,9 @@ export default function RootLayout({
         <ErrorBoundary>
           <ThemeProvider>
             <AuthProvider>
-              <ClientLayout>{children}</ClientLayout>
+              <ReactQueryProvider>
+                <ClientLayout>{children}</ClientLayout>
+              </ReactQueryProvider>
             </AuthProvider>
           </ThemeProvider>
         </ErrorBoundary>

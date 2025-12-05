@@ -40,15 +40,14 @@ public class ContinuousMetricCollectionService {
 	private final ClusterRepository clusterRepository;
 	private final MetricStorageService metricStorageService;
 	private final ScheduledExecutorService scheduler;
-	
+
 	// Mapa para rastrear callbacks ativos por containerId
 	private final Map<String, ResultCallback.Adapter<Statistics>> activeCallbacks = new ConcurrentHashMap<>();
 
 	public ContinuousMetricCollectionService(
-		DockerConnection dockerConnection,
-		ClusterRepository clusterRepository,
-		MetricStorageService metricStorageService
-	) {
+			DockerConnection dockerConnection,
+			ClusterRepository clusterRepository,
+			MetricStorageService metricStorageService) {
 		this.dockerClient = dockerConnection.getClient();
 		this.clusterRepository = clusterRepository;
 		this.metricStorageService = metricStorageService;
@@ -68,18 +67,18 @@ public class ContinuousMetricCollectionService {
 		try {
 			// Buscar todos os clusters com containers ativos
 			List<ClusterInstance> activeClusters = clusterRepository.findAll().stream()
-				.filter(c -> c.getContainerId() != null && !c.getContainerId().isBlank())
-				.filter(c -> {
-					// Verificar se o container está realmente rodando
-					try {
-						var inspect = dockerClient.inspectContainerCmd(c.getContainerId()).exec();
-						return inspect.getState() != null && Boolean.TRUE.equals(inspect.getState().getRunning());
-					} catch (Exception e) {
-						logger.debug("Container {} não está rodando ou não existe mais", c.getContainerId());
-						return false;
-					}
-				})
-				.toList();
+					.filter(c -> c.getContainerId() != null && !c.getContainerId().isBlank())
+					.filter(c -> {
+						// Verificar se o container está realmente rodando
+						try {
+							var inspect = dockerClient.inspectContainerCmd(c.getContainerId()).exec();
+							return inspect.getState() != null && Boolean.TRUE.equals(inspect.getState().getRunning());
+						} catch (Exception e) {
+							logger.debug("Container {} não está rodando ou não existe mais", c.getContainerId());
+							return false;
+						}
+					})
+					.toList();
 
 			// Iniciar coleta para containers que ainda não estão sendo coletados
 			for (ClusterInstance cluster : activeClusters) {
@@ -99,8 +98,8 @@ public class ContinuousMetricCollectionService {
 			activeCallbacks.entrySet().removeIf(entry -> {
 				String containerId = entry.getKey();
 				boolean isActive = activeClusters.stream()
-					.anyMatch(c -> containerId.equals(c.getContainerId()));
-				
+						.anyMatch(c -> containerId.equals(c.getContainerId()));
+
 				if (!isActive) {
 					logger.debug("Parando coleta de métricas para container {} (não está mais ativo)", containerId);
 					try {
@@ -123,14 +122,29 @@ public class ContinuousMetricCollectionService {
 	 */
 	private void startMetricCollection(UUID clusterId, String containerId) {
 		try {
+			// Buscar o tempo de início do container
+			java.time.Instant startedAt = null;
+			try {
+				var inspect = dockerClient.inspectContainerCmd(containerId).exec();
+				if (inspect.getState() != null && inspect.getState().getStartedAt() != null) {
+					startedAt = java.time.Instant.parse(inspect.getState().getStartedAt());
+				}
+			} catch (Exception e) {
+				logger.warn("Não foi possível obter o tempo de início do container {}: {}", containerId,
+						e.getMessage());
+			}
+
+			final java.time.Instant containerStartedAt = startedAt;
+
 			ResultCallback.Adapter<Statistics> callback = new ResultCallback.Adapter<Statistics>() {
 				private volatile boolean closed = false;
 
 				@Override
 				public void onNext(Statistics stats) {
-					if (closed) return;
+					if (closed)
+						return;
 					try {
-						ContainerStats dto = ContainerMapper.toStats(containerId, stats);
+						ContainerStats dto = ContainerMapper.toStats(containerId, stats, containerStartedAt);
 						// Persistir métrica no banco de dados
 						metricStorageService.storeMetricAsync(clusterId, containerId, dto);
 					} catch (Exception e) {
@@ -140,7 +154,8 @@ public class ContinuousMetricCollectionService {
 
 				@Override
 				public void onError(Throwable throwable) {
-					logger.warn("Erro no callback de métricas do container {}: {}", containerId, throwable.getMessage());
+					logger.warn("Erro no callback de métricas do container {}: {}", containerId,
+							throwable.getMessage());
 					closeQuietly();
 					activeCallbacks.remove(containerId);
 				}
@@ -153,7 +168,8 @@ public class ContinuousMetricCollectionService {
 				}
 
 				private void closeQuietly() {
-					if (closed) return;
+					if (closed)
+						return;
 					closed = true;
 					try {
 						this.close();
@@ -167,8 +183,8 @@ public class ContinuousMetricCollectionService {
 
 			// Iniciar stream de stats
 			dockerClient.statsCmd(containerId)
-				.withNoStream(false)
-				.exec(callback);
+					.withNoStream(false)
+					.exec(callback);
 
 			logger.debug("Iniciada coleta contínua de métricas para container {} (cluster {})", containerId, clusterId);
 
@@ -235,4 +251,3 @@ public class ContinuousMetricCollectionService {
 		}
 	}
 }
-

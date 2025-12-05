@@ -6,9 +6,9 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 
-const ClusterDetails = lazy(() => 
-  import("@/components/clusters/ClusterDetails").then(module => ({ 
-    default: module.ClusterDetails 
+const ClusterDetails = lazy(() =>
+  import("@/features/clusters/components/ClusterDetails").then(module => ({
+    default: module.ClusterDetails
   }))
 );
 
@@ -23,9 +23,9 @@ export default function AdminClusterDetailsPage({ params }: { params: Promise<{ 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <Suspense fallback={<LoadingSpinner size="lg" text="Carregando detalhes do cluster..." />}>
-        <ClusterDetails 
-          clusterId={id} 
-          onBack={handleBack} 
+        <ClusterDetails
+          clusterId={id}
+          onBack={handleBack}
         />
       </Suspense>
     </ProtectedRoute>

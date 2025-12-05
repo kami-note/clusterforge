@@ -45,10 +45,9 @@ public class DockerStreamService {
 	private final LogStorageService logStorageService;
 
 	public DockerStreamService(
-		DockerConnection connection,
-		ClusterRepository clusterRepository,
-		LogStorageService logStorageService
-	) {
+			DockerConnection connection,
+			ClusterRepository clusterRepository,
+			LogStorageService logStorageService) {
 		this.dockerClient = Objects.requireNonNull(connection, "connection").getClient();
 		this.clusterRepository = clusterRepository;
 		this.logStorageService = logStorageService;
@@ -62,7 +61,26 @@ public class DockerStreamService {
 			return Optional.empty();
 		}
 		return clusterRepository.findByContainerId(containerId)
-			.map(ClusterInstance::getId);
+				.map(ClusterInstance::getId);
+	}
+
+	/**
+	 * Obtém o timestamp de quando o container foi iniciado.
+	 * Busca diretamente do estado do container via Docker inspect.
+	 * 
+	 * @param containerId ID do container Docker
+	 * @return Instant do momento de início do container, ou null se não disponível
+	 */
+	private java.time.Instant getContainerStartTime(String containerId) {
+		try {
+			var inspect = dockerClient.inspectContainerCmd(containerId).exec();
+			if (inspect.getState() != null && inspect.getState().getStartedAt() != null) {
+				return java.time.Instant.parse(inspect.getState().getStartedAt());
+			}
+		} catch (Exception e) {
+			log.trace("Erro ao obter start time do container {}: {}", containerId, e.getMessage());
+		}
+		return null;
 	}
 
 	public SseEmitter streamContainerStats(String containerId, long timeoutMillis) {
@@ -75,55 +93,82 @@ public class DockerStreamService {
 
 		emitter.onCompletion(() -> executor.shutdown());
 		emitter.onTimeout(() -> {
-			try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
+			try {
+				emitter.complete();
+			} catch (Exception e) {
+				log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+			}
 			executor.shutdown();
 		});
 		emitter.onError(ex -> executor.shutdown());
 
+		// Buscar startedAt uma vez antes de iniciar o stream (otimização)
+		final java.time.Instant startedAt = getContainerStartTime(containerId);
+
 		executor.submit(() -> {
 			try {
 				dockerClient.statsCmd(containerId).withNoStream(false)
-					.exec(new ResultCallback.Adapter<Statistics>() {
-						private volatile boolean closed = false;
+						.exec(new ResultCallback.Adapter<Statistics>() {
+							private volatile boolean closed = false;
 
-						@Override
-						public void onNext(Statistics stats) {
-							try {
-								ContainerStats dto = ContainerMapper.toStats(containerId, stats);
-								emitter.send(SseEmitter.event()
-									.name("stats")
-									.data(dto, MediaType.APPLICATION_JSON));
-								// Nota: Métricas são coletadas continuamente pelo ContinuousMetricCollectionService
-								// Não persistir aqui para evitar duplicação
-							} catch (IOException e) {
-								try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
+							@Override
+							public void onNext(Statistics stats) {
+								try {
+									ContainerStats dto = ContainerMapper.toStats(containerId, stats, startedAt);
+									emitter.send(SseEmitter.event()
+											.name("stats")
+											.data(dto, MediaType.APPLICATION_JSON));
+									// Nota: Métricas são coletadas continuamente pelo
+									// ContinuousMetricCollectionService
+									// Não persistir aqui para evitar duplicação
+								} catch (IOException e) {
+									try {
+										emitter.completeWithError(e);
+									} catch (Exception ex) {
+										log.trace("Erro esperado em operação SSE: {}", ex.getMessage());
+									}
+									closeQuietly();
+								}
+							}
+
+							@Override
+							public void onError(Throwable throwable) {
+								try {
+									emitter.completeWithError(throwable);
+								} catch (Exception e) {
+									log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+								}
 								closeQuietly();
 							}
-						}
 
-						@Override
-						public void onError(Throwable throwable) {
-							try { emitter.completeWithError(throwable); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
-							closeQuietly();
-						}
+							@Override
+							public void onComplete() {
+								try {
+									emitter.complete();
+								} catch (Exception e) {
+									log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+								}
+								closeQuietly();
+							}
 
-						@Override
-						public void onComplete() {
-							try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
-							closeQuietly();
-						}
-
-						private void closeQuietly() {
-							if (closed) return;
-							closed = true;
-							try {
-								// Adapter has close() which cancels the stream
-								this.close();
-							} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
-						}
-					});
+							private void closeQuietly() {
+								if (closed)
+									return;
+								closed = true;
+								try {
+									// Adapter has close() which cancels the stream
+									this.close();
+								} catch (IOException e) {
+									log.trace("Erro ao fechar callback: {}", e.getMessage());
+								}
+							}
+						});
 			} catch (Exception e) {
-				try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
+				try {
+					emitter.completeWithError(e);
+				} catch (Exception ex) {
+					log.trace("Erro esperado em operação SSE: {}", ex.getMessage());
+				}
 			}
 		});
 
@@ -131,19 +176,20 @@ public class DockerStreamService {
 	}
 
 	/**
-	 * Stream de métricas de múltiplos containers (todos os clusters visíveis ao usuário).
+	 * Stream de métricas de múltiplos containers (todos os clusters visíveis ao
+	 * usuário).
 	 * Envia métricas periodicamente (não em tempo real) para reduzir carga.
 	 * 
-	 * @param clusters Lista de clusters visíveis ao usuário (com containerId)
-	 * @param timeoutMillis Timeout do SSE
-	 * @param intervalMillis Intervalo entre atualizações de métricas (padrão: 5 segundos)
+	 * @param clusters       Lista de clusters visíveis ao usuário (com containerId)
+	 * @param timeoutMillis  Timeout do SSE
+	 * @param intervalMillis Intervalo entre atualizações de métricas (padrão: 5
+	 *                       segundos)
 	 * @return SseEmitter para stream de métricas
 	 */
 	public SseEmitter streamAllClustersMetrics(
-		List<ClusterInstance> clusters,
-		long timeoutMillis,
-		long intervalMillis
-	) {
+			List<ClusterInstance> clusters,
+			long timeoutMillis,
+			long intervalMillis) {
 		final SseEmitter emitter = new SseEmitter(timeoutMillis);
 		final var executor = Executors.newCachedThreadPool(r -> {
 			Thread t = new Thread(r, "docker-stats-all");
@@ -159,7 +205,9 @@ public class DockerStreamService {
 			activeCallbacks.values().forEach(callback -> {
 				try {
 					callback.close();
-				} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
+				} catch (IOException e) {
+					log.trace("Erro ao fechar callback: {}", e.getMessage());
+				}
 			});
 			activeCallbacks.clear();
 			executor.shutdown();
@@ -169,10 +217,16 @@ public class DockerStreamService {
 			activeCallbacks.values().forEach(callback -> {
 				try {
 					callback.close();
-				} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
+				} catch (IOException e) {
+					log.trace("Erro ao fechar callback: {}", e.getMessage());
+				}
 			});
 			activeCallbacks.clear();
-			try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
+			try {
+				emitter.complete();
+			} catch (Exception e) {
+				log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+			}
 			executor.shutdown();
 		});
 
@@ -180,7 +234,9 @@ public class DockerStreamService {
 			activeCallbacks.values().forEach(callback -> {
 				try {
 					callback.close();
-				} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
+				} catch (IOException e) {
+					log.trace("Erro ao fechar callback: {}", e.getMessage());
+				}
 			});
 			activeCallbacks.clear();
 			executor.shutdown();
@@ -188,13 +244,15 @@ public class DockerStreamService {
 
 		// Filtrar apenas clusters com containerId válido
 		List<ClusterInstance> validClusters = clusters.stream()
-			.filter(c -> c.getContainerId() != null && !c.getContainerId().isBlank())
-			.toList();
+				.filter(c -> c.getContainerId() != null && !c.getContainerId().isBlank())
+				.toList();
 
 		if (validClusters.isEmpty()) {
 			try {
 				emitter.complete();
-			} catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
+			} catch (Exception e) {
+				log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+			}
 			return emitter;
 		}
 
@@ -205,6 +263,8 @@ public class DockerStreamService {
 		for (ClusterInstance cluster : validClusters) {
 			final UUID clusterId = cluster.getId();
 			final String containerId = cluster.getContainerId();
+			// Buscar startedAt uma vez antes de iniciar o stream (otimização)
+			final java.time.Instant startedAt = getContainerStartTime(containerId);
 
 			executor.submit(() -> {
 				try {
@@ -213,11 +273,13 @@ public class DockerStreamService {
 
 						@Override
 						public void onNext(Statistics stats) {
-							if (closed) return;
+							if (closed)
+								return;
 							try {
-								ContainerStats dto = ContainerMapper.toStats(containerId, stats);
+								ContainerStats dto = ContainerMapper.toStats(containerId, stats, startedAt);
 								lastMetrics.put(clusterId, dto);
-								// Nota: Métricas são coletadas continuamente pelo ContinuousMetricCollectionService
+								// Nota: Métricas são coletadas continuamente pelo
+								// ContinuousMetricCollectionService
 								// Não persistir aqui para evitar duplicação
 							} catch (Exception e) {
 								log.trace("Erro ao processar stats do container {}: {}", containerId, e.getMessage());
@@ -237,11 +299,14 @@ public class DockerStreamService {
 						}
 
 						private void closeQuietly() {
-							if (closed) return;
+							if (closed)
+								return;
 							closed = true;
 							try {
 								this.close();
-							} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
+							} catch (IOException e) {
+								log.trace("Erro ao fechar callback: {}", e.getMessage());
+							}
 						}
 					};
 
@@ -254,36 +319,38 @@ public class DockerStreamService {
 			});
 		}
 
-		// Thread separada para enviar métricas agregadas periodicamente usando ScheduledExecutorService
+		// Thread separada para enviar métricas agregadas periodicamente usando
+		// ScheduledExecutorService
 		ScheduledExecutorService metricsScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
 			Thread t = new Thread(r, "docker-stats-scheduler");
 			t.setDaemon(true);
 			return t;
 		});
-		
+
 		// Flag atômica para controlar loop
 		AtomicBoolean shouldContinue = new AtomicBoolean(true);
-		
+
 		// Tarefa para enviar métricas
 		// Nota: NÃO chamar metricsScheduler.shutdown() de dentro desta tarefa
-		// pois isso causa race condition. O shutdown é feito nos callbacks onCompletion/onError.
+		// pois isso causa race condition. O shutdown é feito nos callbacks
+		// onCompletion/onError.
 		Runnable sendMetricsTask = () -> {
 			if (!shouldContinue.get() || activeCallbacks.isEmpty()) {
 				// Apenas sinaliza para parar; o shutdown é feito externamente
 				shouldContinue.set(false);
 				return;
 			}
-			
+
 			for (ClusterInstance cluster : validClusters) {
 				UUID clusterId = cluster.getId();
 				ContainerStats stats = lastMetrics.get(clusterId);
-				
+
 				if (stats != null) {
 					try {
 						ClusterMetricsEvent event = ClusterMetricsEvent.from(clusterId, stats);
 						emitter.send(SseEmitter.event()
-							.name("stats")
-							.data(event, MediaType.APPLICATION_JSON));
+								.name("stats")
+								.data(event, MediaType.APPLICATION_JSON));
 					} catch (IOException e) {
 						// Cliente desconectou, sinaliza para parar
 						// O shutdown do scheduler é feito no callback onError
@@ -293,15 +360,14 @@ public class DockerStreamService {
 				}
 			}
 		};
-		
+
 		// Agendar envio periódico de métricas com delay inicial
 		metricsScheduler.scheduleAtFixedRate(
-			sendMetricsTask, 
-			ClusterConstants.INITIAL_METRICS_DELAY_MS, 
-			intervalMillis, 
-			TimeUnit.MILLISECONDS
-		);
-		
+				sendMetricsTask,
+				ClusterConstants.INITIAL_METRICS_DELAY_MS,
+				intervalMillis,
+				TimeUnit.MILLISECONDS);
+
 		// Encerrar scheduler e fechar callbacks quando emitter for completado
 		Runnable cleanup = () -> {
 			shouldContinue.set(false);
@@ -327,18 +393,17 @@ public class DockerStreamService {
 	 * Envia logs em tempo real conforme são gerados pelo container.
 	 * Também persiste logs no banco de dados.
 	 * 
-	 * @param containerId ID do container
+	 * @param containerId   ID do container
 	 * @param timeoutMillis Timeout do SSE (padrão: 5 minutos)
-	 * @param tailLines Número de linhas iniciais a enviar (opcional)
-	 * @param sinceSeconds Logs desde X segundos atrás (opcional)
+	 * @param tailLines     Número de linhas iniciais a enviar (opcional)
+	 * @param sinceSeconds  Logs desde X segundos atrás (opcional)
 	 * @return SseEmitter para stream de logs
 	 */
 	public SseEmitter streamContainerLogs(
-		String containerId,
-		long timeoutMillis,
-		Integer tailLines,
-		Integer sinceSeconds
-	) {
+			String containerId,
+			long timeoutMillis,
+			Integer tailLines,
+			Integer sinceSeconds) {
 		// Buscar clusterId pelo containerId para persistir logs
 		Optional<UUID> clusterIdOpt = findClusterIdByContainerId(containerId);
 		final SseEmitter emitter = new SseEmitter(timeoutMillis);
@@ -350,7 +415,11 @@ public class DockerStreamService {
 
 		emitter.onCompletion(() -> executor.shutdown());
 		emitter.onTimeout(() -> {
-			try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
+			try {
+				emitter.complete();
+			} catch (Exception e) {
+				log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+			}
 			executor.shutdown();
 		});
 		emitter.onError(ex -> executor.shutdown());
@@ -358,10 +427,10 @@ public class DockerStreamService {
 		executor.submit(() -> {
 			try {
 				var cmd = dockerClient.logContainerCmd(containerId)
-					.withStdOut(true)
-					.withStdErr(true)
-					.withTimestamps(true)
-					.withFollowStream(true); // Segue logs em tempo real
+						.withStdOut(true)
+						.withStdErr(true)
+						.withTimestamps(true)
+						.withFollowStream(true); // Segue logs em tempo real
 
 				if (tailLines != null) {
 					cmd.withTail(tailLines);
@@ -375,53 +444,70 @@ public class DockerStreamService {
 
 					@Override
 					public void onNext(Frame frame) {
-						if (closed) return;
+						if (closed)
+							return;
 						try {
 							if (frame != null && frame.getPayload() != null) {
 								ContainerLogEvent event = ContainerLogParser.parseFrame(containerId, frame);
 								if (event != null) {
 									emitter.send(SseEmitter.event()
-										.name("log")
-										.data(event, MediaType.APPLICATION_JSON));
+											.name("log")
+											.data(event, MediaType.APPLICATION_JSON));
 									// Persistir log no banco de dados se clusterId estiver disponível
-									clusterIdOpt.ifPresent(clusterId -> 
-										logStorageService.storeLogAsync(clusterId, event)
-									);
+									clusterIdOpt
+											.ifPresent(clusterId -> logStorageService.storeLogAsync(clusterId, event));
 								}
 							}
 						} catch (IOException e) {
-							try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
+							try {
+								emitter.completeWithError(e);
+							} catch (Exception ex) {
+								log.trace("Erro esperado em operação SSE: {}", ex.getMessage());
+							}
 							closeQuietly();
 						}
 					}
 
 					@Override
 					public void onError(Throwable throwable) {
-						try { emitter.completeWithError(throwable); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
+						try {
+							emitter.completeWithError(throwable);
+						} catch (Exception e) {
+							log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+						}
 						closeQuietly();
 					}
 
 					@Override
 					public void onComplete() {
-						try { emitter.complete(); } catch (Exception e) { log.trace("Erro esperado em operação SSE: {}", e.getMessage()); }
+						try {
+							emitter.complete();
+						} catch (Exception e) {
+							log.trace("Erro esperado em operação SSE: {}", e.getMessage());
+						}
 						closeQuietly();
 					}
 
 					private void closeQuietly() {
-						if (closed) return;
+						if (closed)
+							return;
 						closed = true;
 						try {
 							this.close();
-						} catch (IOException e) { log.trace("Erro ao fechar callback: {}", e.getMessage()); }
+						} catch (IOException e) {
+							log.trace("Erro ao fechar callback: {}", e.getMessage());
+						}
 					}
 				});
 			} catch (Exception e) {
-				try { emitter.completeWithError(e); } catch (Exception ex) { log.trace("Erro esperado em operação SSE: {}", ex.getMessage()); }
+				try {
+					emitter.completeWithError(e);
+				} catch (Exception ex) {
+					log.trace("Erro esperado em operação SSE: {}", ex.getMessage());
+				}
 			}
 		});
 
 		return emitter;
 	}
 }
-
-

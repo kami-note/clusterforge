@@ -1,11 +1,13 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { clusterService } from '@/services/cluster.service';
+import * as clusterApi from '../api/cluster-api';
 import { TIMEOUTS } from '@/constants';
 import { parseDockerError } from './cluster-management.utils';
 import type { DockerErrorDetails } from './DockerErrorDisplay';
 import type { Cluster } from './cluster-management.types';
+
+import type { ClusterDetailsResponse } from '@/types';
 
 interface UseClusterActionsProps {
     onClusterUpdate: (clusterId: string, updates: Partial<Cluster>) => void;
@@ -16,7 +18,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
     const [processingClusters, setProcessingClusters] = useState<Set<string>>(new Set());
     const [clusterErrors, setClusterErrors] = useState<Map<string, DockerErrorDetails>>(new Map());
 
-    
+
     const setProcessing = useCallback((clusterId: string, isProcessing: boolean) => {
         setProcessingClusters(prev => {
             const next = new Set(prev);
@@ -29,7 +31,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         });
     }, []);
 
-    
+
     const setError = useCallback((clusterId: string, error: DockerErrorDetails | null) => {
         setClusterErrors(prev => {
             const next = new Map(prev);
@@ -42,10 +44,10 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         });
     }, []);
 
-    
+
     const pollClusterStartStatus = useCallback(async (
         clusterId: string,
-        startResponse: any,
+        startResponse: ClusterDetailsResponse | null,
         toastId: string
     ) => {
         const maxAttempts = TIMEOUTS.CLUSTER_START_MAX_ATTEMPTS;
@@ -57,17 +59,17 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
             await new Promise(resolve => setTimeout(resolve, pollInterval));
 
             try {
-                const clusterDetails = await clusterService.getCluster(clusterId);
+                const clusterDetails = await clusterApi.getCluster(clusterId);
 
                 if (clusterDetails.status === 'ACTIVE' || clusterDetails.status === 'RUNNING') {
                     isRunning = true;
-                    onClusterUpdate(clusterId, { status: 'active' }); 
+                    onClusterUpdate(clusterId, { status: 'active' });
                     setError(clusterId, null);
                     toast.success('Cluster iniciado com sucesso!', { id: toastId });
                     setProcessing(clusterId, false);
                     return;
                 } else if (clusterDetails.status === 'ERROR' || clusterDetails.status === 'FAILED') {
-                    const errorDetails = parseDockerError(startResponse?.message || 'Cluster entrou em estado de erro');
+                    const errorDetails = parseDockerError((startResponse as unknown as { message?: string })?.message || 'Cluster entrou em estado de erro');
                     if (errorDetails) {
                         setError(clusterId, errorDetails);
                     }
@@ -90,7 +92,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
 
         if (!isRunning) {
             try {
-                const finalCheck = await clusterService.getCluster(clusterId);
+                const finalCheck = await clusterApi.getCluster(clusterId);
                 if (finalCheck.status === 'ACTIVE' || finalCheck.status === 'RUNNING') {
                     onClusterUpdate(clusterId, { status: 'active' });
                     toast.success('Cluster iniciado com sucesso!', { id: toastId });
@@ -110,7 +112,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         }
     }, [onClusterUpdate, setError, setProcessing]);
 
-    
+
     const pollClusterStopStatus = useCallback(async (
         clusterId: string,
         toastId: string
@@ -124,7 +126,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
             await new Promise(resolve => setTimeout(resolve, pollInterval));
 
             try {
-                const clusterDetails = await clusterService.getCluster(clusterId);
+                const clusterDetails = await clusterApi.getCluster(clusterId);
 
                 if (clusterDetails.status === 'STOPPED') {
                     isStopped = true;
@@ -152,7 +154,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
 
         if (!isStopped) {
             try {
-                const finalCheck = await clusterService.getCluster(clusterId);
+                const finalCheck = await clusterApi.getCluster(clusterId);
                 if (finalCheck.status === 'STOPPED') {
                     onClusterUpdate(clusterId, { status: 'stopped' });
                     toast.success('Cluster parado com sucesso!', { id: toastId });
@@ -177,13 +179,14 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         setProcessing(clusterId, true);
         const toastId = toast.loading('Iniciando cluster em segundo plano...', { id: toastIdStr });
 
-        clusterService.startCluster(clusterId)
+        clusterApi.startCluster(clusterId)
             .then((startResponse) => {
                 toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
                 pollClusterStartStatus(clusterId, startResponse, String(toastId));
             })
-            .catch((error: any) => {
-                const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+            .catch((err: unknown) => {
+                const error = err as Error;
+                const errorMessage = error.message || 'Erro desconhecido';
 
                 if (error?.name === 'TimeoutError') {
                     toast.warning(
@@ -222,12 +225,13 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         setProcessing(clusterId, true);
         const toastId = toast.loading('Parando cluster em segundo plano...', { id: toastIdStr });
 
-        clusterService.stopCluster(clusterId)
+        clusterApi.stopCluster(clusterId)
             .then(() => {
                 toast.loading('Solicitação enviada! Verificando status...', { id: String(toastId) });
                 pollClusterStopStatus(clusterId, String(toastId));
             })
-            .catch((error: any) => {
+            .catch((err: unknown) => {
+                const error = err as Error;
                 if (error?.name === 'TimeoutError') {
                     toast.warning(
                         'A parada do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
@@ -255,8 +259,8 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                     setProcessing(clusterId, true);
                     try {
                         await toast.promise(
-                            clusterService.restartCluster(clusterId).then(async () => {
-                                
+                            clusterApi.restartCluster(clusterId).then(async () => {
+
                                 await new Promise(resolve => setTimeout(resolve, 2000));
                                 onClusterUpdate(clusterId, { status: 'active' });
                                 return 'Cluster reiniciado com sucesso!';
@@ -275,10 +279,10 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                     setProcessing(clusterId, true);
                     try {
                         await toast.promise(
-                            clusterService.deleteCluster(clusterId).then(() => {
-                                
-                                
-                                window.location.reload(); 
+                            clusterApi.deleteCluster(clusterId).then(() => {
+
+
+                                window.location.reload();
                                 return 'Cluster excluído com sucesso!';
                             }),
                             {
@@ -295,7 +299,8 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                     router.push(`/clusters/${clusterId}/edit`);
                     break;
             }
-        } catch (error) {
+        } catch (err: unknown) {
+            const error = err as Error;
             console.error(`Erro na ação ${action}:`, error);
             setProcessing(clusterId, false);
         }

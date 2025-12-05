@@ -3,12 +3,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { 
-  AlertCircle, 
-  AlertTriangle, 
-  CheckCircle2, 
-  XCircle, 
-  RefreshCw, 
+import {
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
   ChevronDown,
   ChevronUp,
   FileText,
@@ -84,13 +83,13 @@ export function DockerErrorDisplay({ error, onRetry, showLogs = true }: DockerEr
   const colorClass = ERROR_COLORS[errorType] || ERROR_COLORS.UNKNOWN;
   const errorLabel = ERROR_LABELS[errorType] || ERROR_LABELS.UNKNOWN;
 
-  
+
   const parseMessage = (message: string) => {
     const lines = message.split('\n');
     const mainMessage = lines[0];
     const hasLogs = message.includes('Logs do container:') || message.includes('Últimos logs:');
     const hasExitCode = message.includes('Exit code:');
-    
+
     return {
       mainMessage,
       hasLogs,
@@ -132,7 +131,7 @@ export function DockerErrorDisplay({ error, onRetry, showLogs = true }: DockerEr
           )}
         </div>
       </CardHeader>
-      
+
       {(parsed.hasLogs || error.logs || error.details || parsed.hasExitCode) && (
         <CardContent className="space-y-3">
           {error.exitCode && (
@@ -197,9 +196,9 @@ export function DockerErrorDisplay({ error, onRetry, showLogs = true }: DockerEr
 
           {onRetry && !error.resolved && (
             <div className="flex justify-end pt-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={onRetry}
                 disabled={!error.resolvable}
               >

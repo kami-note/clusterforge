@@ -3,17 +3,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+// import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
   ArrowRight,
-  ChevronsUpDown,
+  // ChevronsUpDown,
   ChevronRight,
   Cloud,
   Columns3,
   FilePlus,
   Folder,
-  FolderKanban,
+  // FolderKanban,
   FolderPlus,
   HardDrive,
   List,
@@ -110,7 +110,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingFile, setEditingFile] = useState<{ path: string; name: string } | null>(null);
 
-  
+
   const loadDirectory = useCallback(async (path: string) => {
     if (!webDavService.isConnected()) {
       setError("WebDAV não está conectado");
@@ -122,19 +122,20 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     try {
       const normalizedPath = normalizePath(path);
       const items = await webDavService.listDirectory(normalizedPath);
-      
+
       const filteredItems = items.filter(item => item.filename !== normalizedPath || normalizedPath === ROOT_PATH);
       setFiles(filteredItems);
       setCurrentPath(normalizedPath);
-    } catch (err: any) {
-      setError(`Erro ao carregar diretório: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(`Erro ao carregar diretório: ${error.message}`);
       setFiles([]);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  
+
   useEffect(() => {
     if (webDavCredentials?.username && webDavCredentials?.password && webDavCredentials?.port) {
       try {
@@ -147,8 +148,9 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
         setCurrentPath(ROOT_PATH);
         setConnected(true);
         loadDirectory(ROOT_PATH);
-      } catch (err: any) {
-        setError(`Erro ao conectar ao WebDAV: ${err.message}`);
+      } catch (err: unknown) {
+        const error = err as Error;
+        setError(`Erro ao conectar ao WebDAV: ${error.message}`);
         setConnected(false);
       }
     } else {
@@ -161,19 +163,19 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     };
   }, [clusterId, webDavCredentials, loadDirectory]);
 
-  
+
   const navigateToFolder = useCallback((path: string) => {
     loadDirectory(path);
   }, [loadDirectory]);
 
-  
+
   const navigateUp = useCallback(() => {
     if (currentPath === ROOT_PATH) return;
     const parentPath = currentPath.split("/").slice(0, -1).join("/") || ROOT_PATH;
     loadDirectory(parentPath || ROOT_PATH);
   }, [currentPath, loadDirectory]);
 
-  
+
   const handleCreateFolder = useCallback(async () => {
     const folderName = prompt("Nome da pasta:");
     if (!folderName || !folderName.trim()) return;
@@ -181,13 +183,14 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     const newPath = joinPath(currentPath, folderName.trim());
     try {
       await webDavService.createDirectory(newPath);
-      loadDirectory(currentPath); 
-    } catch (err: any) {
-      setError(`Erro ao criar pasta: ${err.message}`);
+      loadDirectory(currentPath);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(`Erro ao criar pasta: ${error.message}`);
     }
   }, [currentPath, loadDirectory]);
 
-  
+
   const handleCreateFile = useCallback(async () => {
     const fileName = prompt("Nome do arquivo (ex: config.yaml):");
     if (!fileName || !fileName.trim()) return;
@@ -195,14 +198,15 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     const newPath = normalizePath(joinPath(currentPath, fileName.trim()));
     try {
       await webDavService.saveFileAsText(newPath, "");
-      loadDirectory(currentPath); 
+      loadDirectory(currentPath);
       setEditingFile({ path: newPath, name: fileName.trim() });
-    } catch (err: any) {
-      setError(`Erro ao criar arquivo: ${err.message}`);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(`Erro ao criar arquivo: ${error.message}`);
     }
   }, [currentPath, loadDirectory]);
 
-  
+
   const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -211,9 +215,10 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
 
     try {
       await webDavService.uploadFile(remotePath, file);
-      loadDirectory(currentPath); 
-    } catch (err: any) {
-      setError(`Erro ao fazer upload: ${err.message}`);
+      loadDirectory(currentPath);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(`Erro ao fazer upload: ${error.message}`);
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -221,13 +226,13 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     }
   }, [currentPath, loadDirectory]);
 
-  
+
   const fileNodes: FileNode[] = useMemo(() => {
-    return files.map((file, index) => {
-      const extension = file.basename.includes(".") 
-        ? file.basename.split(".").pop()?.toLowerCase() 
+    return files.map((file) => {
+      const extension = file.basename.includes(".")
+        ? file.basename.split(".").pop()?.toLowerCase()
         : undefined;
-      
+
       return {
         id: file.filename,
         name: file.basename,
@@ -240,31 +245,31 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     });
   }, [files]);
 
-  
+
   const filteredFiles = useMemo(() => {
     if (!searchTerm) return fileNodes;
-    return fileNodes.filter(file => 
+    return fileNodes.filter(file =>
       file.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [fileNodes, searchTerm]);
 
-  
+
   const breadcrumb = useMemo(() => {
     const path = normalizePath(currentPath);
-    
+
     if (path === ROOT_PATH) {
       return [
         { id: ROOT_PATH, name: "Raiz", type: "folder", modifiedAt: "", path: ROOT_PATH }
       ];
     }
-    
+
     const parts = path.split("/").filter(Boolean);
     const items: FileNode[] = [
       { id: ROOT_PATH, name: "Raiz", type: "folder", modifiedAt: "", path: ROOT_PATH }
     ];
-    
+
     let current = ROOT_PATH;
-    parts.forEach((part, index) => {
+    parts.forEach((part) => {
       current = current === ROOT_PATH ? `/${part}` : `${current}/${part}`;
       items.push({
         id: current,
@@ -292,8 +297,8 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={() => loadDirectory(currentPath)}
             disabled={loading || !connected}
@@ -317,8 +322,8 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
 
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-1">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="icon"
             onClick={navigateUp}
             disabled={currentPath === ROOT_PATH || loading}
@@ -360,8 +365,8 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
 
       <div className="flex justify-between items-center bg-muted rounded-lg px-3 py-2 border">
         <div className="flex items-center gap-2">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="sm"
             onClick={handleCreateFolder}
             disabled={!connected || loading}
@@ -378,8 +383,8 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
             <FilePlus className="h-4 w-4 mr-2" />
             Novo arquivo
           </Button>
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={!connected || loading}
@@ -422,7 +427,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
       )}
 
       <div className="grid grid-cols-12 gap-4">
-        <CardLikePanel 
+        <CardLikePanel
           title={`Conteúdo de ${currentPath === "/" ? "Raiz" : currentPath.split("/").pop()}`}
           className="col-span-12 min-h-[320px]"
         >
@@ -441,7 +446,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
                   </div>
                 ) : filteredFiles.length === 0 ? (
                   <div className="text-sm text-muted-foreground px-4 py-6">
-                    {searchTerm 
+                    {searchTerm
                       ? "Nenhum item encontrado com esse termo."
                       : "Diretório vazio. Utilize o botão Upload ou crie uma nova pasta."}
                   </div>
@@ -474,7 +479,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
                             className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                             onClick={(e) => {
                               e.stopPropagation();
-                              
+
                               const filePath = item.path ? normalizePath(item.path) : joinPath(currentPath, item.name);
                               setEditingFile({ path: filePath, name: item.name });
                             }}
@@ -540,7 +545,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
                   ))}
                   {filteredFiles.length === 0 && (
                     <div className="text-sm text-muted-foreground px-4 py-6 col-span-3">
-                      {searchTerm 
+                      {searchTerm
                         ? "Nenhum item encontrado com esse termo."
                         : "Diretório vazio. Utilize o botão Upload ou crie uma nova pasta."}
                     </div>
@@ -559,7 +564,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
         </span>
       </div>
 
-      {}
+      { }
       {editingFile && (
         <FileEditor
           filePath={editingFile.path}
@@ -567,7 +572,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
           isOpen={!!editingFile}
           onClose={() => setEditingFile(null)}
           onSave={() => {
-            
+
             loadDirectory(currentPath);
           }}
         />

@@ -6,9 +6,9 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 
-const ClusterManagement = lazy(() => 
-  import("@/components/clusters/ClusterManagement").then(module => ({ 
-    default: module.ClusterManagement 
+const ClusterManagement = lazy(() =>
+  import("@/features/clusters/components/ClusterManagement").then(module => ({
+    default: module.ClusterManagement
   }))
 );
 

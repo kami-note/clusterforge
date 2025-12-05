@@ -22,17 +22,17 @@ export class HttpClient {
     this.baseUrl = config.api.baseUrl;
   }
 
-  
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     const token = this.getToken();
-    
+
     const method = options.method || 'GET';
     const fullUrl = `${this.baseUrl}${endpoint}`;
-    
-    
+
+
     if (process.env.NODE_ENV === 'development') {
       console.log(`[API Request] ${method} ${fullUrl}`, {
         endpoint,
@@ -41,15 +41,15 @@ export class HttpClient {
         tokenLength: token?.length || 0,
       });
     }
-    
+
     const headers = new Headers({
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     });
 
-    
-    const timeout = (options as any).timeout || config.api.timeout;
+
+    const timeout = (options as RequestInit & { timeout?: number }).timeout || config.api.timeout;
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), timeout);
 
@@ -62,7 +62,7 @@ export class HttpClient {
 
       clearTimeout(timeoutId);
 
-      
+
       if (response.status === 401) {
         const refreshed = await this.tryRefreshToken();
         if (refreshed) {
@@ -91,23 +91,24 @@ export class HttpClient {
         await this.handleError(response, fullUrl);
       }
 
-      
+
       if (response.status === 204 || response.headers.get('content-length') === '0') {
         return undefined as T;
       }
 
       return response.json();
-    } catch (error: any) {
+    } catch (err: unknown) {
+      const error = err as Error & { name?: string; message?: string };
       clearTimeout(timeoutId);
-      
-      
-      
+
+
+
       const isAborted = abortController.signal.aborted;
-      const isTimeoutError = error.name === 'AbortError' || 
-                             error.name === 'TimeoutError' ||
-                             (isAborted && error.message?.includes('aborted'));
-      
-      
+      const isTimeoutError = error.name === 'AbortError' ||
+        error.name === 'TimeoutError' ||
+        (isAborted && error.message?.includes('aborted'));
+
+
       if (isTimeoutError) {
         throw {
           message: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.',
@@ -115,20 +116,20 @@ export class HttpClient {
           name: 'TimeoutError',
         } as ApiError;
       }
-      
+
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
         const errorMessage = error.message.toLowerCase();
-        const isLocalhost = this.baseUrl.includes('localhost') || 
-                           this.baseUrl.includes('127.0.0.1') ||
-                           this.baseUrl.includes('0.0.0.0');
-        
-        
+        const isLocalhost = this.baseUrl.includes('localhost') ||
+          this.baseUrl.includes('127.0.0.1') ||
+          this.baseUrl.includes('0.0.0.0');
+
+
         if (isAborted) {
           throw {
             message: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.',
@@ -136,15 +137,15 @@ export class HttpClient {
             name: 'TimeoutError',
           } as ApiError;
         }
-        
-        
-        
+
+
+
         const isCorsError = errorMessage.includes('cors') ||
-                           errorMessage.includes('cross-origin') ||
-                           errorMessage.includes('crossorigin') ||
-                           (typeof error.cause === 'object' && error.cause && 
-                            String(error.cause).toLowerCase().includes('cors'));
-        
+          errorMessage.includes('cross-origin') ||
+          errorMessage.includes('crossorigin') ||
+          (typeof error.cause === 'object' && error.cause &&
+            String(error.cause).toLowerCase().includes('cors'));
+
         if (isCorsError) {
           throw {
             message: 'Erro de conexão com o servidor. Verifique a configuração de CORS.',
@@ -152,30 +153,30 @@ export class HttpClient {
             name: 'NetworkError',
           } as ApiError;
         }
-        
-        
-        
-        
+
+
+
+
         const hasConnectionRefused = errorMessage.includes('connection refused') ||
-                                     errorMessage.includes('err_connection_refused') ||
-                                     errorMessage.includes('connectionreset') ||
-                                     errorMessage.includes('econnrefused');
-        
-        
-        const isInternetError = 
+          errorMessage.includes('err_connection_refused') ||
+          errorMessage.includes('connectionreset') ||
+          errorMessage.includes('econnrefused');
+
+
+        const isInternetError =
           errorMessage.includes('err_name_not_resolved') ||
           errorMessage.includes('err_internet_disconnected') ||
           errorMessage.includes('networkerror when attempting to fetch resource') ||
           errorMessage.includes('network request failed');
-        
-        
-        
-        const isBackendOffline = 
+
+
+
+        const isBackendOffline =
           !isInternetError && (
-            (isLocalhost && hasConnectionRefused) || 
-            (!isLocalhost && hasConnectionRefused)   
+            (isLocalhost && hasConnectionRefused) ||
+            (!isLocalhost && hasConnectionRefused)
           );
-        
+
         throw {
           message: isBackendOffline
             ? 'O servidor está temporariamente indisponível. Verifique se o backend está em execução.'
@@ -184,17 +185,17 @@ export class HttpClient {
           name: isBackendOffline ? 'BackendOffline' : 'NetworkError',
         } as ApiError;
       }
-      
+
       throw error;
     }
   }
 
-  
+
   async get<T>(endpoint: string): Promise<T> {
     return this.request<T>(endpoint, { method: 'GET' });
   }
 
-  
+
   async post<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
@@ -203,7 +204,7 @@ export class HttpClient {
     } as RequestInit & { timeout?: number });
   }
 
-  
+
   async patch<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PATCH',
@@ -212,7 +213,7 @@ export class HttpClient {
     } as RequestInit & { timeout?: number });
   }
 
-  
+
   async put<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
@@ -221,27 +222,27 @@ export class HttpClient {
     } as RequestInit & { timeout?: number });
   }
 
-  
+
   async delete<T>(endpoint: string, timeout?: number): Promise<T> {
-    return this.request<T>(endpoint, { 
+    return this.request<T>(endpoint, {
       method: 'DELETE',
       timeout,
     } as RequestInit & { timeout?: number });
   }
 
-  
+
   private getToken(): string | null {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem(config.auth.tokenKey);
   }
 
-  
+
   setToken(token: string): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem(config.auth.tokenKey, token);
   }
 
-  
+
   clearToken(): void {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(config.auth.tokenKey);
@@ -292,10 +293,10 @@ export class HttpClient {
   }
 
   async refreshSession(): Promise<AuthResponse | null> {
-    
+
     const refreshToken = this.getRefreshToken();
     const currentToken = this.getToken();
-    
+
     if (!refreshToken && !currentToken) {
       return null;
     }
@@ -309,7 +310,7 @@ export class HttpClient {
     }
 
     this.isRefreshing = true;
-    
+
     const tokenToUse = refreshToken || currentToken || '';
     this.refreshPromise = this.performRefresh(tokenToUse)
       .catch((error) => {
@@ -322,17 +323,17 @@ export class HttpClient {
 
     try {
       return await this.refreshPromise;
-    } catch (error) {
+    } catch {
       this.handleRefreshFailure('REFRESH_FAILED');
       return null;
     }
   }
 
   private async performRefresh(refreshToken: string): Promise<AuthResponse> {
-    
-    
+
+
     const token = refreshToken || this.getToken();
-    
+
     if (!token) {
       throw new Error('Nenhum token disponível para refresh');
     }
@@ -349,31 +350,31 @@ export class HttpClient {
       throw new Error('Refresh failed');
     }
 
-    
+
     const response = await resp.json();
-    
-    
+
+
     let expiresIn: number | undefined;
     try {
       const payload = response.token.split('.')[1];
       const decoded = JSON.parse(atob(payload));
       if (decoded.exp) {
-        
+
         const expirationTimestamp = decoded.exp * 1000;
         expiresIn = expirationTimestamp - Date.now();
       }
     } catch (error) {
       console.warn('Erro ao calcular expiresIn do token:', error);
-      
-      expiresIn = 86400000; 
+
+      expiresIn = 86400000;
     }
 
-    
+
     const data: AuthResponse = {
       token: response.token,
       expiresIn: expiresIn,
     };
-    
+
     this.applyAuthResponse(data);
     return data;
   }
@@ -429,7 +430,7 @@ export class HttpClient {
     );
   }
 
-  
+
   private async handleError(response: Response, endpointUrl?: string): Promise<never> {
     let errorMessage = 'Erro desconhecido';
     let errorDetails: Record<string, string[]> | undefined;
@@ -442,7 +443,7 @@ export class HttpClient {
           errorMessage = errorData.message || errorData.error || errorMessage;
           errorDetails = errorData.errors;
         } catch (parseError) {
-          
+
           errorMessage = text || this.getErrorMessage(response.status);
           console.error('Erro ao parsear resposta de erro:', parseError, 'Texto:', text);
         }
@@ -450,7 +451,7 @@ export class HttpClient {
         errorMessage = this.getErrorMessage(response.status);
       }
     } catch (e) {
-      
+
       errorMessage = this.getErrorMessage(response.status);
       console.error('Erro ao ler resposta:', e);
     }
@@ -461,41 +462,41 @@ export class HttpClient {
       errors: errorDetails,
     };
 
-    
-    
-    
+
+
+
     if (response.status === 401) {
       this.handleUnauthorizedResponse(response);
-      
-      
-      
+
+
+
       const url = endpointUrl || response.url || '';
       const isNonExistentEndpoint = url.includes('/health/clusters') ||
-                                   url.includes('/monitoring/') ||
-                                   url.includes('/health/') ||
-                                   url.includes('/ftp-credentials');
-      
-      
+        url.includes('/monitoring/') ||
+        url.includes('/health/') ||
+        url.includes('/ftp-credentials');
+
+
       const isAuthError = !isNonExistentEndpoint && (
-        errorMessage.toLowerCase().includes('token') || 
+        errorMessage.toLowerCase().includes('token') ||
         errorMessage.toLowerCase().includes('autenticado') ||
         errorMessage.toLowerCase().includes('unauthorized')
       );
-      
+
       if (isAuthError) {
         this.clearSession();
-        
+
         if (typeof window !== 'undefined') {
           window.location.href = '/auth/login';
         }
       }
-      
+
     }
 
     throw error;
   }
 
-  
+
   private getErrorMessage(status: number): string {
     const messages: Record<number, string> = {
       400: 'Requisição inválida',
