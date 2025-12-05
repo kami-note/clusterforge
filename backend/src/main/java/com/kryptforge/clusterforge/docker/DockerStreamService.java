@@ -44,6 +44,22 @@ public class DockerStreamService {
 	private final ClusterRepository clusterRepository;
 	private final LogStorageService logStorageService;
 
+	/**
+	 * Cache entry para armazenar clusterId com timestamp
+	 */
+	private record CacheEntry(UUID clusterId, long timestamp) {
+		private static final long TTL_MS = 60_000; // 1 minuto
+
+		boolean isExpired() {
+			return System.currentTimeMillis() - timestamp > TTL_MS;
+		}
+	}
+
+	/**
+	 * Cache de clusterId por containerId (OTIMIZAÇÃO #2)
+	 */
+	private final Map<String, CacheEntry> clusterIdCache = new ConcurrentHashMap<>();
+
 	public DockerStreamService(
 			DockerConnection connection,
 			ClusterRepository clusterRepository,
@@ -54,14 +70,31 @@ public class DockerStreamService {
 	}
 
 	/**
-	 * Busca o clusterId pelo containerId.
+	 * Busca o clusterId pelo containerId com cache (OTIMIZADO).
+	 * Cache reduz queries ao banco de dados para chamadas repetidas.
 	 */
 	private Optional<UUID> findClusterIdByContainerId(String containerId) {
 		if (containerId == null || containerId.isBlank()) {
 			return Optional.empty();
 		}
-		return clusterRepository.findByContainerId(containerId)
+
+		// Verificar cache
+		CacheEntry cached = clusterIdCache.get(containerId);
+		if (cached != null && !cached.isExpired()) {
+			log.trace("Cache hit para containerId: {}", containerId);
+			return Optional.of(cached.clusterId());
+		}
+
+		// Cache miss ou expirado - buscar no banco
+		log.trace("Cache miss para containerId: {}, consultando banco", containerId);
+		Optional<UUID> result = clusterRepository.findByContainerId(containerId)
 				.map(ClusterInstance::getId);
+
+		// Atualizar cache se encontrou
+		result.ifPresent(id -> clusterIdCache.put(containerId,
+				new CacheEntry(id, System.currentTimeMillis())));
+
+		return result;
 	}
 
 	/**

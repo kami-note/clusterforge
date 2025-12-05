@@ -18,17 +18,18 @@ class ClusterMetricsEventTest {
 		// Arrange
 		UUID clusterId = UUID.randomUUID();
 		ContainerStats stats = new ContainerStats(
-			"container-123",
-			"2024-01-01T12:00:00Z",
-			45.5,
-			1024L * 1024 * 512, // 512 MB
-			1024L * 1024 * 1024, // 1 GB
-			50.0,
-			1000L,
-			2000L,
-			500L,
-			750L,
-			10L
+				"container-123",
+				"2024-01-01T12:00:00Z",
+				45.5,
+				1024L * 1024 * 512, // 512 MB
+				1024L * 1024 * 1024, // 1 GB
+				50.0,
+				1000L,
+				2000L,
+				500L,
+				750L,
+				10L,
+				3600L // uptimeSeconds (1 hour)
 		);
 
 		// Act
@@ -56,17 +57,18 @@ class ClusterMetricsEventTest {
 		// Arrange
 		UUID clusterId = UUID.randomUUID();
 		ContainerStats stats = new ContainerStats(
-			null,
-			null,
-			null,
-			null,
-			null,
-			null,
-			null,
-			null,
-			null,
-			null,
-			null
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null // uptimeSeconds
 		);
 
 		// Act
@@ -94,17 +96,18 @@ class ClusterMetricsEventTest {
 		// Arrange
 		UUID clusterId = UUID.randomUUID();
 		ContainerStats stats = new ContainerStats(
-			"container-456",
-			"2024-01-01T12:00:00Z",
-			0.0,
-			0L,
-			0L,
-			0.0,
-			0L,
-			0L,
-			0L,
-			0L,
-			0L
+				"container-456",
+				"2024-01-01T12:00:00Z",
+				0.0,
+				0L,
+				0L,
+				0.0,
+				0L,
+				0L,
+				0L,
+				0L,
+				0L,
+				0L // uptimeSeconds
 		);
 
 		// Act
@@ -125,4 +128,3 @@ class ClusterMetricsEventTest {
 		assertEquals(0L, event.pidsCurrent());
 	}
 }
-

@@ -59,46 +59,62 @@ public class ContinuousMetricCollectionService {
 	}
 
 	/**
+	 * Estrutura para armazenar informações do container obtidas em uma única
+	 * inspeção.
+	 */
+	private record ContainerInfo(ClusterInstance cluster, java.time.Instant startedAt) {
+	}
+
+	/**
 	 * Inicia a coleta contínua de métricas para todos os containers ativos.
 	 * Executa periodicamente conforme configurado.
+	 * OTIMIZADO: Realiza apenas UMA chamada de inspect por container.
 	 */
 	@Scheduled(fixedDelayString = "${clusterforge.monitoring.metrics.continuous-collection.interval-ms:60000}", initialDelay = 10000)
 	public void collectMetricsForActiveContainers() {
 		try {
-			// Buscar todos os clusters com containers ativos
-			List<ClusterInstance> activeClusters = clusterRepository.findAll().stream()
+			// Buscar todos os clusters e fazer inspect uma única vez por container
+			// Extrai tanto o status 'running' quanto o 'startedAt' na mesma chamada
+			List<ContainerInfo> activeContainers = clusterRepository.findAll().stream()
 					.filter(c -> c.getContainerId() != null && !c.getContainerId().isBlank())
-					.filter(c -> {
-						// Verificar se o container está realmente rodando
+					.map(c -> {
 						try {
+							// OTIMIZAÇÃO: Uma única chamada de inspect para obter todas as informações
 							var inspect = dockerClient.inspectContainerCmd(c.getContainerId()).exec();
-							return inspect.getState() != null && Boolean.TRUE.equals(inspect.getState().getRunning());
+							if (inspect.getState() != null && Boolean.TRUE.equals(inspect.getState().getRunning())) {
+								java.time.Instant startedAt = null;
+								if (inspect.getState().getStartedAt() != null) {
+									startedAt = java.time.Instant.parse(inspect.getState().getStartedAt());
+								}
+								return new ContainerInfo(c, startedAt);
+							}
 						} catch (Exception e) {
 							logger.debug("Container {} não está rodando ou não existe mais", c.getContainerId());
-							return false;
 						}
+						return null;
 					})
+					.filter(java.util.Objects::nonNull)
 					.toList();
 
 			// Iniciar coleta para containers que ainda não estão sendo coletados
-			for (ClusterInstance cluster : activeClusters) {
-				String containerId = cluster.getContainerId();
-				UUID clusterId = cluster.getId();
+			for (ContainerInfo info : activeContainers) {
+				String containerId = info.cluster.getContainerId();
+				UUID clusterId = info.cluster.getId();
 
 				// Se já existe callback ativo, não criar outro
 				if (activeCallbacks.containsKey(containerId)) {
 					continue;
 				}
 
-				// Iniciar coleta de métricas para este container
-				startMetricCollection(clusterId, containerId);
+				// Iniciar coleta de métricas, passando o startedAt já obtido
+				startMetricCollection(clusterId, containerId, info.startedAt);
 			}
 
 			// Remover callbacks para containers que não estão mais ativos
 			activeCallbacks.entrySet().removeIf(entry -> {
 				String containerId = entry.getKey();
-				boolean isActive = activeClusters.stream()
-						.anyMatch(c -> containerId.equals(c.getContainerId()));
+				boolean isActive = activeContainers.stream()
+						.anyMatch(c -> containerId.equals(c.cluster.getContainerId()));
 
 				if (!isActive) {
 					logger.debug("Parando coleta de métricas para container {} (não está mais ativo)", containerId);
@@ -119,23 +135,16 @@ public class ContinuousMetricCollectionService {
 
 	/**
 	 * Inicia a coleta de métricas para um container específico.
+	 * OTIMIZADO: Recebe startedAt como parâmetro para evitar chamada adicional de
+	 * inspect.
+	 * 
+	 * @param clusterId   ID do cluster
+	 * @param containerId ID do container Docker
+	 * @param startedAt   Timestamp de quando o container foi iniciado (pode ser
+	 *                    null)
 	 */
-	private void startMetricCollection(UUID clusterId, String containerId) {
+	private void startMetricCollection(UUID clusterId, String containerId, java.time.Instant startedAt) {
 		try {
-			// Buscar o tempo de início do container
-			java.time.Instant startedAt = null;
-			try {
-				var inspect = dockerClient.inspectContainerCmd(containerId).exec();
-				if (inspect.getState() != null && inspect.getState().getStartedAt() != null) {
-					startedAt = java.time.Instant.parse(inspect.getState().getStartedAt());
-				}
-			} catch (Exception e) {
-				logger.warn("Não foi possível obter o tempo de início do container {}: {}", containerId,
-						e.getMessage());
-			}
-
-			final java.time.Instant containerStartedAt = startedAt;
-
 			ResultCallback.Adapter<Statistics> callback = new ResultCallback.Adapter<Statistics>() {
 				private volatile boolean closed = false;
 
@@ -144,7 +153,8 @@ public class ContinuousMetricCollectionService {
 					if (closed)
 						return;
 					try {
-						ContainerStats dto = ContainerMapper.toStats(containerId, stats, containerStartedAt);
+						// Usar o startedAt passado como parâmetro
+						ContainerStats dto = ContainerMapper.toStats(containerId, stats, startedAt);
 						// Persistir métrica no banco de dados
 						metricStorageService.storeMetricAsync(clusterId, containerId, dto);
 					} catch (Exception e) {
