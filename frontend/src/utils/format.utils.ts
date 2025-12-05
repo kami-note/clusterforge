@@ -1,10 +1,6 @@
-/**
- * Utilitários de formatação
- */
 
-/**
- * Formata bytes para formato legível
- */
+
+
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 Bytes';
   
@@ -15,16 +11,12 @@ export function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
-/**
- * Formata número para porcentagem
- */
+
 export function formatPercent(value: number, decimals = 0): string {
   return `${value.toFixed(decimals)}%`;
 }
 
-/**
- * Formata timestamp para data/hora legível
- */
+
 export function formatDateTime(timestamp: string | number | Date): string {
   const date = typeof timestamp === 'string' || typeof timestamp === 'number'
     ? new Date(timestamp)
@@ -39,9 +31,7 @@ export function formatDateTime(timestamp: string | number | Date): string {
   }).format(date);
 }
 
-/**
- * Formata timestamp para tempo relativo
- */
+
 export function formatRelativeTime(timestamp: string | number | Date): string {
   const date = typeof timestamp === 'string' || typeof timestamp === 'number'
     ? new Date(timestamp)
@@ -62,9 +52,7 @@ export function formatRelativeTime(timestamp: string | number | Date): string {
   return formatDateTime(date);
 }
 
-/**
- * Formata tempo em segundos para formato legível
- */
+
 export function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);

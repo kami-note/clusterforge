@@ -19,12 +19,12 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Aguardar verificação de autenticação terminar antes de redirecionar
+    
     if (authLoading) return;
     
-    // Se o usuário já estiver logado E tiver token válido, redirecionar para o dashboard apropriado
+    
     if (user) {
-      // Verificar se ainda tem token válido antes de redirecionar
+      
       const token = authService.getToken();
       const expiresAt = authService.getTokenExpiry();
       
@@ -51,18 +51,18 @@ export default function LoginPage() {
         return;
       }
 
-      // Redireciona baseado no tipo
+      
       if (authenticatedUser.type === 'admin') {
         router.push('/admin/dashboard');
       } else {
         router.push('/client/dashboard');
       }
     } catch (err: unknown) {
-      // Extrai a mensagem de erro da API
+      
       const errorMessage = err instanceof Error ? err.message : 'Ocorreu um erro durante o login. Por favor, tente novamente.';
       const errorStatus = err && typeof err === 'object' && 'status' in err ? (err.status as number) : undefined;
       
-      // Diferencia mensagens de erro
+      
       if (errorStatus === 403) {
         setError('Acesso negado. Verifique suas credenciais.');
       } else if (errorStatus === 401) {
@@ -79,9 +79,9 @@ export default function LoginPage() {
     }
   };
 
-  // Se o usuário já está logado, não renderizar o formulário
+  
   if (user) {
-    return null; // O useEffect irá redirecionar
+    return null; 
   }
 
   return (

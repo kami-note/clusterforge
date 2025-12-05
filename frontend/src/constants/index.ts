@@ -1,10 +1,8 @@
-/**
- * Constantes centralizadas da aplicação
- */
 
-// ============================================
-// CONFIGURAÇÕES
-// ============================================
+
+
+
+
 export const STORAGE_KEYS = {
   TOKEN: 'clusterforge_token',
   REFRESH_TOKEN: 'clusterforge_refresh_token',
@@ -13,18 +11,18 @@ export const STORAGE_KEYS = {
   THEME: 'clusterforge_theme',
 } as const;
 
-// ============================================
-// STATUS MAPPING
-// ============================================
-// Mapeia status do backend (enum ClusterStatus) para formato do frontend
+
+
+
+
 export const CLUSTER_STATUS_MAP: Record<string, 'running' | 'stopped' | 'restarting' | 'error' | 'pending'> = {
-  // Status do backend atual (ClusterStatus enum)
+  
   'PENDING': 'pending',
   'ACTIVE': 'running',
   'STOPPED': 'stopped',
-  'DELETED': 'stopped', // Deletado mostra como parado
+  'DELETED': 'stopped', 
   'ERROR': 'error',
-  // Status legados (compatibilidade)
+  
   'CREATED': 'pending',
   'STARTING': 'restarting',
   'RUNNING': 'running',
@@ -33,9 +31,9 @@ export const CLUSTER_STATUS_MAP: Record<string, 'running' | 'stopped' | 'restart
   'RESTARTING': 'restarting',
 } as const;
 
-// ============================================
-// TEMPLATE ICONS
-// ============================================
+
+
+
 export const TEMPLATE_ICON_MAP: Record<string, string> = {
   'test-alpine': 'Package',
   'webserver-php': 'Code',
@@ -53,13 +51,13 @@ export const TEMPLATE_ICON_MAP: Record<string, string> = {
   'kubernetes': 'Rocket',
 } as const;
 
-// ============================================
-// RECURSOS PADRÃO POR TEMPLATE
-// ============================================
+
+
+
 export interface DefaultResources {
-  cpu: number; // em percentual (5-100%)
-  ram: number; // em GB
-  disk: number; // em GB
+  cpu: number; 
+  ram: number; 
+  disk: number; 
 }
 
 export const TEMPLATE_DEFAULT_RESOURCES: Record<string, DefaultResources> = {
@@ -77,9 +75,9 @@ export const TEMPLATE_DEFAULT_RESOURCES: Record<string, DefaultResources> = {
   'default': { cpu: 25, ram: 2, disk: 10 },
 } as const;
 
-// ============================================
-// TEMPLATE NAME FORMATTING
-// ============================================
+
+
+
 export const TEMPLATE_NAME_FORMAT: Record<string, string> = {
   'webserver-php': 'Servidor Web PHP',
   'webserver-node': 'Servidor Web Node.js',
@@ -93,9 +91,9 @@ export const TEMPLATE_NAME_FORMAT: Record<string, string> = {
   'api-python': 'API Python',
 } as const;
 
-// ============================================
-// VALIDAÇÕES
-// ============================================
+
+
+
 export const VALIDATION_LIMITS = {
   CPU: { min: 5, max: 100 },
   RAM: { min: 0.5, max: 32 },
@@ -103,35 +101,35 @@ export const VALIDATION_LIMITS = {
   PORT: { min: 1, max: 65535 },
 } as const;
 
-// ============================================
-// PAGINAÇÃO E LIMITES
-// ============================================
+
+
+
 export const PAGINATION = {
   DEFAULT_PAGE_SIZE: 10,
   MAX_PAGE_SIZE: 100,
 } as const;
 
-// ============================================
-// TIMEOUTS
-// ============================================
+
+
+
 export const TIMEOUTS = {
-  API_REQUEST: 30000, // 30 segundos
-  CLUSTER_START_POLL: 1500, // 1.5 segundos
+  API_REQUEST: 30000, 
+  CLUSTER_START_POLL: 1500, 
   CLUSTER_START_MAX_ATTEMPTS: 15,
-  CLUSTER_STOP_POLL: 1000, // 1 segundo
+  CLUSTER_STOP_POLL: 1000, 
   CLUSTER_STOP_MAX_ATTEMPTS: 20,
-  CLUSTER_CREATE_POLL: 12000, // 2 segundos
-  CLUSTER_CREATE_MAX_ATTEMPTS: 60, // 2 minutos (60 * 2s)
+  CLUSTER_CREATE_POLL: 12000, 
+  CLUSTER_CREATE_MAX_ATTEMPTS: 60, 
 } as const;
 
-// ============================================
-// GRÁFICOS E VISUALIZAÇÃO
-// ============================================
+
+
+
 export const CHART_CONFIG = {
   MAX_DATA_POINTS: 100,
   INITIAL_VISIBLE_POINTS: 10,
-  AUTO_ZOOM_INTERVAL: 10000, // 10 segundos
-  DATA_UPDATE_THRESHOLD: 0.01, // Mudança mínima para adicionar novo ponto
+  AUTO_ZOOM_INTERVAL: 10000, 
+  DATA_UPDATE_THRESHOLD: 0.01, 
 } as const;
 
 

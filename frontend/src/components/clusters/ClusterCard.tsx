@@ -1,7 +1,4 @@
-/**
- * ClusterCard Component
- * Displays individual cluster information, metrics, and actions
- */
+
 
 import { memo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -53,10 +50,10 @@ export const ClusterCard = memo(({
     onAction,
     onViewDetails
 }: ClusterCardProps) => {
-    // Calculate resource percentages
-    // If we have realtime metrics, use normalized percentages directly
-    // Otherwise, calculate using getResourcePercentage
-    // Ensure we always return a valid number (never null or undefined)
+    
+    
+    
+    
     const cpuPercentage = cluster.realtimeMetrics?.cpuUsagePercent != null
         ? (isNaN(cluster.realtimeMetrics.cpuUsagePercent) ? 0 : cluster.realtimeMetrics.cpuUsagePercent)
         : getResourcePercentage(cluster.resources.cpu.used, cluster.resources.cpu.limit);
@@ -69,10 +66,10 @@ export const ClusterCard = memo(({
         ? (isNaN(cluster.realtimeMetrics.diskUsagePercent) ? 0 : cluster.realtimeMetrics.diskUsagePercent)
         : getResourcePercentage(cluster.resources.disk.used, cluster.resources.disk.limit);
 
-    // Determine processing state based on current status
+    
     const isProcessingStopping = isProcessing && cluster.status === 'active';
     const isProcessingStarting = isProcessing && cluster.status === 'stopped';
-    // If processing but not stopped or active, it's likely restarting
+    
     const isProcessingRestarting = isProcessing && !isProcessingStopping && !isProcessingStarting;
 
     const handleRetry = () => {
@@ -104,7 +101,7 @@ export const ClusterCard = memo(({
             >
                 <CardContent className="p-3">
                     <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-                        {/* Basic Info */}
+                        {}
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                             <div className="flex-shrink-0">
                                 {isProcessingStopping ? (
@@ -150,7 +147,7 @@ export const ClusterCard = memo(({
                             </div>
                         </div>
 
-                        {/* Compact Metrics */}
+                        {}
                         <div className="flex items-center gap-3 lg:gap-4 flex-shrink-0 flex-wrap lg:flex-nowrap">
                             <CompactMetric
                                 label="CPU"
@@ -172,7 +169,7 @@ export const ClusterCard = memo(({
                             />
                         </div>
 
-                        {/* Actions */}
+                        {}
                         <div className="flex items-center gap-1 flex-shrink-0 justify-end lg:justify-start">
                             {cluster.status === 'stopped' ? (
                                 <Button

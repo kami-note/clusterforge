@@ -1,7 +1,4 @@
-/**
- * ClusterFilters Component
- * Manages all filter controls for the cluster list
- */
+
 
 import { useTransition } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -69,7 +66,7 @@ export function ClusterFilters({
             </CardHeader>
             <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-                    {/* Search Field */}
+                    {}
                     <div className="lg:col-span-2">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -79,7 +76,7 @@ export function ClusterFilters({
                                 onChange={(e) => {
                                     onSearchChange(e.target.value);
                                     startTransition(() => {
-                                        // Search is already debounced, just mark as pending
+                                        
                                     });
                                 }}
                                 className="pl-10"
@@ -87,7 +84,7 @@ export function ClusterFilters({
                         </div>
                     </div>
 
-                    {/* Status Filter */}
+                    {}
                     <Select
                         value={statusFilter}
                         onValueChange={(value) => {
@@ -107,7 +104,7 @@ export function ClusterFilters({
                         </SelectContent>
                     </Select>
 
-                    {/* Owner Filter */}
+                    {}
                     <Select
                         value={ownerFilter}
                         onValueChange={(value) => {
@@ -134,7 +131,7 @@ export function ClusterFilters({
                         </SelectContent>
                     </Select>
 
-                    {/* Service Filter */}
+                    {}
                     <Select
                         value={serviceFilter}
                         onValueChange={(value) => {
@@ -161,7 +158,7 @@ export function ClusterFilters({
                         </SelectContent>
                     </Select>
 
-                    {/* Alert Filter */}
+                    {}
                     <Select
                         value={alertFilter}
                         onValueChange={(value) => {

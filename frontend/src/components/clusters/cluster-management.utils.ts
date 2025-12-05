@@ -1,20 +1,14 @@
-/**
- * Utility functions for Cluster Management
- */
+
 
 import type { DockerErrorDetails } from './DockerErrorDisplay';
 
-/**
- * Calculate resource usage percentage
- */
+
 export const getResourcePercentage = (used: number, limit: number): number => {
     if (limit === 0) return 0;
     return Math.round((used / limit) * 100);
 };
 
-/**
- * Parse Docker error messages and extract relevant information
- */
+
 export const parseDockerError = (
     errorMessage: string,
     responseMessage?: string
@@ -24,7 +18,7 @@ export const parseDockerError = (
 
     const lowerMessage = message.toLowerCase();
 
-    // Detect error type
+    
     let errorType = 'UNKNOWN';
     let resolvable = false;
 
@@ -68,7 +62,7 @@ export const parseDockerError = (
         resolvable = false;
     }
 
-    // Extract logs if present
+    
     let logs: string | undefined;
     let exitCode: string | undefined;
 
@@ -86,7 +80,7 @@ export const parseDockerError = (
         }
     }
 
-    // Check if resolved automatically
+    
     const resolved =
         message.includes('resolvido automaticamente') ||
         message.includes('após resolver') ||
@@ -102,9 +96,7 @@ export const parseDockerError = (
     };
 };
 
-/**
- * Get unique sorted values from cluster array
- */
+
 export const getUniqueValues = <T>(
     items: T[],
     accessor: (item: T) => string | undefined,
@@ -114,4 +106,20 @@ export const getUniqueValues = <T>(
         items.map(item => accessor(item) || defaultValue).filter((val): val is string => val !== undefined)
     );
     return Array.from(uniqueSet).sort();
+};
+
+
+export const normalizeClusterStatus = (apiStatus: string): 'active' | 'stopped' | 'reinstalling' | 'pending' | 'running' | 'error' | 'restarting' | 'deleted' => {
+    
+    let status = apiStatus.toLowerCase();
+
+    
+    if (status === 'running') return 'active';
+    if (status === 'restarting') return 'reinstalling';
+    if (status === 'pending') return 'pending';
+    if (status === 'deleted') return 'stopped';
+    if (status === 'failed') return 'error';
+
+    
+    return status as any;
 };

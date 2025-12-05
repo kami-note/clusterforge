@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,13 +10,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { 
-  ChevronDown, 
-  ChevronUp, 
-  Cpu, 
-  HardDrive, 
-  MemoryStick, 
-  Server, 
+import {
+  ChevronDown,
+  ChevronUp,
+  Cpu,
+  HardDrive,
+  MemoryStick,
+  Server,
   Settings,
   ArrowLeft,
   Check,
@@ -41,7 +42,7 @@ import type { TemplateInstantiateRequest } from '@/types';
 import { DockerErrorDisplay, type DockerErrorDetails } from './DockerErrorDisplay';
 import { TIMEOUTS } from '@/constants';
 
-// Types
+
 export interface ClusterData {
   name: string;
   service: ServiceTemplate | null;
@@ -75,6 +76,7 @@ export interface ServiceTemplate {
 }
 
 export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationProps) {
+  const router = useRouter();
   const [clusterName, setClusterName] = useState('');
   const [selectedService, setSelectedService] = useState<ServiceTemplate | null>(null);
   const [cpuAllocation, setCpuAllocation] = useState([25]);
@@ -84,15 +86,24 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   const [customPort, setCustomPort] = useState('');
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isCreating, setIsCreating] = useState(false); // Estado para controlar criação em andamento
-  const [creatingClusterName, setCreatingClusterName] = useState<string | null>(null); // Nome do cluster sendo criado
-  const [creationProgress, setCreationProgress] = useState(0); // Progresso da criação (0-100)
-  const [creationStage, setCreationStage] = useState<string>(''); // Etapa atual da criação
+  const [isCreating, setIsCreating] = useState(false); 
+  const [creatingClusterName, setCreatingClusterName] = useState<string | null>(null); 
+  const [creationProgress, setCreationProgress] = useState(0); 
+  const [creationStage, setCreationStage] = useState<string>(''); 
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [errorDetails, setErrorDetails] = useState<DockerErrorDetails | null>(null);
 
-  // Mapeamento de ícones aleatórios para templates (constantes - não mudam)
+  
+  useEffect(() => {
+    if (creationProgress >= 95) {
+      const redirectPath = userType === 'admin' ? '/admin/clusters' : '/client/dashboard';
+      toast.success('Cluster quase pronto! Redirecionando para a lista...', { duration: 3000 });
+      router.push(redirectPath);
+    }
+  }, [creationProgress, userType, router]);
+
+  
   const iconMap: { [key: string]: React.ComponentType<{ className?: string }> } = {
     'test-alpine': Package,
     'webserver-php': Code,
@@ -111,54 +122,54 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     'default': Cloud
   };
 
-  // Array de ícones para distribuição aleatória (constante - não muda)
+  
   const availableIcons = [
     Gamepad2, FileText, Zap, Globe, Database, CircuitBoard,
     Package, Code, Cloud, Box, Layers, Rocket, Server, Cpu
   ];
 
-  // Função para obter recursos padrão baseados no tipo de template
-  // CPU: em porcentagem (5-100%) para o slider, será convertido para cores (÷100) ao enviar
+  
+  
   const getDefaultResourcesForTemplate = (templateName: string): { cpu: number; ram: number; disk: number } => {
     const lowerName = templateName.toLowerCase();
+
     
-    // Recursos baseados no tipo de template
     if (lowerName.includes('test') || lowerName.includes('alpine')) {
-      return { cpu: 15, ram: 0.5, disk: 2 }; // 15% CPU
+      return { cpu: 15, ram: 0.5, disk: 2 }; 
     }
     if (lowerName.includes('php') || lowerName.includes('webserver') || lowerName.includes('wordpress')) {
-      return { cpu: 30, ram: 2, disk: 5 }; // 30% CPU
+      return { cpu: 30, ram: 2, disk: 5 }; 
     }
     if (lowerName.includes('minecraft') || lowerName.includes('game')) {
-      return { cpu: 50, ram: 4, disk: 10 }; // 50% CPU
+      return { cpu: 50, ram: 4, disk: 10 }; 
     }
     if (lowerName.includes('database') || lowerName.includes('mysql') || lowerName.includes('postgres')) {
-      return { cpu: 40, ram: 4, disk: 20 }; // 40% CPU
+      return { cpu: 40, ram: 4, disk: 20 }; 
     }
     if (lowerName.includes('node') || lowerName.includes('api')) {
-      return { cpu: 25, ram: 1, disk: 3 }; // 25% CPU
+      return { cpu: 25, ram: 1, disk: 3 }; 
     }
     if (lowerName.includes('nginx') || lowerName.includes('apache')) {
-      return { cpu: 20, ram: 1, disk: 2 }; // 20% CPU
+      return { cpu: 20, ram: 1, disk: 2 }; 
     }
     if (lowerName.includes('redis') || lowerName.includes('cache')) {
-      return { cpu: 15, ram: 1, disk: 1 }; // 15% CPU
+      return { cpu: 15, ram: 1, disk: 1 }; 
     }
+
     
-    // Recursos padrão para templates desconhecidos
-    return { cpu: 25, ram: 2, disk: 10 }; // 25% CPU
+    return { cpu: 25, ram: 2, disk: 10 }; 
   };
 
-  // Função para parsear mensagens de erro do Docker
+  
   const parseDockerError = (message: string): DockerErrorDetails | null => {
     if (!message) return null;
 
     const lowerMessage = message.toLowerCase();
+
     
-    // Detectar tipo de erro
     let errorType = 'UNKNOWN';
     let resolvable = false;
-    
+
     if (lowerMessage.includes('restart loop') || lowerMessage.includes('reiniciou') || lowerMessage.includes('restarting')) {
       errorType = 'RESTART_LOOP';
       resolvable = true;
@@ -188,17 +199,17 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       resolvable = false;
     }
 
-    // Extrair logs se presentes
+    
     let logs: string | undefined;
     let exitCode: string | undefined;
-    
+
     if (message.includes('Logs do container:') || message.includes('Últimos logs:')) {
       const logsMatch = message.match(/(?:Logs do container:|Últimos logs:)\s*([\s\S]*)/);
       if (logsMatch) {
         logs = logsMatch[1].trim();
       }
     }
-    
+
     if (message.includes('Exit code:')) {
       const exitMatch = message.match(/Exit code:\s*(\d+)/);
       if (exitMatch) {
@@ -206,10 +217,10 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       }
     }
 
-    // Verificar se foi resolvido automaticamente
-    const resolved = message.includes('resolvido automaticamente') || 
-                     message.includes('após resolver') ||
-                     message.includes('resolvido com sucesso');
+    
+    const resolved = message.includes('resolvido automaticamente') ||
+      message.includes('após resolver') ||
+      message.includes('resolvido com sucesso');
 
     return {
       errorType,
@@ -221,54 +232,54 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
     };
   };
 
-  // Função para obter ícone do template
-  // iconMap e availableIcons são constantes e não mudam, então não precisam estar nas dependências
+  
+  
   const getIconForTemplate = useCallback((templateName: string): React.ComponentType<{ className?: string }> => {
     const lowerName = templateName.toLowerCase();
+
     
-    // Busca ícone pelo nome do template
     for (const [key, icon] of Object.entries(iconMap)) {
       if (lowerName.includes(key)) {
         return icon;
       }
     }
+
     
-    // Se não encontrar, usa hash para escolher um ícone aleatório
     let hash = 0;
     for (let i = 0; i < templateName.length; i++) {
       hash = ((hash << 5) - hash) + templateName.charCodeAt(i);
       hash = hash & hash;
     }
     return availableIcons[Math.abs(hash) % availableIcons.length];
-    // iconMap e availableIcons são constantes locais, não precisam estar nas dependências
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
+    
   }, []);
 
-  // Carregar templates do backend
+  
   useEffect(() => {
     const loadTemplates = async () => {
       try {
         setLoadingTemplates(true);
         const templates = await templateService.listTemplates();
+
         
-        // Converter templates do backend para ServiceTemplate
         const formattedTemplates: ServiceTemplate[] = templates.map((template) => {
           const Icon = getIconForTemplate(template.name);
+
           
-          // Recursos padrão baseados no tipo de template
           const defaultResources = getDefaultResourcesForTemplate(template.name);
-          
+
           return {
             id: template.name.toLowerCase().replace(/\s+/g, '-'),
             name: template.name,
-            description: template.description,
+            description: template.description || '',
             icon: Icon,
             defaultCommand: 'docker-compose up -d',
             recommendedResources: defaultResources
           };
         });
+
         
-        // Se não houver templates do backend, usa templates padrão
         if (formattedTemplates.length === 0) {
           const fallbackTemplates: ServiceTemplate[] = [
             {
@@ -276,7 +287,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               name: 'Aplicação Docker',
               description: 'Aplicação genérica com Docker',
               icon: Cloud,
-      defaultCommand: 'docker-compose up -d',
+              defaultCommand: 'docker-compose up -d',
               recommendedResources: { cpu: 25, ram: 2, disk: 10 }
             }
           ];
@@ -285,13 +296,13 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           setServiceTemplates(formattedTemplates);
         }
       } catch (error) {
-        // Erro já tratado - não logar se for BackendOffline
+        
         if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
           console.error('Error fetching templates:', error);
         }
         toast.error('Não foi possível carregar os tipos de serviço. Tente atualizar a página.');
+
         
-        // Fallback para template padrão em caso de erro
         setServiceTemplates([{
           id: 'docker-app',
           name: 'Aplicação Docker',
@@ -304,7 +315,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         setLoadingTemplates(false);
       }
     };
-    
+
     loadTemplates();
   }, [getIconForTemplate]);
 
@@ -332,98 +343,98 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       toast.error('Por favor, digite um nome para o cluster');
       return false;
     }
-    
+
     if (!selectedService) {
       toast.error('Por favor, escolha um tipo de serviço');
       return false;
     }
-    
+
     if (cpuAllocation[0] < 5 || cpuAllocation[0] > 100) {
       toast.error('A alocação de CPU deve estar entre 5% e 100%');
       return false;
     }
-    
+
     if (ramAllocation[0] < 0.5 || ramAllocation[0] > 32) {
       toast.error('A alocação de RAM deve estar entre 0.5GB e 32GB');
       return false;
     }
-    
+
     if (diskAllocation[0] < 1 || diskAllocation[0] > 500) {
       toast.error('A alocação de disco deve estar entre 1GB e 500GB');
       return false;
     }
-    
+
     if (customPort && (isNaN(Number(customPort)) || Number(customPort) < 1 || Number(customPort) > 65535)) {
       toast.error('A porta personalizada deve ser um número entre 1 e 65535');
       return false;
     }
-    
+
     return true;
   };
 
   const handleSubmit = async () => {
     console.log('handleSubmit chamado');
-    
+
     if (!validateForm()) {
       console.log('Validação falhou');
       return;
     }
-    
+
     console.log('Iniciando criação do cluster em background...');
     setLoading(true);
-    setIsCreating(true); // Marca que criação está em andamento
-    setCreatingClusterName(clusterName); // Guarda o nome do cluster sendo criado
-    setCreationProgress(0); // Reset progresso
-    setCreationStage('Iniciando criação...'); // Primeira etapa
-    setErrorDetails(null); // Limpar erros anteriores
+    setIsCreating(true); 
+    setCreatingClusterName(clusterName); 
+    setCreationProgress(0); 
+    setCreationStage('Iniciando criação...'); 
+    setErrorDetails(null); 
+
     
-    // Notificação inicial
     toast.info('Iniciando criação do cluster...', { duration: 2000 });
-    
+
     const templateName = selectedService?.name || '';
+
     
-    // Monta a requisição para o novo backend usando TemplateService
-    // Portas e limites de recursos são gerenciados pelo backend (PortManager)
-    // O frontend não deve especificar portas - o PortManager aloca automaticamente
+    
+    
     const request: TemplateInstantiateRequest = {
       name: clusterName,
-      // Limites de recursos: CPU em percentual (1-100), RAM em MB (convertido de GB)
+      
       cpuLimitPercent: cpuAllocation[0],
-      memoryLimitMb: ramAllocation[0] * 1024, // Converte GB para MB
-      // ports removido - PortManager aloca portas automaticamente do template
-      // env e binds removidos por enquanto
+      memoryLimitMb: ramAllocation[0] * 1024, 
+      
+      
     };
-    
+
     console.log('Request:', request);
+
     
-    // Simular progresso durante a criação (estimativa baseada em etapas)
-    // Etapa 1: Preparando (0-10%)
+    
     const timeout1 = setTimeout(() => {
       setCreationProgress(10);
       setCreationStage('Preparando ambiente...');
       toast.info('Preparando ambiente...', { duration: 2000 });
     }, 500);
+
     
-    // Etapa 2: Baixando imagem (10-60%) - pode levar tempo
     const timeout2 = setTimeout(() => {
       setCreationProgress(30);
       setCreationStage('Baixando imagem Docker...');
       toast.info('Baixando imagem Docker (isso pode levar alguns minutos)...', { duration: 4000 });
     }, 2000);
+
     
-    // Cleanup dos timeouts se houver erro
     const cleanupTimeouts = () => {
       clearTimeout(timeout1);
       clearTimeout(timeout2);
     };
+
     
-    // Executar criação em background usando TemplateService.instantiateTemplate
     templateService.instantiateTemplate(templateName, request)
       .then(async (response) => {
         console.log('Response:', response);
-        
-        cleanupTimeouts(); // Limpar timeouts quando a resposta chegar
-        
+
+        cleanupTimeouts(); 
+
         if (!response.containerId || !response.name) {
           toast.error('Erro ao criar cluster: resposta inválida do servidor');
           setLoading(false);
@@ -433,28 +444,28 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           setCreationStage('');
           return;
         }
+
         
-        // Etapa 3: Container criado (60-80%)
         setCreationProgress(70);
         setCreationStage('Container criado! Iniciando...');
         toast.success('Container criado com sucesso!', { duration: 2000 });
+
         
-        // Etapa 4: Iniciando (80-90%)
         setCreationProgress(85);
         setCreationStage('Iniciando container...');
         toast.info('Iniciando container...', { duration: 2000 });
+
         
-        // Buscar cluster pelo nome retornado e fazer polling do status
-        // Primeiro, tentamos buscar na lista de clusters pelo nome
+        
         let foundCluster = await pollClusterByName(response.name);
+
         
-        // Se encontramos o cluster pelo ID, fazer polling do status
         if (foundCluster?.id) {
           setCreationProgress(90);
           setCreationStage('Verificando status do cluster...');
           await pollClusterStatus(foundCluster.id);
         } else {
-          // Se não encontrou pelo nome ainda, tentar novamente após alguns segundos
+          
           setTimeout(async () => {
             foundCluster = await pollClusterByName(response.name);
             if (foundCluster?.id) {
@@ -464,9 +475,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             }
           }, 3000);
         }
+
         
-        // Mantém compatibilidade com a interface antiga para o callback
-        // A porta será definida pelo backend através do PortManager
+        
         const clusterData = {
           name: clusterName,
           service: selectedService,
@@ -476,18 +487,18 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             disk: diskAllocation[0]
           },
           startupCommand,
-          // port removido - será definido pelo backend via PortManager
+          
         };
+
         
-        // Etapa 5: Concluído (100%)
         setCreationProgress(100);
         setCreationStage('Cluster criado com sucesso!');
         toast.success(`Cluster "${clusterName}" criado e em execução!`, { duration: 5000 });
-        
+
         onSubmit(clusterData);
         setLoading(false);
+
         
-        // Manter banner por alguns segundos antes de remover
         setTimeout(() => {
           setIsCreating(false);
           setCreatingClusterName(null);
@@ -496,56 +507,56 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         }, 3000);
       })
       .catch((error: unknown) => {
-        cleanupTimeouts(); // Limpar timeouts em caso de erro
+        cleanupTimeouts(); 
+
         
-        // Erro já tratado - não logar se for BackendOffline
-      if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
-        console.error('Error creating cluster:', error);
-      }
+        if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
+          console.error('Error creating cluster:', error);
+        }
+
         
-        // Tenta extrair mensagem de erro de forma mais robusta
         let errorMessage = 'Não foi possível criar o cluster. Tente novamente.';
-        
+
         if (error instanceof Error) {
           errorMessage = error.message;
         } else if (typeof error === 'object' && error !== null) {
-          // Tenta extrair mensagem de objeto de erro da API
+          
           const apiError = error as any;
           if (apiError.message) {
             errorMessage = apiError.message;
           } else if (apiError.error) {
             errorMessage = apiError.error;
           } else {
-            // Se for objeto vazio ou sem mensagem, usa string do objeto
+            
             errorMessage = JSON.stringify(error) || errorMessage;
           }
         }
+
         
-        // Mensagem de erro já extraída - não logar se for BackendOffline
         if (!(error as any)?.name || (error as any).name !== 'BackendOffline') {
           console.error('Mensagem de erro extraída:', errorMessage);
         }
+
         
-        // Se for timeout, informar que está em processamento
         const apiError = error as any;
         if (apiError.name === 'TimeoutError') {
           toast.warning(
             'A criação do cluster foi iniciada, mas está demorando. Verificando status em segundo plano...',
-            { 
-              duration: 5000 
+            {
+              duration: 5000
             }
           );
+
           
-          // Tentar encontrar o cluster pelo nome após alguns segundos
           setTimeout(async () => {
             const foundCluster = await pollClusterByName(clusterName);
             if (foundCluster?.id) {
               await pollClusterStatus(foundCluster.id);
             }
           }, 5000);
+
           
-          // Permitir que usuário continue navegando
-          // A porta será definida pelo backend através do PortManager
+          
           const clusterData = {
             name: clusterName,
             service: selectedService,
@@ -555,9 +566,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               disk: diskAllocation[0]
             },
             startupCommand,
-            // port removido - será definido pelo backend via PortManager
+            
           };
-          
+
           onSubmit(clusterData);
           setLoading(false);
           setIsCreating(false);
@@ -566,12 +577,12 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           setCreationStage('');
           return;
         }
-        
+
         const parsedError = parseDockerError(errorMessage);
         if (parsedError) {
           setErrorDetails(parsedError);
-          toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', { 
-            duration: 10000 
+          toast.error('Erro ao criar cluster. Veja os detalhes abaixo.', {
+            duration: 10000
           });
         } else {
           toast.error(errorMessage);
@@ -583,26 +594,26 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
         setCreationStage('');
       });
   };
+
   
-  // Função para fazer polling do status do cluster após criação
-  // Aceita string (UUID) ou number (legado) para compatibilidade
+  
   const pollClusterStatus = async (clusterId: string | number) => {
     const pollInterval = TIMEOUTS.CLUSTER_CREATE_POLL;
     const maxAttempts = TIMEOUTS.CLUSTER_CREATE_MAX_ATTEMPTS;
     let attempts = 0;
     let isReady = false;
+
     
-    // Atualiza progresso durante polling (90-95%)
     setCreationProgress(90);
     setCreationStage('Aguardando cluster ficar pronto...');
-    
+
     while (attempts < maxAttempts && !isReady) {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
-      
+
       try {
         const clusterDetails = await clusterService.getCluster(clusterId);
+
         
-        // Verificar se cluster está em estado final (RUNNING, STOPPED, ou ERROR)
         if (clusterDetails.status === 'RUNNING' || clusterDetails.status === 'STOPPED') {
           isReady = true;
           setCreationProgress(100);
@@ -619,21 +630,21 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           setErrorDetails(parseDockerError('Cluster entrou em estado de erro'));
           break;
         } else {
-          // Cluster ainda está sendo criado (CREATED, STARTING, etc)
-          // Incrementa progresso gradualmente durante o polling (90-95%)
+          
+          
           const progress = Math.min(90 + (attempts * 5), 95);
           setCreationProgress(progress);
           setCreationStage(`Configurando cluster... (Status: ${clusterDetails.status})`);
         }
-        
+
         attempts++;
       } catch (pollError: unknown) {
-        // Se erro ao buscar status, continua tentando (pode ser temporário)
+        
         console.warn(`Erro ao verificar status (tentativa ${attempts + 1}):`, pollError);
         attempts++;
       }
     }
-    
+
     if (!isReady && attempts >= maxAttempts) {
       setCreationProgress(95);
       setCreationStage('Criação está demorando mais que o esperado...');
@@ -642,14 +653,14 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
       });
     }
   };
+
   
-  // Função para buscar cluster pelo nome caso a criação tenha sido iniciada mas demorou
-  // Retorna o cluster encontrado para permitir polling do status
+  
   const pollClusterByName = async (name: string): Promise<{ id: string; name: string } | null> => {
     try {
       const clusters = await clusterService.listClusters();
       const foundCluster = clusters.find(c => c.name === name || c.name.startsWith(name));
-      
+
       if (foundCluster) {
         return {
           id: foundCluster.id,
@@ -669,7 +680,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header */}
+        {}
         <div className="flex items-center space-x-4">
           <Button variant="ghost" onClick={onBack} className="p-2">
             <ArrowLeft className="h-4 w-4" />
@@ -682,7 +693,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           </div>
         </div>
 
-        {/* Banner de criação em andamento com barra de progresso */}
+        {}
         {isCreating && creatingClusterName && (
           <Card className="border-primary bg-primary/5 shadow-lg">
             <CardContent className="pt-6 pb-6">
@@ -701,8 +712,8 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                     {creationProgress}%
                   </Badge>
                 </div>
-                
-                {/* Barra de progresso */}
+
+                {}
                 <div className="space-y-2">
                   <Progress value={creationProgress} className="h-2" />
                   <div className="flex justify-between text-xs text-muted-foreground">
@@ -716,7 +727,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                     <span className="text-primary font-medium">{creationProgress}%</span>
                   </div>
                 </div>
-                
+
                 <p className="text-xs text-muted-foreground italic">
                   💡 Você pode continuar navegando enquanto isso. Você será notificado quando a criação for concluída.
                 </p>
@@ -725,9 +736,9 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
           </Card>
         )}
 
-        {/* Exibir erros detalhados se houver */}
+        {}
         {errorDetails && (
-          <DockerErrorDisplay 
+          <DockerErrorDisplay
             error={errorDetails}
             onRetry={() => {
               setErrorDetails(null);
@@ -739,7 +750,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            {/* 1. Informações Básicas */}
+            {}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
@@ -751,7 +762,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Nome do Cluster */}
+                {}
                 <div className="space-y-2">
                   <Label htmlFor="cluster-name">Nome do Cluster</Label>
                   <Input
@@ -766,7 +777,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </p>
                 </div>
 
-                {/* Tipo de Serviço */}
+                {}
                 <div className="space-y-3">
                   <Label>Tipo de Serviço (Template)</Label>
                   {loadingTemplates ? (
@@ -784,45 +795,44 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                       </div>
                     </div>
                   ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {serviceTemplates.map((service) => {
-                      const IconComponent = service.icon;
-                      return (
-                        <div
-                          key={service.id}
-                          className={`relative border rounded-lg p-4 cursor-pointer transition-all hover:border-primary ${
-                            selectedService?.id === service.id 
-                              ? 'border-primary bg-primary/5' 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {serviceTemplates.map((service) => {
+                        const IconComponent = service.icon;
+                        return (
+                          <div
+                            key={service.id}
+                            className={`relative border rounded-lg p-4 cursor-pointer transition-all hover:border-primary ${selectedService?.id === service.id
+                              ? 'border-primary bg-primary/5'
                               : 'border-border'
-                          }`}
-                          onClick={() => handleServiceChange(service.id)}
-                        >
-                          <div className="flex items-start space-x-3">
-                            <div className="p-2 rounded-lg bg-muted/50">
-                              <IconComponent className="h-6 w-6 text-primary" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-medium">{service.name}</h4>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                {service.description}
-                              </p>
-                            </div>
-                            {selectedService?.id === service.id && (
-                              <div className="absolute top-2 right-2">
-                                <div className="h-2 w-2 bg-primary rounded-full"></div>
+                              }`}
+                            onClick={() => handleServiceChange(service.id)}
+                          >
+                            <div className="flex items-start space-x-3">
+                              <div className="p-2 rounded-lg bg-muted/50">
+                                <IconComponent className="h-6 w-6 text-primary" />
                               </div>
-                            )}
+                              <div className="flex-1">
+                                <h4 className="font-medium">{service.name}</h4>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  {service.description}
+                                </p>
+                              </div>
+                              {selectedService?.id === service.id && (
+                                <div className="absolute top-2 right-2">
+                                  <div className="h-2 w-2 bg-primary rounded-full"></div>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               </CardContent>
             </Card>
 
-            {/* 2. Alocação de Recursos */}
+            {}
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -844,7 +854,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </div>
               </CardHeader>
               <CardContent className="space-y-8">
-                {/* CPU */}
+                {}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center space-x-2">
@@ -866,7 +876,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </p>
                 </div>
 
-                {/* RAM */}
+                {}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center space-x-2">
@@ -888,7 +898,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </p>
                 </div>
 
-                {/* Disco */}
+                {}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label className="flex items-center space-x-2">
@@ -912,7 +922,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
               </CardContent>
             </Card>
 
-            {/* 3. Configurações Avançadas */}
+            {}
             <Card>
               <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
                 <CollapsibleTrigger asChild>
@@ -934,7 +944,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <CardContent className="space-y-6">
-                    {/* Comando de Inicialização */}
+                    {}
                     <div className="space-y-2">
                       <Label htmlFor="startup-command">Comando de Inicialização</Label>
                       <Textarea
@@ -949,7 +959,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                       </p>
                     </div>
 
-                    {/* Porta (Admin apenas) */}
+                    {}
                     {userType === 'admin' && (
                       <div className="space-y-2">
                         <Label htmlFor="custom-port">Porta Personalizada</Label>
@@ -965,7 +975,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                       </div>
                     )}
 
-                    {/* Info: Backend cria usuário automaticamente */}
+                    {}
                     {userType === 'admin' && (
                       <div className="space-y-2">
                         <div className="flex items-center space-x-2 text-sm text-muted-foreground">
@@ -980,7 +990,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
             </Card>
           </div>
 
-          {/* Resumo e Confirmação */}
+          {}
           <div className="space-y-6">
             <Card className="sticky top-6">
               <CardHeader>
@@ -990,7 +1000,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Nome */}
+                {}
                 <div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium">Nome:</span>
@@ -1000,7 +1010,7 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                   </div>
                 </div>
 
-                {/* Serviço */}
+                {}
                 <div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium">Serviço:</span>
@@ -1012,54 +1022,54 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
 
                 <Separator />
 
-                {/* Recursos */}
+                {}
                 <div className="space-y-2">
                   <h4 className="font-medium">Recursos Alocados:</h4>
-                  
+
                   <div className="flex justify-between text-sm">
                     <span>CPU:</span>
                     <span>{cpuAllocation[0]}%</span>
                   </div>
-                  
+
                   <div className="flex justify-between text-sm">
                     <span>RAM:</span>
                     <span>{ramAllocation[0]} GB</span>
                   </div>
-                  
+
                   <div className="flex justify-between text-sm">
                     <span>Disco:</span>
                     <span>{diskAllocation[0]} GB</span>
                   </div>
                 </div>
 
-                    <Separator />
+                <Separator />
 
-                    {/* Custo Estimado */}
-                    <div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium">Custo Estimado:</span>
-                        <Badge variant="outline">R$ {totalCost}/mês</Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Baseado no uso de recursos
-                      </p>
+                {}
+                <div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium">Custo Estimado:</span>
+                    <Badge variant="outline">R$ {totalCost}/mês</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Baseado no uso de recursos
+                  </p>
+                </div>
+
+                {userType === 'admin' && (
+                  <>
+                    <Separator />
+                    <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                      <AlertCircle className="h-4 w-4" />
+                      <span>Um usuário será criado automaticamente para este cluster</span>
                     </div>
+                  </>
+                )}
 
-                    {userType === 'admin' && (
-                      <>
-                        <Separator />
-                        <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                          <AlertCircle className="h-4 w-4" />
-                          <span>Um usuário será criado automaticamente para este cluster</span>
-                        </div>
-                      </>
-                    )}
+                <Separator />
 
-                    <Separator />
-
-                {/* Botões de Ação */}
+                {}
                 <div className="space-y-2">
-                  <Button 
+                  <Button
                     onClick={handleSubmit}
                     disabled={!isFormValid || loading}
                     className="w-full"
@@ -1073,12 +1083,12 @@ export function ClusterCreation({ userType, onBack, onSubmit }: ClusterCreationP
                       'Criar Cluster'
                     )}
                   </Button>
-                  
-                  <Button 
-                    variant="outline" 
+
+                  <Button
+                    variant="outline"
                     onClick={onBack}
                     className="w-full"
-                    // Não bloqueia o botão - usuário pode voltar mesmo durante criação
+                  
                   >
                     {isCreating ? 'Voltar (Criação em andamento)' : 'Cancelar'}
                   </Button>

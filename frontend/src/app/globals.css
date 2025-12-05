@@ -188,4 +188,80 @@
     );
     background-size: 1000px 100%;
   }
+  
+  /* Responsive container padding */
+  .container-responsive {
+    @apply px-4 md:px-6 lg:px-8;
+  }
+  
+  /* Touch-friendly minimum sizes */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Horizontal scroll hint for mobile */
+  .mobile-scroll-hint {
+    position: relative;
+  }
+  
+  .mobile-scroll-hint::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    background: linear-gradient(to right, transparent, hsl(var(--background)));
+    pointer-events: none;
+  }
+  
+  @media (min-width: 768px) {
+    .mobile-scroll-hint::after {
+      display: none;
+    }
+  }
+  
+  /* Responsive text sizes */
+  .text-responsive-xs {
+    @apply text-xs sm:text-sm;
+  }
+  
+  .text-responsive-sm {
+    @apply text-sm sm:text-base;
+  }
+  
+  .text-responsive-base {
+    @apply text-base sm:text-lg;
+  }
+  
+  .text-responsive-lg {
+    @apply text-lg sm:text-xl;
+  }
+  
+  .text-responsive-xl {
+    @apply text-xl sm:text-2xl;
+  }
+  
+  /* Mobile-specific spacing */
+  .gap-responsive {
+    @apply gap-3 md:gap-4 lg:gap-6;
+  }
+  
+  .space-y-responsive > * + * {
+    @apply mt-3 md:mt-4 lg:mt-6;
+  }
+  
+  /* Responsive grid columns */
+  .grid-responsive-2 {
+    @apply grid-cols-1 sm:grid-cols-2;
+  }
+  
+  .grid-responsive-3 {
+    @apply grid-cols-1 sm:grid-cols-2 lg:grid-cols-3;
+  }
+  
+  .grid-responsive-4 {
+    @apply grid-cols-1 sm:grid-cols-2 lg:grid-cols-4;
+  }
 }

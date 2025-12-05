@@ -1,7 +1,4 @@
-/**
- * CompactMetric Component
- * Displays resource metrics (CPU, RAM, Disk) with visual indicators
- */
+
 
 import { memo } from 'react';
 import { getResourceColor, getResourceBgColor } from './cluster-management.constants';
@@ -14,7 +11,7 @@ interface CompactMetricProps {
 }
 
 export const CompactMetric = memo(({ label, icon: Icon, percentage, realtime }: CompactMetricProps) => {
-    // Ensure percentage is always a valid number
+    
     const safePercentage = percentage != null && !isNaN(percentage)
         ? Math.max(0, Math.min(100, percentage))
         : 0;

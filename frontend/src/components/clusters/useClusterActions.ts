@@ -16,7 +16,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
     const [processingClusters, setProcessingClusters] = useState<Set<string>>(new Set());
     const [clusterErrors, setClusterErrors] = useState<Map<string, DockerErrorDetails>>(new Map());
 
-    // Helper to update processing state
+    
     const setProcessing = useCallback((clusterId: string, isProcessing: boolean) => {
         setProcessingClusters(prev => {
             const next = new Set(prev);
@@ -29,7 +29,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         });
     }, []);
 
-    // Helper to set error
+    
     const setError = useCallback((clusterId: string, error: DockerErrorDetails | null) => {
         setClusterErrors(prev => {
             const next = new Map(prev);
@@ -42,7 +42,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         });
     }, []);
 
-    // Polling for start status
+    
     const pollClusterStartStatus = useCallback(async (
         clusterId: string,
         startResponse: any,
@@ -61,7 +61,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
 
                 if (clusterDetails.status === 'ACTIVE' || clusterDetails.status === 'RUNNING') {
                     isRunning = true;
-                    onClusterUpdate(clusterId, { status: 'active' }); // Map API status to local status
+                    onClusterUpdate(clusterId, { status: 'active' }); 
                     setError(clusterId, null);
                     toast.success('Cluster iniciado com sucesso!', { id: toastId });
                     setProcessing(clusterId, false);
@@ -110,7 +110,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
         }
     }, [onClusterUpdate, setError, setProcessing]);
 
-    // Polling for stop status
+    
     const pollClusterStopStatus = useCallback(async (
         clusterId: string,
         toastId: string
@@ -256,7 +256,7 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                     try {
                         await toast.promise(
                             clusterService.restartCluster(clusterId).then(async () => {
-                                // Wait a bit before refreshing status
+                                
                                 await new Promise(resolve => setTimeout(resolve, 2000));
                                 onClusterUpdate(clusterId, { status: 'active' });
                                 return 'Cluster reiniciado com sucesso!';
@@ -276,9 +276,9 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                     try {
                         await toast.promise(
                             clusterService.deleteCluster(clusterId).then(() => {
-                                // Refresh list handled by parent via router refresh or state update
-                                // But here we might want to trigger a refresh
-                                window.location.reload(); // Simple reload for now, or callback
+                                
+                                
+                                window.location.reload(); 
                                 return 'Cluster excluído com sucesso!';
                             }),
                             {

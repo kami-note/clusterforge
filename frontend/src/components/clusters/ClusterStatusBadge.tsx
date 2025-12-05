@@ -1,7 +1,4 @@
-/**
- * ClusterStatusBadge Component
- * Displays a styled badge representing the cluster's current status
- */
+
 
 import { Badge } from '@/components/ui/badge';
 import { STATUS_LABELS, STATUS_COLORS } from './cluster-management.constants';

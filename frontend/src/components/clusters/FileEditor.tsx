@@ -1,6 +1,4 @@
-/**
- * Componente de editor de arquivo
- */
+
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
@@ -50,7 +48,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, [filePath]);
 
   const hasChanges = content !== originalContent;
@@ -75,19 +73,19 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
     }
   }, [content, originalContent, filePath, onClose, onSave]);
 
-  // Carregar conteúdo do arquivo quando abrir
+  
   useEffect(() => {
     if (isOpen && filePath) {
       loadFile();
     } else {
-      // Limpar conteúdo quando fechar
+      
       setContent("");
       setOriginalContent("");
       setError(null);
     }
   }, [isOpen, filePath, loadFile]);
 
-  // Atalho de teclado Ctrl+S para salvar
+  
   useEffect(() => {
     if (!isOpen) return;
 
@@ -106,7 +104,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
 
   if (!isOpen) return null;
 
-  // Detectar extensão do arquivo para syntax highlighting básico
+  
   const extension = fileName.split(".").pop()?.toLowerCase() || "";
   const isTextFile = !["jpg", "jpeg", "png", "gif", "webp", "pdf", "zip", "tar", "gz"].includes(extension);
 
@@ -148,7 +146,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-background border rounded-lg shadow-lg w-[90vw] h-[90vh] max-w-6xl flex flex-col">
-        {/* Header */}
+        {}
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">Editor de Arquivo</h2>
@@ -189,7 +187,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
           </div>
         </div>
 
-        {/* Error */}
+        {}
         {error && (
           <div className="p-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800">
             <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
@@ -199,7 +197,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
           </div>
         )}
 
-        {/* Editor */}
+        {}
         <div className="flex-1 overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center h-full">
@@ -239,7 +237,7 @@ export function FileEditor({ filePath, fileName, isOpen, onClose, onSave }: File
           )}
         </div>
 
-        {/* Footer */}
+        {}
         <div className="p-3 border-t bg-muted/50 flex items-center justify-between text-xs text-muted-foreground">
           <div className="flex items-center gap-4">
             <span>Caminho: {filePath}</span>

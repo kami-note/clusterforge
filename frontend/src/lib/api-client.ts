@@ -1,7 +1,4 @@
-/**
- * Cliente HTTP base para comunicação com a API
- * Implementa autenticação JWT e tratamento centralizado de erros
- */
+
 
 import type { AuthResponse } from '@/types';
 import { config } from './config';
@@ -25,9 +22,7 @@ export class HttpClient {
     this.baseUrl = config.api.baseUrl;
   }
 
-  /**
-   * Faz uma requisição HTTP com autenticação JWT
-   */
+  
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -37,7 +32,7 @@ export class HttpClient {
     const method = options.method || 'GET';
     const fullUrl = `${this.baseUrl}${endpoint}`;
     
-    // Log da requisição apenas em desenvolvimento
+    
     if (process.env.NODE_ENV === 'development') {
       console.log(`[API Request] ${method} ${fullUrl}`, {
         endpoint,
@@ -53,7 +48,7 @@ export class HttpClient {
       ...options.headers,
     });
 
-    // Usar timeout customizado se fornecido, senão usar o padrão
+    
     const timeout = (options as any).timeout || config.api.timeout;
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), timeout);
@@ -67,7 +62,7 @@ export class HttpClient {
 
       clearTimeout(timeoutId);
 
-      // Se 401, tenta refresh automático uma vez
+      
       if (response.status === 401) {
         const refreshed = await this.tryRefreshToken();
         if (refreshed) {
@@ -96,7 +91,7 @@ export class HttpClient {
         await this.handleError(response, fullUrl);
       }
 
-      // Se a resposta não tem conteúdo, retorna void
+      
       if (response.status === 204 || response.headers.get('content-length') === '0') {
         return undefined as T;
       }
@@ -105,14 +100,14 @@ export class HttpClient {
     } catch (error: any) {
       clearTimeout(timeoutId);
       
-      // Verificar se o erro foi causado por timeout (AbortController)
-      // Quando o AbortController cancela, pode gerar AbortError ou TypeError
+      
+      
       const isAborted = abortController.signal.aborted;
       const isTimeoutError = error.name === 'AbortError' || 
                              error.name === 'TimeoutError' ||
                              (isAborted && error.message?.includes('aborted'));
       
-      // Tratar erros de timeout e rede com mensagens amigáveis
+      
       if (isTimeoutError) {
         throw {
           message: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.',
@@ -122,18 +117,18 @@ export class HttpClient {
       }
       
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        // Verificar se é backend offline ou erro de internet real
-        // Quando o fetch falha completamente (sem resposta HTTP), geralmente é:
-        // 1. Backend offline (ERR_CONNECTION_REFUSED, Failed to fetch)
-        // 2. Sem internet (ERR_NAME_NOT_RESOLVED, ERR_INTERNET_DISCONNECTED)
-        // 3. CORS (mais comum em produção, menos em localhost)
-        // IMPORTANTE: Se o signal foi abortado, não é backend offline, é timeout
+        
+        
+        
+        
+        
+        
         const errorMessage = error.message.toLowerCase();
         const isLocalhost = this.baseUrl.includes('localhost') || 
                            this.baseUrl.includes('127.0.0.1') ||
                            this.baseUrl.includes('0.0.0.0');
         
-        // Se o signal foi abortado, é timeout, não backend offline
+        
         if (isAborted) {
           throw {
             message: 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.',
@@ -142,8 +137,8 @@ export class HttpClient {
           } as ApiError;
         }
         
-        // Verificar se é erro de CORS (geralmente inclui "CORS" ou "Cross-Origin" na mensagem)
-        // Erros de CORS não devem ser classificados como BackendOffline
+        
+        
         const isCorsError = errorMessage.includes('cors') ||
                            errorMessage.includes('cross-origin') ||
                            errorMessage.includes('crossorigin') ||
@@ -158,27 +153,27 @@ export class HttpClient {
           } as ApiError;
         }
         
-        // Indicadores específicos de backend offline:
-        // - connection refused (porta fechada/backend não respondendo)
-        // - failed to fetch em localhost (geralmente significa backend não rodando)
+        
+        
+        
         const hasConnectionRefused = errorMessage.includes('connection refused') ||
                                      errorMessage.includes('err_connection_refused') ||
                                      errorMessage.includes('connectionreset') ||
                                      errorMessage.includes('econnrefused');
         
-        // Indicadores de erro de internet (não backend offline):
+        
         const isInternetError = 
           errorMessage.includes('err_name_not_resolved') ||
           errorMessage.includes('err_internet_disconnected') ||
           errorMessage.includes('networkerror when attempting to fetch resource') ||
           errorMessage.includes('network request failed');
         
-        // Backend offline: apenas se for localhost OU tiver connection refused explícito
-        // E não for erro de internet
+        
+        
         const isBackendOffline = 
           !isInternetError && (
-            (isLocalhost && hasConnectionRefused) || // localhost + connection refused = backend offline
-            (!isLocalhost && hasConnectionRefused)   // qualquer URL + connection refused = backend offline
+            (isLocalhost && hasConnectionRefused) || 
+            (!isLocalhost && hasConnectionRefused)   
           );
         
         throw {
@@ -194,16 +189,12 @@ export class HttpClient {
     }
   }
 
-  /**
-   * GET request
-   */
+  
   async get<T>(endpoint: string): Promise<T> {
     return this.request<T>(endpoint, { method: 'GET' });
   }
 
-  /**
-   * POST request
-   */
+  
   async post<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
@@ -212,9 +203,7 @@ export class HttpClient {
     } as RequestInit & { timeout?: number });
   }
 
-  /**
-   * PATCH request
-   */
+  
   async patch<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PATCH',
@@ -223,9 +212,7 @@ export class HttpClient {
     } as RequestInit & { timeout?: number });
   }
 
-  /**
-   * PUT request
-   */
+  
   async put<T>(endpoint: string, body?: unknown, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
@@ -234,9 +221,7 @@ export class HttpClient {
     } as RequestInit & { timeout?: number });
   }
 
-  /**
-   * DELETE request
-   */
+  
   async delete<T>(endpoint: string, timeout?: number): Promise<T> {
     return this.request<T>(endpoint, { 
       method: 'DELETE',
@@ -244,25 +229,19 @@ export class HttpClient {
     } as RequestInit & { timeout?: number });
   }
 
-  /**
-   * Obtém o token JWT do localStorage
-   */
+  
   private getToken(): string | null {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem(config.auth.tokenKey);
   }
 
-  /**
-   * Define o token JWT no localStorage
-   */
+  
   setToken(token: string): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem(config.auth.tokenKey, token);
   }
 
-  /**
-   * Remove o token do localStorage
-   */
+  
   clearToken(): void {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(config.auth.tokenKey);
@@ -313,7 +292,7 @@ export class HttpClient {
   }
 
   async refreshSession(): Promise<AuthResponse | null> {
-    // Tenta usar refreshToken se disponível, senão usa o token atual
+    
     const refreshToken = this.getRefreshToken();
     const currentToken = this.getToken();
     
@@ -330,7 +309,7 @@ export class HttpClient {
     }
 
     this.isRefreshing = true;
-    // Usa refreshToken se disponível, senão usa o token atual
+    
     const tokenToUse = refreshToken || currentToken || '';
     this.refreshPromise = this.performRefresh(tokenToUse)
       .catch((error) => {
@@ -350,8 +329,8 @@ export class HttpClient {
   }
 
   private async performRefresh(refreshToken: string): Promise<AuthResponse> {
-    // O backend aceita o token atual (não refresh token separado)
-    // Se não tiver refreshToken, tenta usar o token atual
+    
+    
     const token = refreshToken || this.getToken();
     
     if (!token) {
@@ -370,26 +349,26 @@ export class HttpClient {
       throw new Error('Refresh failed');
     }
 
-    // Backend retorna LoginResponse: { token, username, role, userId }
+    
     const response = await resp.json();
     
-    // Calcular expiresIn a partir do token JWT
+    
     let expiresIn: number | undefined;
     try {
       const payload = response.token.split('.')[1];
       const decoded = JSON.parse(atob(payload));
       if (decoded.exp) {
-        // exp está em segundos, converter para milissegundos
+        
         const expirationTimestamp = decoded.exp * 1000;
         expiresIn = expirationTimestamp - Date.now();
       }
     } catch (error) {
       console.warn('Erro ao calcular expiresIn do token:', error);
-      // Usar padrão de 24 horas se não conseguir calcular
-      expiresIn = 86400000; // 24 horas
+      
+      expiresIn = 86400000; 
     }
 
-    // Criar AuthResponse compatível
+    
     const data: AuthResponse = {
       token: response.token,
       expiresIn: expiresIn,
@@ -450,9 +429,7 @@ export class HttpClient {
     );
   }
 
-  /**
-   * Tratamento centralizado de erros
-   */
+  
   private async handleError(response: Response, endpointUrl?: string): Promise<never> {
     let errorMessage = 'Erro desconhecido';
     let errorDetails: Record<string, string[]> | undefined;
@@ -465,7 +442,7 @@ export class HttpClient {
           errorMessage = errorData.message || errorData.error || errorMessage;
           errorDetails = errorData.errors;
         } catch (parseError) {
-          // Se não conseguir parsear JSON, usa o texto como mensagem
+          
           errorMessage = text || this.getErrorMessage(response.status);
           console.error('Erro ao parsear resposta de erro:', parseError, 'Texto:', text);
         }
@@ -473,7 +450,7 @@ export class HttpClient {
         errorMessage = this.getErrorMessage(response.status);
       }
     } catch (e) {
-      // Se não conseguir ler a resposta, usa o status
+      
       errorMessage = this.getErrorMessage(response.status);
       console.error('Erro ao ler resposta:', e);
     }
@@ -484,21 +461,21 @@ export class HttpClient {
       errors: errorDetails,
     };
 
-    // 401 Unauthorized - limpa tokens e redireciona
-    // Mas só redireciona se não for um erro de endpoint não encontrado
-    // (endpoints que não existem podem retornar 401 se requerem autenticação)
+    
+    
+    
     if (response.status === 401) {
       this.handleUnauthorizedResponse(response);
       
-      // Verificar se é um erro de autenticação real ou endpoint não existente
-      // Endpoints conhecidos que não existem: /health/clusters, /monitoring, /ftp-credentials, etc
+      
+      
       const url = endpointUrl || response.url || '';
       const isNonExistentEndpoint = url.includes('/health/clusters') ||
                                    url.includes('/monitoring/') ||
                                    url.includes('/health/') ||
                                    url.includes('/ftp-credentials');
       
-      // Se a mensagem indicar token inválido/ausente E não for endpoint não existente, é erro de autenticação
+      
       const isAuthError = !isNonExistentEndpoint && (
         errorMessage.toLowerCase().includes('token') || 
         errorMessage.toLowerCase().includes('autenticado') ||
@@ -507,20 +484,18 @@ export class HttpClient {
       
       if (isAuthError) {
         this.clearSession();
-        // Redireciona para login se estiver no browser
+        
         if (typeof window !== 'undefined') {
           window.location.href = '/auth/login';
         }
       }
-      // Se não for erro de autenticação real, apenas lança o erro sem redirecionar
+      
     }
 
     throw error;
   }
 
-  /**
-   * Retorna mensagem de erro baseada no status HTTP
-   */
+  
   private getErrorMessage(status: number): string {
     const messages: Record<number, string> = {
       400: 'Requisição inválida',
@@ -535,5 +510,5 @@ export class HttpClient {
   }
 }
 
-// Instância única do cliente HTTP
+
 export const httpClient = new HttpClient();

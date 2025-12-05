@@ -2,23 +2,23 @@
 
 import React, { useMemo, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { 
-  BarChart, 
-  Bar, 
-  LineChart, 
-  Line, 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid 
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid
 } from 'recharts';
-import { 
-  ChartContainer, 
-  ChartTooltip, 
+import {
+  ChartContainer,
+  ChartTooltip,
   ChartTooltipContent,
   ChartLegend,
-  ChartLegendContent 
+  ChartLegendContent
 } from '@/components/ui/chart';
 import { clusterService } from '@/services/cluster.service';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
@@ -34,7 +34,7 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const { metrics: realtimeMetrics } = useRealtimeMetrics();
 
-  // Carregar clusters
+  
   useEffect(() => {
     const loadClusters = async () => {
       try {
@@ -51,7 +51,7 @@ const AdminDashboard: React.FC = () => {
     loadClusters();
   }, []);
 
-  // Calcular estatísticas reais
+  
   const stats = useMemo(() => {
     const activeClusters = clusters.filter(c => {
       const status = mapClusterStatus(c.status);
@@ -61,15 +61,15 @@ const AdminDashboard: React.FC = () => {
       const status = mapClusterStatus(c.status);
       return status === 'pending';
     });
+
     
-    // Contar usuários únicos
     const uniqueUserIds = new Set(
       clusters
         .map(c => c.userId || c.owner?.userId)
         .filter((id): id is number => id !== undefined)
     );
 
-    // Calcular métricas agregadas dos clusters ativos
+    
     const clustersWithMetrics = activeClusters.filter(cluster => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
@@ -87,7 +87,7 @@ const AdminDashboard: React.FC = () => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
       if (metrics) {
-        // CPU: calcular porcentagem relativa ao limite do cluster
+        
         const cpuRelative = calculateCpuUsageRelativeToLimit(
           metrics.cpuUsagePercent,
           cluster.cpuLimitPercent
@@ -95,9 +95,9 @@ const AdminDashboard: React.FC = () => {
         if (cpuRelative !== undefined) {
           totalCpu += Math.max(0, Math.min(100, cpuRelative));
         }
+
         
-        // Memória: calcular porcentagem relativa ao limite do cluster
-        // cluster.memoryLimit está em MB (vem do backend como memoryLimitMb)
+        
         const memoryRelative = calculateMemoryUsageRelativeToLimit(
           metrics.memoryUsagePercent,
           metrics.memoryUsageMb,
@@ -122,29 +122,29 @@ const AdminDashboard: React.FC = () => {
     };
   }, [clusters, realtimeMetrics]);
 
-  // Dados dos gráficos baseados em dados reais
+  
   const resourceData = useMemo(() => {
     const activeClusters = clusters.filter(c => {
       const status = mapClusterStatus(c.status);
       return status === 'running' || status === 'active';
-    }).slice(0, 5); // Limitar a 5 clusters para o gráfico
+    }).slice(0, 5); 
 
     return activeClusters.map((cluster, index) => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
+
       
-      // Calcular porcentagens relativas ao limite do cluster
       const cpuRelative = calculateCpuUsageRelativeToLimit(
         metrics?.cpuUsagePercent,
         cluster.cpuLimitPercent
       );
-      
+
       const memoryRelative = calculateMemoryUsageRelativeToLimit(
         metrics?.memoryUsagePercent,
         metrics?.memoryUsageMb,
         cluster.memoryLimit ? cluster.memoryLimit * 1024 : metrics?.memoryLimitMb
       );
-      
+
       return {
         cluster: cluster.name || `Cluster ${index + 1}`,
         cpu: cpuRelative !== undefined ? Math.round(cpuRelative) : 0,
@@ -153,7 +153,7 @@ const AdminDashboard: React.FC = () => {
     });
   }, [clusters, realtimeMetrics]);
 
-  // Dados mockados simplificados para histórico (já que não temos histórico real ainda)
+  
   const usersData = [
     { month: 'Jan', users: Math.max(1, stats.totalUsers - 5) },
     { month: 'Fev', users: Math.max(1, stats.totalUsers - 3) },
@@ -196,11 +196,11 @@ const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold mb-6">Admin Dashboard</h1>
-      
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div className="p-4 md:p-6">
+      <h1 className="text-2xl sm:text-3xl font-bold mb-4 md:mb-6">Admin Dashboard</h1>
+
+      {}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6 md:mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Usuários</CardTitle>
@@ -239,9 +239,9 @@ const AdminDashboard: React.FC = () => {
         </Card>
       </div>
 
-      {/* Charts Section - 3 columns layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {/* Users Growth Chart */}
+      {}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8">
+        {}
         <Card>
           <CardHeader>
             <CardTitle>Crescimento de Usuários</CardTitle>
@@ -259,7 +259,7 @@ const AdminDashboard: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Cluster Status Chart */}
+        {}
         <Card>
           <CardHeader>
             <CardTitle>Status dos Clusters</CardTitle>
@@ -279,7 +279,7 @@ const AdminDashboard: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Resource Utilization Chart */}
+        {}
         <Card>
           <CardHeader>
             <CardTitle>Utilização de Recursos</CardTitle>
@@ -306,7 +306,7 @@ const AdminDashboard: React.FC = () => {
         </Card>
       </div>
 
-      {/* Recent Activity */}
+      {}
       <Card>
         <CardHeader>
           <CardTitle>Clusters Recentes</CardTitle>
@@ -327,20 +327,20 @@ const AdminDashboard: React.FC = () => {
                 .slice(0, 5)
                 .map((cluster) => {
                   const status = mapClusterStatus(cluster.status);
-                  const statusText = status === 'running' || status === 'active' 
-                    ? 'Ativo' 
-                    : status === 'pending' 
-                    ? 'Pendente' 
-                    : 'Parado';
-                  
+                  const statusText = status === 'running' || status === 'active'
+                    ? 'Ativo'
+                    : status === 'pending'
+                      ? 'Pendente'
+                      : 'Parado';
+
                   const date = cluster.updatedAt || cluster.createdAt;
                   const dateObj = date ? new Date(date) : new Date();
                   const hoursAgo = Math.floor((Date.now() - dateObj.getTime()) / (1000 * 60 * 60));
-                  const timeText = hoursAgo < 1 
-                    ? 'menos de 1 hora atrás' 
-                    : hoursAgo < 24 
-                    ? `${hoursAgo} ${hoursAgo === 1 ? 'hora' : 'horas'} atrás`
-                    : `${Math.floor(hoursAgo / 24)} ${Math.floor(hoursAgo / 24) === 1 ? 'dia' : 'dias'} atrás`;
+                  const timeText = hoursAgo < 1
+                    ? 'menos de 1 hora atrás'
+                    : hoursAgo < 24
+                      ? `${hoursAgo} ${hoursAgo === 1 ? 'hora' : 'horas'} atrás`
+                      : `${Math.floor(hoursAgo / 24)} ${Math.floor(hoursAgo / 24) === 1 ? 'dia' : 'dias'} atrás`;
 
                   return (
                     <li key={cluster.id} className="flex justify-between items-center border-b pb-2">

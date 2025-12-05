@@ -50,13 +50,13 @@ interface ClusterDetailsProps {
   onBack: () => void;
 }
 
-// Formato de dados para gráfico
+
 interface ResourceDataPoint {
   time: string;
   cpu: number;
   ram: number;
   disk: number;
-  // network removido da UI (mantido no tipo original apenas localmente se necessário)
+  
   network: number;
 }
 
@@ -75,19 +75,19 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const { metrics: realtimeMetrics, connected } = useRealtimeMetrics();
   const [cluster, setCluster] = useState<Cluster | null>(null);
   
-  // Armazenar TODOS os dados desde que a página foi carregada
+  
   const [allResourceData, setAllResourceData] = useState<ResourceDataPoint[]>([]);
   
-  // Número de pontos a mostrar (começa com zoom alto - poucos pontos, aumenta com o tempo)
-  const [visiblePoints, setVisiblePoints] = useState(10); // Começa mostrando apenas 10 pontos
   
-  // Timestamp quando a página foi carregada
+  const [visiblePoints, setVisiblePoints] = useState(10); 
+  
+  
   const pageLoadTime = useRef<number>(Date.now());
   
-  // Referência para controlar o zoom automático
+  
   const autoZoomIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Calcular dados visíveis baseado no zoom (sempre mostra os últimos N pontos)
+  
   const resourceData = allResourceData.slice(-visiblePoints);
   
   const [currentMetrics, setCurrentMetrics] = useState<ClusterMetrics | null>(null);
@@ -105,10 +105,10 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       return '';
     }
 
-    // Determinar timestamp: se já temos string ISO, usar diretamente; senão, converter de epochSecond
+    
     let timestampLabel: string | undefined;
     if (logEvent.timestamp) {
-      // timestamp já é uma string ISO, converter diretamente
+      
       try {
         timestampLabel = new Date(logEvent.timestamp).toLocaleTimeString('pt-BR', {
           hour: '2-digit',
@@ -116,7 +116,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           second: '2-digit',
         });
       } catch {
-        // Se falhar, tentar usar epochSecond como fallback
+        
         if (typeof logEvent.epochSecond === 'number' && Number.isFinite(logEvent.epochSecond)) {
           timestampLabel = new Date(logEvent.epochSecond * 1000).toLocaleTimeString('pt-BR', {
             hour: '2-digit',
@@ -126,7 +126,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         }
       }
     } else if (typeof logEvent.epochSecond === 'number' && Number.isFinite(logEvent.epochSecond)) {
-      // Usar epochSecond diretamente
+      
       timestampLabel = new Date(logEvent.epochSecond * 1000).toLocaleTimeString('pt-BR', {
         hour: '2-digit',
         minute: '2-digit',
@@ -156,16 +156,16 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return `${prefix}${normalizedMessage}\n`;
   }, []);
 
-  // Função auxiliar para sanitizar valores numéricos
+  
   const sanitizeValue = useCallback((value: number | undefined | null): number => {
     if (value === null || value === undefined || isNaN(value)) {
       return 0;
     }
-    return Math.max(0, Math.min(100, Number(value))); // Garantir que está entre 0 e 100
+    return Math.max(0, Math.min(100, Number(value))); 
   }, []);
 
 
-  // Função para gerar dados iniciais do gráfico baseado em métricas
+  
   const generateInitialChartData = useCallback((metrics: ClusterMetrics) => {
     const now = Date.now();
     const initialData: ResourceDataPoint[] = Array.from({ length: 20 }, (_, i) => ({
@@ -182,19 +182,19 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     setAllResourceData(initialData);
   }, [sanitizeValue]);
 
-  // Calcular domínios dinâmicos baseados nos dados reais
+  
   const calculateDynamicDomain = useCallback((
     data: ResourceDataPoint[], 
     keys: ('cpu' | 'ram' | 'disk' | 'network')[],
     minPadding: number = 0.1,
     maxPadding: number = 0.1,
-    maxLimit?: number // Limite máximo opcional (para percentuais, por exemplo)
+    maxLimit?: number 
   ): [number, number] => {
     if (data.length === 0) {
       return maxLimit ? [0, maxLimit] : [0, 100];
     }
 
-    // Encontrar min e max entre todas as chaves fornecidas
+    
     let min = Infinity;
     let max = -Infinity;
 
@@ -208,19 +208,19 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       });
     });
 
-    // Se não encontrou valores válidos, retornar padrão
+    
     if (!isFinite(min) || !isFinite(max)) {
       return maxLimit ? [0, maxLimit] : [0, 100];
     }
 
-    // Se min e max são iguais, criar um range mínimo
+    
     if (min === max) {
-      // Para valores muito pequenos (< 1), usar padding absoluto
+      
       if (max < 1) {
         const padding = Math.max(0.1, max * 0.3);
         return [Math.max(0, min - padding), Math.min(maxLimit || Infinity, max + padding)];
       }
-      // Para valores maiores, usar padding proporcional
+      
       const padding = Math.max(max * 0.1, 1);
       return [
         Math.max(0, min - padding), 
@@ -228,23 +228,23 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       ];
     }
 
-    // Calcular padding baseado na diferença
+    
     const range = max - min;
     
-    // Para valores muito pequenos, usar padding absoluto
+    
     let paddingMin: number;
     let paddingMax: number;
     
     if (max < 1) {
-      // Valores muito pequenos: padding baseado no valor máximo
+      
       paddingMin = Math.max(0.05, max * 0.15);
       paddingMax = Math.max(0.1, max * 0.2);
     } else if (range < 5) {
-      // Range pequeno: padding proporcional ao range
+      
       paddingMin = range * minPadding;
       paddingMax = range * maxPadding;
     } else {
-      // Range normal: padding proporcional ao range
+      
       paddingMin = range * minPadding;
       paddingMax = range * maxPadding;
     }
@@ -254,7 +254,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       ? Math.min(maxLimit, max + paddingMax)
       : max + paddingMax;
 
-    // Se o range ficou muito pequeno após o cálculo, garantir um mínimo
+    
     if (finalMax - finalMin < 0.1 && max < 1) {
       return [Math.max(0, finalMin - 0.1), finalMax + 0.1];
     }
@@ -310,20 +310,20 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
 
   const accessLoading = !cluster;
 
-  // Helper para converter oklch para hex (usando elemento temporário)
-  // No tema escuro, prioriza cores mais brilhantes para melhor visibilidade
+  
+  
   const oklchToHex = useCallback((oklch: string, fallback: string = '#8884d8', preferFallback: boolean = false): string => {
     if (typeof document === 'undefined') {
       return fallback;
     }
     
-    // Se preferFallback for true (tema escuro), usar fallback diretamente para garantir visibilidade
+    
     if (preferFallback) {
       return fallback;
     }
     
     try {
-      // Criar elemento temporário para obter cor computada
+      
       const tempElement = document.createElement('div');
       tempElement.style.color = oklch;
       tempElement.style.position = 'absolute';
@@ -335,27 +335,27 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       const computedColor = window.getComputedStyle(tempElement).color;
       document.body.removeChild(tempElement);
       
-      // Converter rgb/rgba para hex
+      
       const rgb = computedColor.match(/\d+/g);
       if (rgb && rgb.length >= 3) {
         const r = parseInt(rgb[0]);
         const g = parseInt(rgb[1]);
         const b = parseInt(rgb[2]);
         
-        // Verificar luminosidade da cor
+        
         const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
         
-        // No tema claro: se a cor for muito clara (luminosidade alta), usar fallback
-        // No tema escuro: se a cor for muito escura (luminosidade baixa), usar fallback
-        // Verificar se estamos em tema claro ou escuro
+        
+        
+        
         const root = document.documentElement;
         const isDark = root.classList.contains('dark');
         
         if (isDark && luminance < 0.3) {
-          // Tema escuro: cor muito escura, usar fallback
+          
           return fallback;
         } else if (!isDark && luminance > 0.85) {
-          // Tema claro: cor muito clara, usar fallback para garantir contraste
+          
           return fallback;
         }
         
@@ -374,17 +374,17 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return fallback;
   }, []);
 
-  // Obter cores do tema convertidas para hex
-  // Cores padrão visíveis (serão substituídas quando o tema for detectado)
+  
+  
   const [chartColors, setChartColors] = useState({
-    chart1: '#dc2626', // vermelho escuro (tema claro) ou azul claro (tema escuro)
-    chart2: '#2563eb', // azul escuro (tema claro) ou verde (tema escuro)
-    chart3: '#d97706', // laranja escuro (tema claro) ou amarelo (tema escuro)
-    chart4: '#ea580c', // laranja escuro (tema claro) ou roxo (tema escuro)
+    chart1: '#dc2626', 
+    chart2: '#2563eb', 
+    chart3: '#d97706', 
+    chart4: '#ea580c', 
   });
 
-  // Carregar dados iniciais (apenas cluster, sem métricas - métricas vêm do SSE)
-  // Este efeito roda APENAS quando clusterId mudar, não quando realtimeMetrics mudar
+  
+  
   useEffect(() => {
     let isCancelled = false;
     
@@ -392,32 +392,32 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       try {
         const clusterData = await findClusterById(clusterId);
         
-        // Verificar se o componente ainda está montado e o clusterId ainda é o mesmo
+        
         if (isCancelled) return;
         
         if (clusterData) {
           setCluster(clusterData);
           
-          // ID agora é UUID (string), não precisa mais de parseInt
           
-          // SEMPRE usar o status da API como fonte primária inicial
-          // O status da API é mais confiável no momento do carregamento
+          
+          
+          
           const initialStatus = clusterData.status;
           
-          // Buscar health status da API para ter informação mais atualizada
-          // Endpoint pode não existir no backend (não crítico)
+          
+          
           try {
             const health = await monitoringService.getClusterHealth(clusterId);
             if (!isCancelled && health) {
               setHealthStatus(health);
               
-              // Se o health status da API indica algo diferente, usar como referência
-              // mas priorizar o status da entidade do cluster (que vem de /clusters/{id})
-              // A API pode ter status diferente do health check
+              
+              
+              
             }
           } catch (error: any) {
-            // Não logar se for 403/404 (endpoint não existe ou não autorizado)
-            // Apenas usar o status do cluster como fallback (comportamento normal)
+            
+            
             if (error?.status !== 403 && error?.status !== 404) {
               if (process.env.NODE_ENV === 'development') {
                 console.debug("Failed to fetch health status from API, using cluster status:", error);
@@ -425,58 +425,58 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             }
           }
           
-          // Verificar SSE apenas para métricas, não para sobrescrever status inicial
-          // ID agora é UUID (string), tentar buscar como string primeiro (UUID), depois como number (legado)
+          
+          
           const sseMetrics = realtimeMetrics && (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)]) 
             ? (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)])
             : null;
           
-          // Se houver métricas do SSE, usar TODOS os campos disponíveis
+          
           if (sseMetrics && connected && !isCancelled) {
             const sseMetricsData: ClusterMetrics = {
-              // CPU
+              
               cpuUsagePercent: sseMetrics.cpuUsagePercent ?? undefined,
               cpuLimitCores: sseMetrics.cpuLimitCores ?? undefined,
               
-              // Memory
+              
               memoryUsagePercent: sseMetrics.memoryUsagePercent ?? undefined,
               memoryUsageMb: sseMetrics.memoryUsageMb ?? undefined,
               memoryLimitMb: sseMetrics.memoryLimitMb ?? undefined,
               
-              // Disk
+              
               diskUsagePercent: sseMetrics.diskUsagePercent !== null && sseMetrics.diskUsagePercent !== undefined 
                 ? sseMetrics.diskUsagePercent 
                 : undefined,
               diskUsageMb: sseMetrics.diskUsageMb ?? undefined,
               diskLimitMb: sseMetrics.diskLimitMb ?? undefined,
               
-              // Network
+              
               networkRxBytes: sseMetrics.networkRxBytes ?? undefined,
               networkTxBytes: sseMetrics.networkTxBytes ?? undefined,
               networkUsage: sseMetrics.networkRxBytes && sseMetrics.networkTxBytes 
                 ? (sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024 
                 : undefined,
               
-              // Container
+              
               containerUptimeSeconds: sseMetrics.containerUptimeSeconds ?? undefined,
               containerRestartCount: sseMetrics.containerRestartCount ?? undefined,
               containerStatus: sseMetrics.containerStatus ?? undefined,
               
-              // Health
+              
               healthState: sseMetrics.healthState ?? undefined,
               
-              // Cluster Info
+              
               clusterId: sseMetrics.clusterId ?? clusterId,
             };
             setCurrentMetrics(sseMetricsData);
             
-            // Inicializar gráfico apenas se ainda não houver dados
+            
             if (allResourceData.length === 0) {
               generateInitialChartData(sseMetricsData);
             }
           }
           
-          // Definir status baseado na API (fonte primária)
+          
           if (!isCancelled) {
             setStatus(initialStatus);
           }
@@ -486,55 +486,55 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       }
     };
 
-    // Resetar ref quando clusterId mudar
+    
     hasLoadedInitialDataRef.current = false;
     fetchInitialData();
     hasLoadedInitialDataRef.current = true;
     
-    // Resetar zoom quando mudar de cluster
+    
     pageLoadTime.current = Date.now();
     setVisiblePoints(10);
     
-    // Limpar dados antigos do gráfico quando mudar de cluster
+    
     setAllResourceData([]);
     
     return () => {
       isCancelled = true;
       hasLoadedInitialDataRef.current = false;
     };
-  }, [clusterId, findClusterById]); // Apenas clusterId e findClusterById (que agora é memoizado)
+  }, [clusterId, findClusterById]); 
 
-  // Zoom automático: aumenta gradualmente o número de pontos visíveis com o tempo
+  
   useEffect(() => {
     const updateZoom = () => {
       const timeElapsed = Date.now() - pageLoadTime.current;
       const secondsElapsed = timeElapsed / 1000;
       
-      // Começa com 10 pontos (zoom alto), aumenta gradualmente
-      // A cada 30 segundos, aumenta 1 ponto até chegar a 60 pontos (5 minutos de dados)
-      // Depois disso, aumenta mais lentamente até mostrar tudo
+      
+      
+      
       const maxPoints = allResourceData.length;
       let newVisiblePoints: number;
       
-      if (secondsElapsed < 1800) { // Primeiros 30 minutos: aumenta 1 ponto a cada 30s
+      if (secondsElapsed < 1800) { 
         newVisiblePoints = Math.min(10 + Math.floor(secondsElapsed / 30), 60);
-      } else { // Depois de 30 min: aumenta mais lentamente até mostrar tudo
-        const extraPoints = Math.floor((secondsElapsed - 1800) / 60); // 1 ponto por minuto após 30min
+      } else { 
+        const extraPoints = Math.floor((secondsElapsed - 1800) / 60); 
         newVisiblePoints = Math.min(60 + extraPoints, maxPoints);
       }
       
-      // Garantir que não ultrapasse o total de dados disponíveis
+      
       newVisiblePoints = Math.min(newVisiblePoints, maxPoints);
       
-      // Atualizar sempre (o React vai otimizar re-renders se o valor não mudou)
+      
       setVisiblePoints(prev => {
-        // Só atualizar se realmente mudou (evitar re-renders desnecessários)
+        
         return prev !== newVisiblePoints ? newVisiblePoints : prev;
       });
     };
     
-    // Atualizar zoom a cada 10 segundos para ser mais suave
-    updateZoom(); // Executar imediatamente
+    
+    updateZoom(); 
     autoZoomIntervalRef.current = setInterval(updateZoom, 10000);
     
     return () => {
@@ -542,11 +542,11 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         clearInterval(autoZoomIntervalRef.current);
       }
     };
-  }, [allResourceData.length]); // Remover visiblePoints das dependências para evitar loop
+  }, [allResourceData.length]); 
 
 
-  // ÚNICA fonte de atualização: SSE para métricas em tempo real
-  // Usar refs para evitar loops - não incluir status nas dependências
+  
+  
   const statusRef = useRef(status);
   useEffect(() => {
     statusRef.current = status;
@@ -555,111 +555,111 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   useEffect(() => {
     if (!cluster) return;
 
-    // ID agora é UUID (string), não precisa mais de parseInt
-    // Tentar buscar como string primeiro (UUID), depois como number (legado)
+    
+    
     const sseMetrics = realtimeMetrics && (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)]) 
       ? (realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)])
       : null;
     
-    // Só processar se SSE estiver conectado E houver métricas
+    
     if (!sseMetrics || !connected) {
       if (!connected) {
-        setMetricsError(null); // Limpar erro quando desconectado (já há aviso visual)
+        setMetricsError(null); 
       }
       return;
     }
     
-    // Limpar erro quando receber métricas válidas
+    
     if (metricsError) {
       setMetricsError(null);
     }
     
-    // Debug: verificar TODOS os campos recebidos do SSE
+    
     if (process.env.NODE_ENV === 'development') {
       console.log('📊 Métricas COMPLETAS recebidas do SSE para cluster', clusterId, {
-        // CPU
+        
         cpuUsagePercent: sseMetrics.cpuUsagePercent,
         cpuLimitCores: sseMetrics.cpuLimitCores,
         
-        // Memory
+        
         memoryUsagePercent: sseMetrics.memoryUsagePercent,
         memoryUsageMb: sseMetrics.memoryUsageMb,
         memoryLimitMb: sseMetrics.memoryLimitMb,
         
-        // Disk
+        
         diskUsagePercent: sseMetrics.diskUsagePercent,
         diskUsageMb: sseMetrics.diskUsageMb,
         diskLimitMb: sseMetrics.diskLimitMb,
         
-        // Network
+        
         networkRxBytes: sseMetrics.networkRxBytes,
         networkTxBytes: sseMetrics.networkTxBytes,
         networkMB: sseMetrics.networkRxBytes !== undefined && sseMetrics.networkTxBytes !== undefined
           ? ((sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024).toFixed(2)
           : 'N/A',
         
-        // Container
+        
         containerUptimeSeconds: sseMetrics.containerUptimeSeconds,
         containerStatus: sseMetrics.containerStatus,
         
-        // Health
+        
         healthState: sseMetrics.healthState,
         
-        // Objeto completo para debug
+        
         objetoCompleto: sseMetrics
       });
     }
     
-    // Calcular porcentagens relativas ao limite do cluster
-    // CPU: se limite é 50% da máquina e uso é 50% da máquina, então é 100% do limite
-    // cluster.cpu já é cpuLimitPercent (em percentual 1-100)
+    
+    
+    
     const cpuUsageRelativeToLimit = calculateCpuUsageRelativeToLimit(
       sseMetrics.cpuUsagePercent,
-      cluster?.cpu // cluster.cpu já é cpuLimitPercent
+      cluster?.cpu 
     );
     
-    // Memory: já vem como percentual do limite, mas garantir consistência
-    // cluster.memory é o limite em GB, converter para MB
+    
+    
     const memoryUsageRelativeToLimit = calculateMemoryUsageRelativeToLimit(
       sseMetrics.memoryUsagePercent,
       sseMetrics.memoryUsageMb,
-      cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb // Converter GB para MB
+      cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb 
     );
     
-    // Disk: similar à memória
-    // cluster.storage é o limite em GB, converter para MB
+    
+    
     const diskUsageRelativeToLimit = calculateDiskUsageRelativeToLimit(
       sseMetrics.diskUsagePercent,
       sseMetrics.diskUsageMb,
-      cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb // Converter GB para MB
+      cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb 
     );
     
-    // Network: calcular relativo ao limite (não temos networkLimit na interface Cluster)
+    
     const networkUsageRelativeToLimit = calculateNetworkUsageRelativeToLimit(
       sseMetrics.networkRxBytes,
       sseMetrics.networkTxBytes,
       sseMetrics.networkLimitMbps
     );
     
-    // Usar TODOS os campos disponíveis do SSE (ContainerStats)
+    
     const metrics: ClusterMetrics = {
-      // CPU - usar porcentagem relativa ao limite do cluster
+      
       cpuUsagePercent: cpuUsageRelativeToLimit,
       cpuLimitCores: sseMetrics.cpuLimitCores ?? undefined,
       
-      // Memory - usar porcentagem relativa ao limite do cluster
+      
       memoryUsagePercent: memoryUsageRelativeToLimit,
       memoryUsageMb: sseMetrics.memoryUsageMb ?? undefined,
-      memoryLimitMb: cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb, // Converter GB para MB
+      memoryLimitMb: cluster?.memory ? cluster.memory * 1024 : sseMetrics.memoryLimitMb, 
       
-      // Disk - usar porcentagem relativa ao limite do cluster
+      
       diskUsagePercent: diskUsageRelativeToLimit,
       diskUsageMb: sseMetrics.diskUsageMb ?? undefined,
-      diskLimitMb: cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb, // Converter GB para MB
+      diskLimitMb: cluster?.storage ? cluster.storage * 1024 : sseMetrics.diskLimitMb, 
       diskReadBytes: sseMetrics.diskReadBytes ?? undefined,
       diskWriteBytes: sseMetrics.diskWriteBytes ?? undefined,
       
-      // Network - calcular de networkRxBytes e networkTxBytes
+      
       networkRxBytes: sseMetrics.networkRxBytes ?? undefined,
       networkTxBytes: sseMetrics.networkTxBytes ?? undefined,
       networkLimitMbps: sseMetrics.networkLimitMbps ?? undefined,
@@ -667,47 +667,47 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         ? (sseMetrics.networkRxBytes + sseMetrics.networkTxBytes) / 1024 / 1024 
         : undefined,
       
-      // Container - usar diretamente do SSE
+      
       containerUptimeSeconds: sseMetrics.containerUptimeSeconds ?? undefined,
       containerRestartCount: sseMetrics.containerRestartCount ?? undefined,
       containerStatus: sseMetrics.containerStatus ?? undefined,
       
-      // Application - usar diretamente do SSE
+      
       applicationResponseTimeMs: sseMetrics.applicationResponseTimeMs ?? undefined,
       applicationStatusCode: sseMetrics.applicationStatusCode ?? undefined,
       
-      // Health - usar diretamente do SSE
+      
       healthState: sseMetrics.healthState ?? undefined,
       errorMessage: sseMetrics.errorMessage ?? undefined,
       
-      // Cluster Info - usar diretamente do SSE
+      
       clusterId: sseMetrics.clusterId ?? clusterId,
       clusterName: sseMetrics.clusterName ?? undefined,
-      timestamp: sseMetrics.timestamp ?? undefined, // LocalDateTime serializado como string ISO
+      timestamp: sseMetrics.timestamp ?? undefined, 
     };
     
-    // Atualizar métricas apenas se houver mudança significativa
+    
     setCurrentMetrics(prev => {
-      // Evitar atualizações se os valores principais não mudaram
+      
       if (prev && 
           prev.cpuUsagePercent === metrics.cpuUsagePercent &&
           prev.memoryUsagePercent === metrics.memoryUsagePercent &&
           prev.diskUsagePercent === metrics.diskUsagePercent &&
           prev.healthState === metrics.healthState) {
-        return prev; // Retornar mesmo objeto para evitar re-render
+        return prev; 
       }
       return metrics;
     });
     
-    // Não usar SSE para alterar status; apenas a API controla estado.
     
-    // Atualizar healthStatus apenas se mudou
+    
+    
     if (sseMetrics.healthState) {
       setHealthStatus(prev => {
         const newStatus = sseMetrics.healthState === 'HEALTHY' ? 'HEALTHY' : 
                          sseMetrics.healthState === 'UNHEALTHY' ? 'UNHEALTHY' : 'UNKNOWN';
         if (prev && prev.status === newStatus && prev.clusterId === clusterId) {
-          return prev; // Retornar mesmo objeto se não mudou
+          return prev; 
         }
         return {
           clusterId: clusterId,
@@ -716,14 +716,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       });
     }
     
-    // Atualizar gráfico se houver ao menos CPU ou RAM (essenciais)
-    // Mesmo se Disco ou Network forem null/undefined, ainda plotamos as métricas válidas
+    
+    
     const hasValidMetrics = metrics.cpuUsagePercent !== undefined || 
                            metrics.memoryUsagePercent !== undefined;
     
     if (hasValidMetrics) {
       setAllResourceData(prev => {
-        // Se não há dados ainda, criar array inicial com timestamps diferentes
+        
         if (prev.length === 0) {
           const now = Date.now();
           const initialNetwork = metrics.networkUsage !== undefined ? Math.round(metrics.networkUsage) : 0;
@@ -741,14 +741,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           return initialData;
         }
         
-        // Verificar se os valores realmente mudaram antes de adicionar novo ponto
+        
         const lastPoint = prev[prev.length - 1];
         const newCpu = sanitizeValue(metrics.cpuUsagePercent);
         const newRam = sanitizeValue(metrics.memoryUsagePercent);
         const newDisk = sanitizeValue(metrics.diskUsagePercent);
         const newNetwork = metrics.networkUsage !== undefined ? Math.round(metrics.networkUsage) : 0;
         
-        // Debug: verificar valores que serão adicionados ao gráfico
+        
         if (process.env.NODE_ENV === 'development') {
           console.log('📈 Valores plotados no gráfico:', {
             cpu: `${newCpu}% (original: ${metrics.cpuUsagePercent}%)`,
@@ -759,19 +759,19 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           });
         }
         
-        // Só adicionar se houver mudança significativa (evitar pontos duplicados)
-        // Mas sempre adicionar se algum valor válido mudou (não apenas se todos mudaram)
+        
+        
         const cpuChanged = !lastPoint || Math.abs(lastPoint.cpu - newCpu) >= 0.01;
         const ramChanged = !lastPoint || Math.abs(lastPoint.ram - newRam) >= 0.01;
         const diskChanged = !lastPoint || Math.abs(lastPoint.disk - newDisk) >= 0.01;
         const networkChanged = !lastPoint || Math.abs(lastPoint.network - newNetwork) >= 0.01;
         
-        // Se nenhum valor válido mudou, não adicionar novo ponto
+        
         if (lastPoint && !cpuChanged && !ramChanged && !diskChanged && !networkChanged) {
-          return prev; // Dados muito similares, não adicionar novo ponto
+          return prev; 
         }
         
-        // Adicionar novo ponto
+        
         const newData = [...prev];
         newData.push({
           time: new Date().toLocaleTimeString('pt-BR', {
@@ -785,7 +785,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           network: newNetwork
         });
         
-        // Manter apenas os últimos 100 pontos
+        
         if (newData.length > 100) {
           return newData.slice(-100);
         }
@@ -794,10 +794,10 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     }
   }, [realtimeMetrics, connected, clusterId, sanitizeValue, cluster]);
 
-  // NÃO fazer polling REST - usar apenas SSE para métricas em tempo real
-  // Se SSE não estiver disponível, o usuário verá uma mensagem ou dados estáticos
+  
+  
 
-  // Conectar SSE de logs do container
+  
   useEffect(() => {
     if (!cluster || !cluster.containerId || status !== 'running' || isLogsPaused) {
       if (status !== 'running' && cluster) {
@@ -806,7 +806,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       return;
     }
 
-    // Usar ref para evitar race condition com callback do SSE
+    
     const isInitialLoadCompleteRef = { current: false };
     const sseLogsBufferRef = { current: [] as string[] };
 
@@ -825,7 +825,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       sseLogsBufferRef.current = [];
     };
 
-    // Carregar logs iniciais via REST ANTES de conectar SSE
+    
     const loadInitialLogs = async (): Promise<number | undefined> => {
       try {
         const response = await clusterService.getContainerLogs(cluster.id, 200);
@@ -846,7 +846,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       }
     };
 
-    // Callback para receber logs via SSE (registrado ANTES de conectar para evitar perder logs)
+    
     const unsubscribe = sseService.onLogs((receivedClusterId: string | number, logEvent: ContainerLogEventPayload) => {
       if (receivedClusterId === cluster.id && logEvent?.message) {
         const formattedLine = formatLogLine(logEvent);
@@ -869,7 +869,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       }
     });
 
-    // Conectar SSE para logs em tempo real
+    
     const containerId = cluster.containerId;
     if (containerId) {
       const connectLogs = async (sinceSeconds?: number) => {
@@ -880,7 +880,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         }
       };
 
-      // Carrega logs iniciais primeiro, depois conecta SSE com since para evitar duplicação
+      
       loadInitialLogs().then((sinceTimestamp) => {
         connectLogs(sinceTimestamp);
       });
@@ -892,20 +892,20 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     };
   }, [cluster, status, isLogsPaused, formatLogLine]);
 
-  // Auto-scroll do console
+  
   useEffect(() => {
     if (consoleRef.current && !isLogsPaused) {
       consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
     }
   }, [consoleOutput, isLogsPaused]);
 
-  // Estado para cores do tema (eixos, grid, etc.)
+  
   const [themeColors, setThemeColors] = useState({
     foreground: '#000000',
     mutedForeground: '#888888',
   });
 
-  // Função para converter rgb/rgba para hex
+  
   const rgbToHex = useCallback((rgb: string): string => {
     const match = rgb.match(/\d+/g);
     if (match && match.length >= 3) {
@@ -920,23 +920,23 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return '#000000';
   }, []);
 
-  // Função para obter cor CSS do tema e converter para hex
+  
   const getThemeColor = useCallback((cssVar: string, fallback: string = '#000000'): string => {
     if (typeof document === 'undefined') {
       return fallback;
     }
     try {
       const root = document.documentElement;
-      // Obter valor da variável CSS
+      
       const cssValue = getComputedStyle(root).getPropertyValue(cssVar).trim();
       
       if (cssValue) {
-        // Se já for hex, retornar diretamente
+        
         if (cssValue.startsWith('#')) {
           return cssValue;
         }
         
-        // Se for oklch, criar elemento temporário para obter cor computada
+        
         if (cssValue.startsWith('oklch')) {
           const tempElement = document.createElement('div');
           tempElement.style.color = cssValue;
@@ -949,11 +949,11 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           const computedColor = window.getComputedStyle(tempElement).color;
           document.body.removeChild(tempElement);
           
-          // Converter rgb para hex
+          
           return rgbToHex(computedColor);
         }
         
-        // Se for rgb/rgba, converter para hex
+        
         if (cssValue.startsWith('rgb')) {
           return rgbToHex(cssValue);
         }
@@ -968,7 +968,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     return fallback;
   }, [rgbToHex]);
 
-  // Atualizar cores do tema quando mudar
+  
   const updateThemeColors = useCallback(() => {
     setThemeColors({
       foreground: getThemeColor('--foreground', '#000000'),
@@ -976,46 +976,46 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     });
   }, [getThemeColor]);
 
-  // Obter cores do tema quando componente montar
+  
   useEffect(() => {
-    // Atualizar cores do tema
+    
     updateThemeColors();
     
-    // Obter cores reais do CSS e converter para hex
+    
     const root = document.documentElement;
     const isDark = root.classList.contains('dark');
     
-    // Cores oklch baseadas no globals.css
-    // Para tema escuro, usar cores mais brilhantes para melhor visibilidade
+    
+    
     const oklchColors = isDark 
       ? {
-          chart1: 'oklch(0.488 0.243 264.376)', // azul escuro - usar fallback mais brilhante
-          chart2: 'oklch(0.696 0.17 162.48)',   // verde
-          chart3: 'oklch(0.769 0.188 70.08)',  // amarelo
-          chart4: 'oklch(0.627 0.265 303.9)', // roxo/rosa
+          chart1: 'oklch(0.488 0.243 264.376)', 
+          chart2: 'oklch(0.696 0.17 162.48)',   
+          chart3: 'oklch(0.769 0.188 70.08)',  
+          chart4: 'oklch(0.627 0.265 303.9)', 
         }
       : {
-          chart1: 'oklch(0.646 0.222 41.116)', // laranja/vermelho
-          chart2: 'oklch(0.6 0.118 184.704)',  // azul
-          chart3: 'oklch(0.398 0.07 227.392)', // azul escuro
-          chart4: 'oklch(0.828 0.189 84.429)', // amarelo/verde claro
+          chart1: 'oklch(0.646 0.222 41.116)', 
+          chart2: 'oklch(0.6 0.118 184.704)',  
+          chart3: 'oklch(0.398 0.07 227.392)', 
+          chart4: 'oklch(0.828 0.189 84.429)', 
         };
     
-    // Converter para hex com fallbacks específicos
-    // No tema escuro: cores brilhantes para visibilidade
-    // No tema claro: cores escuras e saturadas para contraste
+    
+    
+    
     const colors = {
-      // CPU - vermelho escuro no tema claro, azul claro no tema escuro
-      chart1: oklchToHex(oklchColors.chart1, isDark ? '#818cf8' : '#dc2626', isDark), // vermelho escuro (red-600) ou azul claro (indigo-400)
-      // RAM - azul escuro no tema claro, verde brilhante no tema escuro
-      chart2: oklchToHex(oklchColors.chart2, isDark ? '#34d399' : '#2563eb', isDark), // azul escuro (blue-600) ou verde esmeralda (emerald-400)
-      // Disco - amarelo/laranja escuro no tema claro, amarelo brilhante no tema escuro
-      chart3: oklchToHex(oklchColors.chart3, isDark ? '#fbbf24' : '#d97706', isDark), // laranja escuro (amber-600) ou amarelo (amber-400)
-      // Network (não usado, mas mantido para consistência)
-      chart4: oklchToHex(oklchColors.chart4, isDark ? '#c084fc' : '#ea580c', isDark), // laranja escuro (orange-600) ou roxo (purple-400)
+      
+      chart1: oklchToHex(oklchColors.chart1, isDark ? '#818cf8' : '#dc2626', isDark), 
+      
+      chart2: oklchToHex(oklchColors.chart2, isDark ? '#34d399' : '#2563eb', isDark), 
+      
+      chart3: oklchToHex(oklchColors.chart3, isDark ? '#fbbf24' : '#d97706', isDark), 
+      
+      chart4: oklchToHex(oklchColors.chart4, isDark ? '#c084fc' : '#ea580c', isDark), 
     };
     
-    // Log para debug
+    
     if (process.env.NODE_ENV === 'development') {
       console.log('🎨 Cores do gráfico definidas:', colors);
     }
@@ -1023,10 +1023,10 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     setChartColors(colors);
   }, [oklchToHex, updateThemeColors]);
 
-  // Observar mudanças de tema
+  
   useEffect(() => {
     const updateColors = () => {
-      // Atualizar cores do tema (eixos, grid, etc.)
+      
       updateThemeColors();
       
       const root = document.documentElement;
@@ -1046,24 +1046,24 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             chart4: 'oklch(0.828 0.189 84.429)',
           };
       
-      // Usar cores mais brilhantes no tema escuro, cores escuras no tema claro
-      // No tema escuro: forçar uso de cores mais brilhantes para garantir visibilidade
-      // No tema claro: usar cores escuras e saturadas para melhor contraste
+      
+      
+      
       const colors = {
-        chart1: oklchToHex(oklchColors.chart1, isDark ? '#818cf8' : '#dc2626', isDark), // vermelho escuro (red-600) ou azul claro (indigo-400)
-        chart2: oklchToHex(oklchColors.chart2, isDark ? '#34d399' : '#2563eb', isDark), // azul escuro (blue-600) ou verde esmeralda (emerald-400)
-        chart3: oklchToHex(oklchColors.chart3, isDark ? '#fbbf24' : '#d97706', isDark), // laranja escuro (amber-600) ou amarelo (amber-400)
-        chart4: oklchToHex(oklchColors.chart4, isDark ? '#c084fc' : '#ea580c', isDark), // laranja escuro (orange-600) ou roxo (purple-400)
+        chart1: oklchToHex(oklchColors.chart1, isDark ? '#818cf8' : '#dc2626', isDark), 
+        chart2: oklchToHex(oklchColors.chart2, isDark ? '#34d399' : '#2563eb', isDark), 
+        chart3: oklchToHex(oklchColors.chart3, isDark ? '#fbbf24' : '#d97706', isDark), 
+        chart4: oklchToHex(oklchColors.chart4, isDark ? '#c084fc' : '#ea580c', isDark), 
       };
       
       setChartColors(colors);
     };
 
-    // Atualizar cores imediatamente
+    
     updateColors();
 
     const observer = new MutationObserver(() => {
-      // Pequeno delay para garantir que o CSS foi atualizado
+      
       setTimeout(updateColors, 10);
     });
 
@@ -1079,14 +1079,14 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     if (!cluster) return;
 
     if (action === 'delete') {
-      // A deleção será tratada pelo AlertDialog, apenas prevenir chamada direta
+      
       return;
     }
 
     const newStatus = action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting';
     setStatus(newStatus);
     
-    // Atualização otimista na UI
+    
     if (cluster) {
       updateCluster(cluster.id, { status: newStatus });
     }
@@ -1106,7 +1106,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         const toastId = toast.loading('Iniciando cluster...');
         await clusterService.startCluster(cluster.id);
         toast.success('Cluster iniciado com sucesso!', { id: toastId });
-        // Recarregar dados do cluster
+        
         const updated = await findClusterById(cluster.id);
         if (updated) {
           setCluster(updated);
@@ -1116,7 +1116,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         const toastId = toast.loading('Parando cluster...');
         await clusterService.stopCluster(cluster.id);
         toast.success('Cluster parado com sucesso!', { id: toastId });
-        // Recarregar dados do cluster
+        
         const updated = await findClusterById(cluster.id);
         if (updated) {
           setCluster(updated);
@@ -1126,20 +1126,20 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         const toastId = toast.loading('Reiniciando cluster...');
         await clusterService.restartCluster(cluster.id);
         toast.success('Cluster reiniciado com sucesso!', { id: toastId });
-        // Recarregar dados do cluster
+        
         const updated = await findClusterById(cluster.id);
         if (updated) {
           setCluster(updated);
           setStatus(updated.status);
         }
       } else if (action === 'reinstall') {
-        // Reinstalação é uma operação complexa que pode não estar disponível no backend atual
+        
         toast.info('Reinstalação não está disponível no momento.');
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       toast.error(`Erro ao executar ação: ${errorMessage}`);
-      // Reverter status em caso de erro
+      
       if (cluster) {
         const updated = await findClusterById(cluster.id);
         if (updated) {
@@ -1158,7 +1158,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     try {
       await deleteCluster(cluster.id);
       toast.success('Cluster excluído com sucesso!', { id: toastId });
-      // Voltar para a lista após excluir
+      
       setTimeout(() => {
         onBack();
       }, 1000);
@@ -1289,16 +1289,16 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     cpu: sanitizeValue(currentMetrics.cpuUsagePercent),
     ram: sanitizeValue(currentMetrics.memoryUsagePercent),
     disk: sanitizeValue(currentMetrics.diskUsagePercent),
-    // network removido da UI
+    
   } : (resourceData.length > 0 && resourceData[resourceData.length - 1] ? {
     cpu: sanitizeValue(resourceData[resourceData.length - 1].cpu),
     ram: sanitizeValue(resourceData[resourceData.length - 1].ram),
     disk: sanitizeValue(resourceData[resourceData.length - 1].disk),
   } : { cpu: 0, ram: 0, disk: 0 });
 
-  // Calcular domínios para os eixos Y
-  // Para percentuais: usar domínio fixo [0, 100] para melhor visualização
-  // Apenas usar domínio dinâmico se todos os valores forem muito baixos (< 10%)
+  
+  
+  
   const maxValue = resourceData.length > 0 
     ? Math.max(
         ...resourceData.map(p => Math.max(
@@ -1309,15 +1309,15 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       )
     : 0;
   
-  // Se o valor máximo for menor que 10%, usar domínio dinâmico para melhor visualização
-  // Caso contrário, usar domínio fixo [0, 100] para percentuais
+  
+  
   const percentageDomain = maxValue < 10 && resourceData.length > 0
     ? calculateDynamicDomain(resourceData, ['cpu', 'ram', 'disk'], 0.1, 0.1, 100)
     : [0, 100] as [number, number];
 
   return (
     <div className="p-6 space-y-6">
-      {/* 1. Informações Essenciais e Ações Rápidas */}
+      {}
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -1344,7 +1344,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
               </div>
             </div>
             
-            {/* Botões de Ação */}
+            {}
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:space-x-3">
               <Button
                 size="lg"
@@ -1450,9 +1450,9 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         </Card>
       ) : (
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* 2. Monitoramento de Recursos */}
+        {}
         <div className="xl:col-span-2 space-y-6">
-          {/* Gráficos de Recursos */}
+          {}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1535,7 +1535,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                   <div className="text-2xl">{Math.round(currentResourceUsage.disk)}%</div>
                   <div className="text-xs text-muted-foreground">Disco</div>
                 </div>
-                {/* Card de Network removido */}
+                {}
               </div>
 
               <ResponsiveContainer width="100%" height={400}>
@@ -1544,7 +1544,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                     data={resourceData}
                     margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
                     onMouseEnter={() => {
-                      // Debug: log dos dados quando hover
+                      
                       if (process.env.NODE_ENV === 'development') {
                         console.log('📊 Dados do gráfico:', resourceData.slice(-5), {
                           totalPontos: resourceData.length,
@@ -1583,7 +1583,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                       allowDecimals={true}
                       stroke={themeColors.mutedForeground}
                     />
-                    {/* Eixo de rede removido */}
+                    {}
                     <Tooltip 
                       contentStyle={{ backgroundColor: 'hsl(var(--background))', border: '1px solid hsl(var(--border))' }}
                       labelStyle={{ color: 'hsl(var(--foreground))' }}
@@ -1639,7 +1639,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                       yAxisId="left"
                       style={{ stroke: chartColors.chart3 }}
                     />
-                    {/* Linha de network removida */}
+                    {}
                   </LineChart>
                 ) : (
                   <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -1650,7 +1650,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             </CardContent>
           </Card>
 
-          {/* 3. Console de Controle */}
+          {}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1702,9 +1702,9 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           </Card>
         </div>
 
-        {/* Sidebar Direita */}
+        {}
         <div className="space-y-6">
-          {/* Informações de Acesso */}
+          {}
           <Card>
             <CardHeader>
               <CardTitle>Informações de Acesso</CardTitle>
@@ -1870,7 +1870,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             </CardContent>
           </Card>
 
-          {/* 4. Acesso ao Banco de Dados */}
+          {}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
@@ -1891,7 +1891,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             </CardContent>
           </Card>
 
-          {/* Estatísticas Rápidas */}
+          {}
           <Card>
             <CardHeader>
               <CardTitle>Estatísticas</CardTitle>
@@ -1917,7 +1917,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
                     try {
                       const date = new Date(cluster.lastUpdate);
                       if (isNaN(date.getTime())) {
-                        // Se não for uma data válida, mostrar o valor original
+                        
                         return cluster.lastUpdate || 'Desconhecido';
                       }
                       return date.toLocaleDateString('pt-BR');

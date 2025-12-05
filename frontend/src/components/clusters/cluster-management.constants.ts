@@ -1,12 +1,8 @@
-/**
- * Constants for Cluster Management components
- */
+
 
 import type { ClusterStatus } from './cluster-management.types';
 
-/**
- * Status label mappings
- */
+
 export const STATUS_LABELS: Record<ClusterStatus, string> = {
     active: 'Ativo',
     stopped: 'Parado',
@@ -18,9 +14,7 @@ export const STATUS_LABELS: Record<ClusterStatus, string> = {
     deleted: 'Deletado',
 };
 
-/**
- * Status color classes for badges
- */
+
 export const STATUS_COLORS: Record<ClusterStatus, string> = {
     active: 'bg-green-100 dark:bg-green-950 text-green-800 dark:text-green-300 border-green-200 dark:border-green-800',
     stopped: 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700',
@@ -32,18 +26,14 @@ export const STATUS_COLORS: Record<ClusterStatus, string> = {
     deleted: 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700',
 };
 
-/**
- * Resource usage color thresholds
- */
+
 export const RESOURCE_COLOR_THRESHOLDS = {
     LOW: 50,
     MEDIUM: 70,
     HIGH: 85,
 } as const;
 
-/**
- * Resource usage colors based on percentage
- */
+
 export const getResourceColor = (percent: number): string => {
     if (percent >= RESOURCE_COLOR_THRESHOLDS.HIGH) {
         return 'text-red-600 dark:text-red-400';
@@ -57,9 +47,7 @@ export const getResourceColor = (percent: number): string => {
     return 'text-green-600 dark:text-green-400';
 };
 
-/**
- * Resource usage background colors for progress bars
- */
+
 export const getResourceBgColor = (percent: number): string => {
     if (percent >= RESOURCE_COLOR_THRESHOLDS.HIGH) {
         return 'bg-red-500 dark:bg-red-600';
@@ -73,9 +61,17 @@ export const getResourceBgColor = (percent: number): string => {
     return 'bg-green-500 dark:bg-green-600';
 };
 
-/**
- * Default filter values
- */
+
+export const RESOURCE_THRESHOLDS = {
+    WARNING: 80,
+    CRITICAL: 90,
+};
+
+export const UNITS = {
+    MB_TO_GB: 1024,
+    GB_TO_MB: 1024,
+};
+
 export const DEFAULT_FILTERS = {
     SEARCH: '',
     STATUS: 'all',
@@ -84,9 +80,7 @@ export const DEFAULT_FILTERS = {
     ALERT: 'all',
 } as const;
 
-/**
- * Toast messages
- */
+
 export const TOAST_MESSAGES = {
     CLUSTER_START_LOADING: 'Iniciando cluster em segundo plano...',
     CLUSTER_START_SUCCESS: 'Cluster iniciado com sucesso!',

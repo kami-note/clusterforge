@@ -1,12 +1,8 @@
-/**
- * Utilitários para tratamento de erros
- */
+
 
 import { ApiError } from '@/types';
 
-/**
- * Extrai mensagem de erro de forma segura
- */
+
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -23,9 +19,7 @@ export function getErrorMessage(error: unknown): string {
   return 'Erro desconhecido';
 }
 
-/**
- * Verifica se é um erro de API
- */
+
 export function isApiError(error: unknown): error is ApiError {
   return (
     typeof error === 'object' &&
@@ -35,10 +29,7 @@ export function isApiError(error: unknown): error is ApiError {
   );
 }
 
-/**
- * Obtém mensagem de erro amigável baseada no status HTTP
- * Mensagens simplificadas para usuários leigos
- */
+
 export function getHttpErrorMessage(status: number): string {
   const messages: Record<number, string> = {
     0: 'Sem conexão com a internet. Verifique se você está online e tente novamente.',
@@ -55,17 +46,15 @@ export function getHttpErrorMessage(status: number): string {
   return messages[status] || 'Algo deu errado. Tente novamente em alguns instantes.';
 }
 
-/**
- * Trata erro e retorna mensagem amigável para usuários leigos
- */
+
 export function handleError(error: unknown): string {
-  // Verificar se é erro de timeout ou rede primeiro
+  
   if (error && typeof error === 'object') {
     const err = error as any;
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       return 'A operação está demorando mais que o normal. Aguarde alguns segundos e verifique se funcionou. Se não funcionar, tente novamente.';
     }
-    // Distinguir entre backend offline e erro de internet
+    
     if (err.name === 'BackendOffline') {
       return 'O servidor está temporariamente indisponível. Verifique se o backend está em execução.';
     }
@@ -75,7 +64,7 @@ export function handleError(error: unknown): string {
   }
   
   if (isApiError(error)) {
-    // Se a mensagem já for amigável, usar ela
+    
     if (error.message && !error.message.includes('Error') && !error.message.includes('Exception')) {
       return error.message;
     }
@@ -84,7 +73,7 @@ export function handleError(error: unknown): string {
     }
   }
   
-  // Mensagem genérica amigável
+  
   const genericMessage = getErrorMessage(error);
   if (genericMessage.includes('Error') || genericMessage.includes('Exception') || genericMessage.includes('timeout')) {
     return 'Algo deu errado. Tente novamente em alguns instantes. Se o problema continuar, entre em contato com o suporte.';
@@ -93,20 +82,17 @@ export function handleError(error: unknown): string {
   return genericMessage;
 }
 
-/**
- * Verifica se um erro deve ser ocultado do console
- * Erros BackendOffline são ocultados pois são tratados graciosamente
- */
+
 function shouldSuppressError(error: unknown): boolean {
   if (error && typeof error === 'object') {
     const err = error as any;
     
-    // Ocultar erros BackendOffline
+    
     if (err.name === 'BackendOffline') {
       return true;
     }
     
-    // Ocultar mensagens relacionadas a backend offline
+    
     const message = String(err.message || '').toLowerCase();
     if (message.includes('servidor está temporariamente indisponível') ||
         message.includes('backend está em execução') ||
@@ -114,13 +100,13 @@ function shouldSuppressError(error: unknown): boolean {
       return true;
     }
     
-    // Verificar também no primeiro argumento (caso seja string)
+    
     if (typeof err === 'string' && err.toLowerCase().includes('backend offline')) {
       return true;
     }
   }
   
-  // Verificar se algum argumento contém BackendOffline
+  
   if (typeof error === 'string' && error.toLowerCase().includes('backend offline')) {
     return true;
   }
@@ -128,18 +114,15 @@ function shouldSuppressError(error: unknown): boolean {
   return false;
 }
 
-/**
- * Console.error seguro que filtra erros BackendOffline
- * Use esta função no lugar de console.error diretamente
- */
+
 export function safeConsoleError(...args: unknown[]): void {
-  // Verificar se algum argumento é um erro BackendOffline
+  
   const shouldSuppress = args.some(arg => shouldSuppressError(arg));
   
   if (!shouldSuppress) {
     console.error(...args);
   }
-  // Se for BackendOffline, não loga nada (erro já é tratado graciosamente)
+  
 }
 
 

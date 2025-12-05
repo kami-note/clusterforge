@@ -1,10 +1,8 @@
-/**
- * Tipos e interfaces centralizados da aplicação
- */
 
-// ============================================
-// AUTENTICAÇÃO
-// ============================================
+
+
+
+
 export interface User {
   id?: number;
   email: string;
@@ -14,9 +12,9 @@ export interface User {
 }
 
 export interface AuthResponse {
-  token: string; // access token
-  refreshToken?: string; // Opcional - backend pode não retornar
-  expiresIn?: number; // Opcional - backend pode não retornar
+  token: string; 
+  refreshToken?: string; 
+  expiresIn?: number; 
 }
 
 export interface LoginRequest {
@@ -29,9 +27,9 @@ export interface RegisterRequest {
   password: string;
 }
 
-// ============================================
-// CLUSTERS
-// ============================================
+
+
+
 export type ClusterStatus = 'running' | 'stopped' | 'restarting' | 'error' | 'pending' | 'active' | 'deleted';
 
 export interface ClusterAccessInfo {
@@ -55,9 +53,12 @@ export interface Cluster {
   service: ServiceTemplate | null;
   startupCommand: string;
   port?: string;
+  cpuLimitPercent?: number;  
+  memoryLimit?: number;       
+  diskLimit?: number;         
   ftp?: ClusterAccessInfo;
   webDav?: ClusterAccessInfo;
-  containerId?: string; // ID do container Docker para SSE
+  containerId?: string; 
 }
 
 export interface ClusterData {
@@ -86,61 +87,61 @@ export interface ServiceTemplate {
   };
 }
 
-// ============================================
-// MÉTRICAS E MONITORAMENTO
-// ============================================
+
+
+
 export interface ClusterMetrics {
-  clusterId?: number | string; // Aceita number (legado) ou string (UUID)
+  clusterId?: number | string; 
   clusterName?: string;
   timestamp?: string;
+
   
-  // CPU Metrics
   cpuUsage?: number;
   cpuUsagePercent?: number;
   cpuLimitCores?: number;
   cpuThrottledTime?: number;
+
   
-  // Memory Metrics
   memoryUsage?: number;
   memoryUsageMb?: number;
   memoryLimitMb?: number;
   memoryUsagePercent?: number;
   memoryCacheMb?: number;
+
   
-  // Disk Metrics
   diskUsage?: number;
   diskUsageMb?: number;
   diskLimitMb?: number;
   diskUsagePercent?: number;
   diskReadBytes?: number;
   diskWriteBytes?: number;
+
   
-  // Network Metrics
   networkUsage?: number;
   networkRxBytes?: number;
   networkTxBytes?: number;
   networkRxPackets?: number;
   networkTxPackets?: number;
   networkLimitMbps?: number;
+
   
-  // Application Metrics
   applicationResponseTimeMs?: number;
   applicationStatusCode?: number;
   applicationUptimeSeconds?: number;
+
   
-  // Container Metrics
   containerRestartCount?: number;
   containerUptimeSeconds?: number;
   containerStatus?: string;
+
   
-  // Health Status
   healthState?: string;
   errorMessage?: string;
 }
 
 export interface ClusterStatsMessage {
   timestamp: number;
-  clusters: Record<number | string, ClusterMetrics>; // Aceita number (legado) ou string (UUID)
+  clusters: Record<number | string, ClusterMetrics>; 
   systemStats?: {
     totalClusters: number;
     healthyClusters: number;
@@ -153,7 +154,7 @@ export interface ClusterStatsMessage {
 }
 
 export interface ClusterHealthStatus {
-  clusterId: number | string; // Aceita number (legado) ou string (UUID)
+  clusterId: number | string; 
   status: 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN';
   lastCheck?: string;
   details?: Record<string, unknown>;
@@ -177,9 +178,9 @@ export interface ClusterMetricsHistoryPoint {
   [key: string]: unknown;
 }
 
-// ============================================
-// API RESPONSES
-// ============================================
+
+
+
 export interface ApiError {
   message: string;
   status?: number;
@@ -187,7 +188,7 @@ export interface ApiError {
 }
 
 export interface ClusterListItem {
-  id: string; // UUID
+  id: string; 
   name: string;
   status?: string;
   port?: number;
@@ -207,13 +208,13 @@ export interface ClusterListItem {
   env?: Record<string, string>;
   ports?: number[];
   volumes?: string[];
-  containerId?: string; // ID do container Docker para SSE
+  containerId?: string; 
   ftp?: ClusterAccessInfo;
   webDav?: ClusterAccessInfo;
 }
 
 export interface ClusterDetailsResponse {
-  id: string; // UUID
+  id: string; 
   name: string;
   status?: string;
   templateName?: string;
@@ -222,10 +223,10 @@ export interface ClusterDetailsResponse {
   env?: Record<string, string>;
   ports?: number[];
   volumes?: string[];
-  containerId?: string; // ID do container Docker para SSE
+  containerId?: string; 
   ownerId?: string;
   ownerUsername?: string;
-  // Campos opcionais que podem não estar presentes no novo backend
+  
   port?: number;
   rootPath?: string;
   userId?: number;
@@ -251,7 +252,7 @@ export interface CreateClusterRequest {
   networkLimit?: number;
 }
 
-// Request para instanciação de template (novo backend)
+
 export interface TemplateInstantiateRequest {
   name: string;
   env?: Record<string, string>;
@@ -261,15 +262,15 @@ export interface TemplateInstantiateRequest {
   memoryLimitMb?: number;
 }
 
-// Response da instanciação de template (novo backend)
+
 export interface TemplateInstantiateResponse {
   containerId: string;
   name: string;
 }
 
-// Response legado mantido para compatibilidade
+
 export interface CreateClusterResponse {
-  clusterId: string | null; // UUID
+  clusterId: string | null; 
   clusterName: string;
   port: number;
   ftpPort?: number;
@@ -281,9 +282,9 @@ export interface CreateClusterResponse {
   };
 }
 
-// ============================================
-// UI COMPONENTS
-// ============================================
+
+
+
 export interface CompactMetricProps {
   label: string;
   icon: React.ComponentType<{ className?: string }>;

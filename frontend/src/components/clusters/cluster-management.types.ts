@@ -1,6 +1,4 @@
-/**
- * Type definitions for Cluster Management components
- */
+
 
 export type ClusterStatus =
     | 'active'

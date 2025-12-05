@@ -17,10 +17,7 @@ interface State {
   errorInfo: ErrorInfo | null;
 }
 
-/**
- * Error Boundary para capturar erros de renderização e exibir UI amigável
- * Usa class component pois Error Boundaries só funcionam com classes no React
- */
+
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);

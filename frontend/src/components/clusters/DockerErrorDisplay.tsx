@@ -84,7 +84,7 @@ export function DockerErrorDisplay({ error, onRetry, showLogs = true }: DockerEr
   const colorClass = ERROR_COLORS[errorType] || ERROR_COLORS.UNKNOWN;
   const errorLabel = ERROR_LABELS[errorType] || ERROR_LABELS.UNKNOWN;
 
-  // Parse message para extrair informações estruturadas
+  
   const parseMessage = (message: string) => {
     const lines = message.split('\n');
     const mainMessage = lines[0];

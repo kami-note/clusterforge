@@ -18,14 +18,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     
-    // Carrega o tema persistido do localStorage
+    
     const storedTheme = localStorage.getItem(STORAGE_KEYS.THEME) as Theme | null;
     
     if (storedTheme) {
       setTheme(storedTheme);
       document.documentElement.classList.toggle('dark', storedTheme === 'dark');
     } else {
-      // Verifica a preferência do sistema como fallback
+      
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       const systemTheme = prefersDark ? 'dark' : 'light';
       setTheme(systemTheme);

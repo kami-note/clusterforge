@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
-// Lazy load do componente pesado
+
 const ClusterManagement = lazy(() => 
   import("@/components/clusters/ClusterManagement").then(module => ({ 
     default: module.ClusterManagement 

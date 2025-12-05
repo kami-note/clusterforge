@@ -19,7 +19,7 @@ export default function RegisterPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Se o usuário já estiver logado, redirecionar para o dashboard apropriado
+    
     if (user) {
       if (user.type === 'admin') {
         router.push('/admin/dashboard');
@@ -32,7 +32,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validações
+    
     if (!username.trim()) {
       setError('O usuário é obrigatório.');
       return;
@@ -68,18 +68,18 @@ export default function RegisterPage() {
         return;
       }
 
-      // Redireciona baseado no tipo (primeiro usuário será admin)
+      
       if (authenticatedUser.type === 'admin') {
         router.push('/admin/dashboard');
       } else {
         router.push('/client/dashboard');
       }
     } catch (err: unknown) {
-      // Extrai a mensagem de erro da API
+      
       const errorMessage = err instanceof Error ? err.message : 'Ocorreu um erro durante o registro. Por favor, tente novamente.';
       const errorStatus = err && typeof err === 'object' && 'status' in err ? (err.status as number) : undefined;
       
-      // Diferencia mensagens de erro
+      
       if (errorStatus === 400) {
         if (errorMessage.includes('username já utilizado')) {
           setError('Este usuário já está em uso. Por favor, escolha outro.');
@@ -98,9 +98,9 @@ export default function RegisterPage() {
     }
   };
 
-  // Se o usuário já está logado, não renderizar o formulário
+  
   if (user) {
-    return null; // O useEffect irá redirecionar
+    return null; 
   }
 
   return (

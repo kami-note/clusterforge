@@ -1,6 +1,4 @@
-/**
- * Serviço SSE (Server-Sent Events) para receber métricas em tempo real
- */
+
 
 import { config } from '@/lib/config';
 import { httpClient } from '@/lib/api-client';
@@ -42,18 +40,18 @@ interface AllClustersConnection {
   reconnectTimeout: NodeJS.Timeout | null;
 }
 
-// Constantes configuráveis
+
 const SSE_CONFIG = {
-  FETCH_TIMEOUT_MS: 30000, // Timeout para conexão inicial (30 segundos - aumentado para tolerar delays do backend)
-  RECONNECT_DELAY_MS: 3000, // Delay entre tentativas de reconexão (3 segundos)
-  MAX_RECONNECT_ATTEMPTS: 5, // Número máximo de tentativas de reconexão
-  STREAM_TIMEOUT_MS: 300000, // Timeout do stream SSE (5 minutos)
-  DISCONNECT_DELAY_MS: 100, // Delay após desconectar antes de reconectar
-  RETRY_NETWORK_ERROR_DELAY_MS: 2000, // Delay antes de retentar após NetworkError
-  SAFE_DISCONNECT_GRACE_MS: 1500, // Janela antes de encerrar SSE agregado (1.5s)
+  FETCH_TIMEOUT_MS: 30000, 
+  RECONNECT_DELAY_MS: 3000, 
+  MAX_RECONNECT_ATTEMPTS: 5, 
+  STREAM_TIMEOUT_MS: 300000, 
+  DISCONNECT_DELAY_MS: 100, 
+  RETRY_NETWORK_ERROR_DELAY_MS: 2000, 
+  SAFE_DISCONNECT_GRACE_MS: 1500, 
 } as const;
 
-// Utilitário para logs condicionais (apenas em desenvolvimento)
+
 const debugLog = (...args: unknown[]): void => {
   if (process.env.NODE_ENV === 'development') {
     console.log(...args);
@@ -80,19 +78,16 @@ class SseService {
   private pendingAllClustersDisconnect: NodeJS.Timeout | null = null;
   private allClustersConnectPromise: Promise<void> | null = null;
 
-  /**
-   * Conecta ao SSE para um cluster específico
-   * Obtém o containerId do cluster automaticamente se não for fornecido
-   */
+  
   async connect(clusterId: string | number, containerId?: string): Promise<void> {
-    // Se já existe conexão ativa para este cluster, não conectar novamente
+    
     const existingConnection = this.connections.get(clusterId);
     if (existingConnection?.connected) {
       debugLog(`✅ SSE já está conectado para cluster ${clusterId}`);
       return;
     }
 
-    // Verificar token ANTES de desconectar conexão existente
+    
     const token = this.getToken();
     if (!token) {
       console.warn(`⚠️ Token JWT não encontrado. Não é possível conectar SSE para cluster ${clusterId}.`);
@@ -103,13 +98,13 @@ class SseService {
       return;
     }
 
-    // Se já existe conexão mas não está conectada, desconectar primeiro
+    
     if (existingConnection) {
       this.disconnect(clusterId);
-      // Aguardar um pouco antes de reconectar para evitar conflitos
-      await new Promise(resolve => setTimeout(resolve, SSE_CONFIG.DISCONNECT_DELAY_MS));
       
-      // Verificar token novamente após desconectar (pode ter mudado)
+      await new Promise(resolve => setTimeout(resolve, SSE_CONFIG.DISCONNECT_DELAY_MS));
+
+      
       const newToken = this.getToken();
       if (!newToken) {
         console.warn(`⚠️ Token JWT não encontrado após desconectar. Não é possível conectar SSE para cluster ${clusterId}.`);
@@ -118,7 +113,7 @@ class SseService {
       }
     }
 
-    // Se containerId não foi fornecido, buscar do cluster
+    
     let actualContainerId: string;
     try {
       if (!containerId) {
@@ -135,14 +130,14 @@ class SseService {
         actualContainerId = containerId;
       }
 
-      // Construir URL do SSE (o endpoint está em /api/docker/...)
+      
       const sseUrl = `${config.api.baseUrl}/docker/containers/${actualContainerId}/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}`;
 
       debugLog(`🔌 Tentando conectar SSE para cluster ${clusterId} com containerId ${actualContainerId}`);
       debugLog(`🔗 URL do SSE: ${sseUrl}`);
       debugLog(`🔑 Token disponível: ${token ? `Sim (${token.length} chars)` : 'Não'}`);
 
-      // Criar AbortController com timeout para evitar que fetch trave indefinidamente
+      
       const fetchAbortController = new AbortController();
       const fetchTimeout = setTimeout(() => {
         console.warn(`⏱️ Timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s atingido para conexão SSE do cluster ${clusterId}. Abortando...`);
@@ -151,7 +146,7 @@ class SseService {
 
       let response: Response;
       try {
-        // EventSource não suporta headers customizados, então usamos fetch com ReadableStream
+        
         debugLog(`📡 Iniciando fetch para SSE (timeout de ${SSE_CONFIG.FETCH_TIMEOUT_MS / 1000}s)...`);
         const startTime = Date.now();
         response = await fetch(sseUrl, {
@@ -177,29 +172,29 @@ class SseService {
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         console.error(`❌ SSE falhou para cluster ${clusterId} - Status: ${response.status} ${response.statusText}`, errorText);
+
         
-        // Se for 401, verificar se o token mudou e tentar novamente uma vez
         if (response.status === 401) {
           console.warn(`⚠️ SSE retornou 401 (não autorizado) para cluster ${clusterId}. Verificando token...`);
           const newToken = this.getToken();
           if (newToken && newToken !== token) {
             debugLog(`🔄 Token atualizado, tentando reconectar SSE para cluster ${clusterId}...`);
-            // Tentar uma vez mais com o novo token
+            
             const retryResponse = await fetch(sseUrl, {
               headers: {
                 Authorization: `Bearer ${newToken}`,
                 Accept: 'text/event-stream',
               },
             });
-            
+
             if (!retryResponse.ok) {
               const retryErrorText = await retryResponse.text().catch(() => '');
               console.error(`❌ Retry SSE também falhou para cluster ${clusterId} - Status: ${retryResponse.status}`, retryErrorText);
               throw new Error(`SSE connection failed: ${retryResponse.status} ${retryResponse.statusText} - ${retryErrorText}`);
             }
-            
+
             debugLog(`✅ Retry SSE bem-sucedido para cluster ${clusterId} com novo token`);
-            // Usar a resposta bem-sucedida
+            
             const abortController = new AbortController();
             const connection: SseConnection = {
               eventSource: abortController,
@@ -208,7 +203,7 @@ class SseService {
               reconnectAttempts: 0,
               reconnectTimeout: null,
             };
-            
+
             this.processSseStream(retryResponse, clusterId, connection, actualContainerId, abortController.signal);
             this.connections.set(clusterId, connection);
             return;
@@ -220,7 +215,7 @@ class SseService {
       }
 
       const abortController = new AbortController();
-      
+
       const connection: SseConnection = {
         eventSource: abortController,
         clusterId,
@@ -229,7 +224,7 @@ class SseService {
         reconnectTimeout: null,
       };
 
-      // Processar stream SSE
+      
       debugLog(`✅ Resposta SSE recebida para cluster ${clusterId} - Status: ${response.status} ${response.statusText}`);
       this.processSseStream(response, clusterId, connection, actualContainerId, abortController.signal);
 
@@ -237,21 +232,21 @@ class SseService {
       debugLog(`📡 Conexão SSE registrada para cluster ${clusterId}`);
     } catch (error: unknown) {
       const err = error as Error & { name?: string; message?: string; stack?: string; containerId?: string };
+
       
-      // Se for um erro de abort (cancelação manual), não logar como erro
       if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
         debugLog(`ℹ️ Conexão SSE cancelada para cluster ${clusterId}:`, err?.message || 'Abortado manualmente');
         return;
       }
+
       
-      // Log detalhado do erro
       console.error(`❌ Erro ao criar conexão SSE para cluster ${clusterId}:`, err);
       if (process.env.NODE_ENV === 'development') {
         console.error(`   Tipo do erro: ${err?.name || 'Unknown'}`);
         console.error(`   Mensagem: ${err?.message || 'No message'}`);
         console.error(`   Stack: ${err?.stack || 'No stack'}`);
+
         
-        // Log da URL que estava tentando conectar
         try {
           const containerIdForError = err?.containerId || containerId || 'unknown';
           const sseUrl = `${config.api.baseUrl}/docker/containers/${containerIdForError}/metrics/stream?timeoutMillis=${SSE_CONFIG.STREAM_TIMEOUT_MS}`;
@@ -260,25 +255,23 @@ class SseService {
           console.error(`   ContainerId: ${containerId || 'unknown'}`);
         }
       }
-      
+
       this.notifyConnectionCallbacks(clusterId, false);
+
       
-      // Se for NetworkError, pode ser que o backend não esteja pronto ainda
-      // Tentar novamente após um delay
+      
       if (err?.name === 'TypeError' && err?.message?.includes('fetch')) {
         debugLog(`🔄 Tentando reconectar SSE para cluster ${clusterId} após NetworkError...`);
         setTimeout(() => {
           this.connect(clusterId, actualContainerId).catch(() => {
-            // Ignorar erro na reconexão automática
+            
           });
         }, SSE_CONFIG.RETRY_NETWORK_ERROR_DELAY_MS);
       }
     }
   }
 
-  /**
-   * Desconecta SSE para um cluster específico
-   */
+  
   disconnect(clusterId: string | number): void {
     const connection = this.connections.get(clusterId);
     if (!connection) return;
@@ -303,19 +296,14 @@ class SseService {
     this.notifyConnectionCallbacks(clusterId, false);
   }
 
-  /**
-   * Desconecta todas as conexões SSE
-   */
+  
   disconnectAll(): void {
     const clusterIds = Array.from(this.connections.keys());
     clusterIds.forEach((clusterId) => this.disconnect(clusterId));
     this.disconnectAllClusters({ force: true, clearSubscribers: true });
   }
 
-  /**
-   * Conecta ao SSE para todos os clusters visíveis ao usuário
-   * Usa o endpoint agregado que retorna métricas de todos os containers
-   */
+  
   async connectAllClusters(intervalMillis: number = 5000): Promise<void> {
     if (this.allClustersConnection?.connected) {
       debugLog('✅ SSE já está conectado para todos os clusters');
@@ -447,9 +435,7 @@ class SseService {
     await this.connectAllClusters(intervalMillis);
   }
 
-  /**
-   * Desconecta SSE para todos os clusters
-   */
+  
   disconnectAllClusters(options: { subscriberId?: string; force?: boolean; clearSubscribers?: boolean } = {}): void {
     const { subscriberId, force = false } = options;
     const clearSubscribers = options.clearSubscribers ?? (!subscriberId || force);
@@ -504,9 +490,7 @@ class SseService {
     debugLog(`🔌 SSE desconectado para todos os clusters`);
   }
 
-  /**
-   * Processa o stream SSE para todos os clusters
-   */
+  
   private async processAllClustersSseStream(
     response: Response,
     connection: AllClustersConnection,
@@ -514,16 +498,16 @@ class SseService {
   ): Promise<void> {
     try {
       debugLog(`📡 Iniciando processamento do stream SSE para todos os clusters...`);
-      
+
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      
+
       if (!reader) {
         throw new Error('Response body stream not available');
       }
-      
+
       debugLog(`✅ Reader SSE criado para todos os clusters. Aguardando dados...`);
-      
+
       connection.connected = true;
       connection.reconnectAttempts = 0;
       console.log(`✅ SSE conectado e pronto para receber dados de todos os clusters`);
@@ -539,7 +523,7 @@ class SseService {
           debugLog(`📡 SSE stream finalizado para todos os clusters (${eventCount} eventos processados)`);
           break;
         }
-        
+
         if (eventCount === 0 && value && process.env.NODE_ENV === 'development') {
           const firstChunk = decoder.decode(value, { stream: true });
           debugLog(`📥 Primeiro chunk SSE recebido para todos os clusters (${firstChunk.length} bytes):`, firstChunk.substring(0, 200));
@@ -569,14 +553,14 @@ class SseService {
               eventCount++;
               try {
                 const jsonData = JSON.parse(data.trim());
-                // O backend retorna ClusterMetricsEvent com clusterId (UUID)
+                
                 const clusterId = jsonData.clusterId || jsonData.id;
                 const metrics: ClusterMetrics = this.mapClusterMetricsEventToClusterMetrics(clusterId, jsonData);
-                
+
                 if (process.env.NODE_ENV === 'development' && (eventCount === 1 || eventCount % 10 === 0)) {
                   debugLog(`📊 SSE evento ${eventCount} recebido para cluster ${clusterId} - CPU: ${metrics.cpuUsagePercent?.toFixed(2)}%, RAM: ${metrics.memoryUsagePercent?.toFixed(2)}%`);
                 }
-                
+
                 this.notifyMetricsCallbacks(clusterId, metrics);
               } catch (error) {
                 console.error(`❌ Erro ao processar métricas SSE (evento ${eventCount}):`, error);
@@ -607,7 +591,7 @@ class SseService {
       connection.connected = false;
       this.notifyAllClustersConnectionChange(false);
 
-      // Tentar reconectar
+      
       if (connection.reconnectAttempts < this.maxReconnectAttempts) {
         this.scheduleAllClustersReconnect(connection);
       } else {
@@ -617,9 +601,7 @@ class SseService {
     }
   }
 
-  /**
-   * Agenda reconexão para todos os clusters
-   */
+  
   private scheduleAllClustersReconnect(connection: AllClustersConnection): void {
     if (connection.reconnectTimeout) {
       clearTimeout(connection.reconnectTimeout);
@@ -640,9 +622,7 @@ class SseService {
     }, this.reconnectDelay);
   }
 
-  /**
-   * Converte ClusterMetricsEvent do backend para ClusterMetrics do frontend
-   */
+  
   private mapClusterMetricsEventToClusterMetrics(
     clusterId: string | number,
     event: {
@@ -674,11 +654,9 @@ class SseService {
     };
   }
 
-  /**
-   * Notifica mudança de conexão para todos os clusters
-   */
+  
   private notifyAllClustersConnectionChange(connected: boolean): void {
-    // Notificar para cada cluster conhecido
+    
     this.connections.forEach((_, clusterId) => {
       this.notifyConnectionCallbacks(clusterId, connected);
     });
@@ -692,24 +670,18 @@ class SseService {
     });
   }
 
-  /**
-   * Verifica se está conectado para um cluster específico
-   */
+  
   isConnected(clusterId: string | number): boolean {
     const connection = this.connections.get(clusterId);
     return connection?.connected ?? false;
   }
 
-  /**
-   * Verifica se está conectado ao endpoint agregado de todos os clusters
-   */
+  
   isAllClustersConnected(): boolean {
     return this.allClustersConnection?.connected ?? false;
   }
 
-  /**
-   * Processa o stream SSE usando fetch ReadableStream
-   */
+  
   private async processSseStream(
     response: Response,
     clusterId: string | number,
@@ -717,21 +689,21 @@ class SseService {
     containerId: string,
     signal: AbortSignal
   ): Promise<void> {
-    // Armazenar containerId na conexão para reconexão
+    
     (connection as any).containerId = containerId;
     try {
       debugLog(`📡 Iniciando processamento do stream SSE para cluster ${clusterId}...`);
-      
+
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      
+
       if (!reader) {
         throw new Error('Response body stream not available');
       }
-      
+
       debugLog(`✅ Reader SSE criado para cluster ${clusterId}. Aguardando dados...`);
+
       
-      // Marcar como conectado APÓS criar o reader (stream está pronto)
       connection.connected = true;
       connection.reconnectAttempts = 0;
       console.log(`✅ SSE conectado e pronto para receber dados para cluster ${clusterId}`);
@@ -739,8 +711,8 @@ class SseService {
 
       let buffer = '';
       let eventCount = 0;
+
       
-      // Nota: reader e decoder já foram criados acima
 
       while (!signal.aborted) {
         const { done, value } = await reader.read();
@@ -749,19 +721,19 @@ class SseService {
           debugLog(`📡 SSE stream finalizado para cluster ${clusterId} (${eventCount} eventos processados)`);
           break;
         }
+
         
-        // Log primeiro chunk apenas em desenvolvimento
         if (eventCount === 0 && value && process.env.NODE_ENV === 'development') {
           const firstChunk = decoder.decode(value, { stream: true });
           debugLog(`📥 Primeiro chunk SSE recebido para cluster ${clusterId} (${firstChunk.length} bytes):`, firstChunk.substring(0, 200));
         }
 
-        // Decodificar chunk
+        
         buffer += decoder.decode(value, { stream: true });
 
-        // Processar linhas completas
+        
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Manter linha incompleta no buffer
+        buffer = lines.pop() || ''; 
 
         let eventType = 'stats';
         let data = '';
@@ -772,32 +744,32 @@ class SseService {
           } else if (line.startsWith('data:')) {
             const dataLine = line.substring(5).trim();
             if (dataLine) {
-              // Se já tem dados, adicionar quebra de linha
+              
               if (data) {
                 data += '\n';
               }
               data += dataLine;
             }
           } else if (line === '' || line === '\r') {
-            // Linha vazia indica fim do evento SSE
+            
             if (data && eventType === 'stats') {
               eventCount++;
               try {
                 const jsonData = JSON.parse(data.trim());
                 const metrics: ClusterMetrics = this.mapContainerStatsToClusterMetrics(clusterId, jsonData);
+
                 
-                // Log apenas o primeiro evento e a cada 10 eventos (apenas em desenvolvimento)
                 if (process.env.NODE_ENV === 'development' && (eventCount === 1 || eventCount % 10 === 0)) {
                   debugLog(`📊 SSE evento ${eventCount} recebido para cluster ${clusterId} - CPU: ${metrics.cpuUsagePercent?.toFixed(2)}%, RAM: ${metrics.memoryUsagePercent?.toFixed(2)}%`);
                 }
-                
+
                 this.notifyMetricsCallbacks(clusterId, metrics);
               } catch (error) {
                 console.error(`❌ Erro ao processar métricas SSE para cluster ${clusterId} (evento ${eventCount}):`, error);
                 console.error('Data recebida:', data.trim().substring(0, 500));
               }
             }
-            // Resetar para próximo evento
+            
             data = '';
             eventType = 'stats';
           }
@@ -805,7 +777,7 @@ class SseService {
       }
     } catch (error: any) {
       if (signal.aborted) {
-        // Desconexão manual, não tentar reconectar
+        
         return;
       }
 
@@ -813,7 +785,7 @@ class SseService {
       connection.connected = false;
       this.notifyConnectionCallbacks(clusterId, false);
 
-      // Tentar reconectar se não foi uma desconexão manual
+      
       const storedContainerId = (connection as any).containerId as string | undefined;
       if (connection.reconnectAttempts < this.maxReconnectAttempts && storedContainerId) {
         this.scheduleReconnect(clusterId, storedContainerId, connection);
@@ -824,9 +796,7 @@ class SseService {
     }
   }
 
-  /**
-   * Agenda reconexão
-   */
+  
   private scheduleReconnect(
     clusterId: string | number,
     containerId: string,
@@ -851,9 +821,7 @@ class SseService {
     }, this.reconnectDelay);
   }
 
-  /**
-   * Converte ContainerStats do backend para ClusterMetrics do frontend
-   */
+  
   private mapContainerStatsToClusterMetrics(
     clusterId: string | number,
     stats: {
@@ -884,41 +852,31 @@ class SseService {
     };
   }
 
-  /**
-   * Obtém o token JWT do localStorage usando a chave correta
-   */
+  
   private getToken(): string | null {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem(STORAGE_KEYS.TOKEN) || localStorage.getItem(config.auth.tokenKey);
   }
 
-  /**
-   * Registra callback para métricas
-   */
+  
   onMetrics(callback: MetricsCallback): () => void {
     this.metricsCallbacks.add(callback);
     return () => this.metricsCallbacks.delete(callback);
   }
 
-  /**
-   * Registra callback para mudanças de conexão
-   */
+  
   onConnectionChange(callback: ConnectionCallback): () => void {
     this.connectionCallbacks.add(callback);
     return () => this.connectionCallbacks.delete(callback);
   }
 
-  /**
-   * Registra callback para mudanças de conexão do stream agregado
-   */
+  
   onAllClustersConnectionChange(callback: AllClustersConnectionCallback): () => void {
     this.allClustersConnectionCallbacks.add(callback);
     return () => this.allClustersConnectionCallbacks.delete(callback);
   }
 
-  /**
-   * Notifica callbacks de métricas
-   */
+  
   private notifyMetricsCallbacks(clusterId: string | number, metrics: ClusterMetrics): void {
     this.metricsCallbacks.forEach((callback) => {
       try {
@@ -929,9 +887,7 @@ class SseService {
     });
   }
 
-  /**
-   * Notifica callbacks de conexão
-   */
+  
   private notifyConnectionCallbacks(clusterId: string | number, connected: boolean): void {
     this.connectionCallbacks.forEach((callback) => {
       try {
@@ -942,9 +898,7 @@ class SseService {
     });
   }
 
-  /**
-   * Conecta ao SSE de logs para um cluster específico
-   */
+  
   async connectLogs(clusterId: string | number, containerId: string, sinceSeconds?: number): Promise<void> {
     const existingConnection = this.logConnections.get(clusterId);
     if (existingConnection?.connected) {
@@ -1003,6 +957,12 @@ class SseService {
         signal: controller.signal,
       });
 
+      if (response.status === 404) {
+        console.warn(`⚠️ Container ${containerId} não encontrado (404). Parando tentativas de conexão.`);
+        this.disconnectLogs(clusterId);
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -1022,9 +982,7 @@ class SseService {
     }
   }
 
-  /**
-   * Desconecta SSE de logs para um cluster
-   */
+  
   disconnectLogs(clusterId: string | number): void {
     const connection = this.logConnections.get(clusterId);
     if (connection) {
@@ -1039,9 +997,7 @@ class SseService {
     }
   }
 
-  /**
-   * Processa stream SSE de logs
-   */
+  
   private async processLogsStream(
     response: Response,
     clusterId: string | number,
@@ -1072,13 +1028,13 @@ class SseService {
 
       while (!signal.aborted) {
         const { done, value } = await reader.read();
-        
+
         if (value) {
           buffer += decoder.decode(value, { stream: true });
         }
-        
+
         const lines = buffer.split('\n');
-        // Mantém a última linha no buffer (pode estar incompleta)
+        
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -1093,7 +1049,7 @@ class SseService {
               data += dataLine;
             }
           } else if (line === '' || line === '\r') {
-            // Linha vazia indica fim de evento SSE
+            
             if (data && eventType === 'log') {
               emitLogEvent(data);
             }
@@ -1101,25 +1057,25 @@ class SseService {
             eventType = 'log';
           }
         }
+
         
-        // Se o stream terminou, processa qualquer dado restante no buffer
         if (done) {
-          // Se há dados acumulados mas não processados (sem linha vazia final)
+          
           if (data && eventType === 'log') {
             emitLogEvent(data);
             data = '';
           }
+
           
-          // Se há buffer restante (última linha sem newline), processa como log
           if (buffer.trim()) {
-            // Tenta processar como evento SSE completo ou como linha de log simples
+            
             if (buffer.startsWith('data:')) {
               const dataLine = buffer.substring(5).trim();
               if (dataLine) {
                 emitLogEvent(dataLine);
               }
             } else if (buffer.trim() && !buffer.startsWith('event:')) {
-              // Linha de dados sem prefixo 'data:' - trata como log direto
+              
               emitLogEvent(buffer.trim());
             }
           }
@@ -1142,9 +1098,7 @@ class SseService {
     }
   }
 
-  /**
-   * Agenda reconexão de logs
-   */
+  
   private scheduleLogsReconnect(
     clusterId: string | number,
     connection: LogsConnection
@@ -1153,7 +1107,7 @@ class SseService {
       clearTimeout(connection.reconnectTimeout);
     }
 
-    // Guardar containerId antes de desconectar (pode ser perdido se conexão for deletada)
+    
     const containerId = connection.containerId;
     if (!containerId) {
       debugLog(`⚠️ Não é possível reconectar: containerId não disponível para cluster ${clusterId}`);
@@ -1180,27 +1134,23 @@ class SseService {
     }, this.reconnectDelay);
   }
 
-  /**
-   * Registra callback para receber logs
-   */
+  
   onLogs(callback: LogsCallback): () => void {
     this.logsCallbacks.add(callback);
     return () => this.logsCallbacks.delete(callback);
   }
 
-  /**
-   * Parseia evento de log do SSE (JSON ou texto puro)
-   */
+  
   private parseLogEvent(rawData: string, containerId: string): ContainerLogEventPayload | null {
     if (!rawData || !rawData.trim()) {
       return null;
     }
 
-    // Tentar parsear como JSON primeiro
+    
     try {
       const parsed = JSON.parse(rawData) as ContainerLogEventPayload;
+
       
-      // Se for um array (múltiplos eventos), pegar apenas o primeiro
       if (Array.isArray(parsed)) {
         if (parsed.length === 0) {
           return null;
@@ -1208,10 +1158,10 @@ class SseService {
         const firstEvent = parsed[0] as ContainerLogEventPayload;
         return this.normalizeLogEvent(firstEvent, containerId);
       }
-      
+
       return this.normalizeLogEvent(parsed, containerId);
     } catch (error) {
-      // Se não for JSON válido, tratar como texto puro
+      
       if (process.env.NODE_ENV === 'development') {
         debugLog('Falha ao converter evento de log SSE. Usando fallback de texto puro.', error);
       }
@@ -1223,9 +1173,7 @@ class SseService {
     }
   }
 
-  /**
-   * Normaliza evento de log parseado
-   */
+  
   private normalizeLogEvent(parsed: ContainerLogEventPayload, containerId: string): ContainerLogEventPayload {
     const epochSecond =
       typeof parsed.epochSecond === 'number'
@@ -1254,6 +1202,6 @@ class SseService {
   }
 }
 
-// Instância única do serviço SSE
+
 export const sseService = new SseService();
 

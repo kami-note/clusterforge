@@ -1,13 +1,9 @@
-/**
- * Utilitários de validação
- */
+
 
 import { VALIDATION_LIMITS } from '@/constants';
 import { ClusterData } from '@/types';
 
-/**
- * Valida nome de cluster
- */
+
 export function validateClusterName(name: string): { valid: boolean; error?: string } {
   if (!name.trim()) {
     return { valid: false, error: 'O nome do cluster é obrigatório' };
@@ -21,9 +17,7 @@ export function validateClusterName(name: string): { valid: boolean; error?: str
   return { valid: true };
 }
 
-/**
- * Valida alocação de CPU
- */
+
 export function validateCpu(cpu: number): { valid: boolean; error?: string } {
   if (cpu < VALIDATION_LIMITS.CPU.min || cpu > VALIDATION_LIMITS.CPU.max) {
     return {
@@ -34,9 +28,7 @@ export function validateCpu(cpu: number): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
-/**
- * Valida alocação de RAM
- */
+
 export function validateRam(ram: number): { valid: boolean; error?: string } {
   if (ram < VALIDATION_LIMITS.RAM.min || ram > VALIDATION_LIMITS.RAM.max) {
     return {
@@ -47,9 +39,7 @@ export function validateRam(ram: number): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
-/**
- * Valida alocação de disco
- */
+
 export function validateDisk(disk: number): { valid: boolean; error?: string } {
   if (disk < VALIDATION_LIMITS.DISK.min || disk > VALIDATION_LIMITS.DISK.max) {
     return {
@@ -60,9 +50,7 @@ export function validateDisk(disk: number): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
-/**
- * Valida porta personalizada
- */
+
 export function validatePort(port: string): { valid: boolean; error?: string } {
   if (!port) return { valid: true };
   
@@ -76,9 +64,7 @@ export function validatePort(port: string): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
-/**
- * Valida dados completos do cluster
- */
+
 export function validateClusterData(data: ClusterData): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   

@@ -13,8 +13,8 @@ export default function AdminClusterCreationPage() {
 
   const handleSubmit = (clusterData: ClusterData) => {
     console.log("Admin Cluster Data Submitted:", clusterData);
-    // In a real app, you would send this data to your API
-    router.push('/admin/clusters'); // Redirect after submission
+    
+    router.push('/admin/clusters'); 
   };
 
   return (

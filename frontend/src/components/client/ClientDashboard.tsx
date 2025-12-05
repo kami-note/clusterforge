@@ -6,12 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { 
-  ChartContainer, 
-  ChartTooltip, 
+import {
+  ChartContainer,
+  ChartTooltip,
   ChartTooltipContent,
   ChartLegend,
-  ChartLegendContent 
+  ChartLegendContent
 } from '@/components/ui/chart';
 import { Play, Square, RotateCw, Eye, Server, Cpu, HardDrive, MemoryStick, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
@@ -51,13 +51,13 @@ const performClusterAction = async (clusterId: string, action: 'start' | 'stop' 
 
 export function ClientDashboard() {
   const router = useRouter();
-  const { } = useAuth(); // Removed user
+  const { } = useAuth(); 
   const { clusters, updateCluster } = useClusters();
   const { metrics: realtimeMetrics } = useRealtimeMetrics();
 
-  // Calcular métricas agregadas reais dos clusters usando métricas em tempo real
+  
   const aggregatedMetrics = useMemo(() => {
-    const runningClusters = clusters.filter(c => 
+    const runningClusters = clusters.filter(c =>
       c.status === 'running' || c.status === 'active'
     );
 
@@ -70,7 +70,7 @@ export function ClientDashboard() {
       };
     }
 
-    // Coletar métricas apenas de clusters com dados em tempo real
+    
     const clustersWithMetrics = runningClusters.filter(cluster => {
       const clusterId = cluster.id;
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
@@ -81,23 +81,23 @@ export function ClientDashboard() {
       );
     });
 
-    // Se não houver métricas em tempo real, calcular média simples dos limites disponíveis
+    
     if (clustersWithMetrics.length === 0) {
-      // Tentar calcular com base nos limites dos clusters
+      
       const avgCpu = runningClusters.reduce((sum, c) => {
-        // cluster.cpu é limite convertido para %, não uso real
+        
         return sum + (c.cpu || 0);
       }, 0) / runningClusters.length;
 
       return {
-        cpuPercent: Math.min(avgCpu * 0.3, 100), // Estimar ~30% de uso do limite
-        memoryPercent: 35, // Estimativa realista
-        storagePercent: 40, // Estimativa realista
-        networkPercent: 15, // Estimativa realista
+        cpuPercent: Math.min(avgCpu * 0.3, 100), 
+        memoryPercent: 35, 
+        storagePercent: 40, 
+        networkPercent: 15, 
       };
     }
 
-    // Calcular agregados usando métricas reais
+    
     let totalCpuPercent = 0;
     let totalMemoryPercent = 0;
     let totalDiskPercent = 0;
@@ -112,7 +112,7 @@ export function ClientDashboard() {
       const metrics = realtimeMetrics[clusterId] || realtimeMetrics[parseInt(clusterId)];
 
       if (metrics) {
-        // CPU: calcular porcentagem relativa ao limite do cluster
+        
         const cpuRelative = calculateCpuUsageRelativeToLimit(
           metrics.cpuUsagePercent,
           cluster.cpuLimitPercent
@@ -122,8 +122,8 @@ export function ClientDashboard() {
           validCpuCount++;
         }
 
-        // Memória: calcular porcentagem relativa ao limite do cluster
-        // cluster.memoryLimit está em MB (vem do backend como memoryLimitMb)
+        
+        
         const memoryRelative = calculateMemoryUsageRelativeToLimit(
           metrics.memoryUsagePercent,
           metrics.memoryUsageMb,
@@ -134,7 +134,7 @@ export function ClientDashboard() {
           validMemoryCount++;
         }
 
-        // Disco: calcular porcentagem relativa ao limite do cluster
+        
         const diskRelative = calculateDiskUsageRelativeToLimit(
           metrics.diskUsagePercent,
           metrics.diskUsageMb,
@@ -145,13 +145,13 @@ export function ClientDashboard() {
           validDiskCount++;
         }
 
-        // Rede: usar uma estimativa conservadora baseada em tráfego
-        // Nota: bytes acumulados não refletem uso instantâneo de banda
-        // Para cálculo preciso, seria necessário throughput em bytes/s
+        
+        
+        
         if (metrics.networkRxBytes !== undefined && metrics.networkTxBytes !== undefined) {
-          // Se há tráfego, estimar uso médio conservador (10-20%)
-          const hasTraffic = (metrics.networkRxBytes + metrics.networkTxBytes) > 1024 * 1024; // > 1MB
-          const estimatedPercent = hasTraffic ? 15 : 5; // Estimativa conservadora
+          
+          const hasTraffic = (metrics.networkRxBytes + metrics.networkTxBytes) > 1024 * 1024; 
+          const estimatedPercent = hasTraffic ? 15 : 5; 
           totalNetworkPercent += estimatedPercent;
           validNetworkCount++;
         }
@@ -166,7 +166,7 @@ export function ClientDashboard() {
     };
   }, [clusters, realtimeMetrics]);
 
-  // Usage data for the chart (usando métricas reais)
+  
   const usageData: UsageData[] = useMemo(() => [
     { name: 'CPU', value: Math.round(aggregatedMetrics.cpuPercent) },
     { name: 'Memória', value: Math.round(aggregatedMetrics.memoryPercent) },
@@ -179,28 +179,28 @@ export function ClientDashboard() {
   };
 
   const handleClusterAction = (clusterId: string, action: 'start' | 'stop' | 'restart') => {
-    // Optimistic update - update UI immediately
+    
     updateCluster(clusterId, { status: action === 'start' ? 'running' : action === 'stop' ? 'stopped' : 'restarting' });
 
-    // Executar ação em background (não bloquear UI)
+    
     performClusterAction(clusterId, action)
       .then((success) => {
         if (!success) {
-          // Reverter atualização otimista em caso de falha
-          updateCluster(clusterId, { 
-            status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running' 
+          
+          updateCluster(clusterId, {
+            status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running'
           });
           toast.error(`Falha ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
         }
-        // Se sucesso, a atualização já foi feita otimisticamente e será confirmada pelo polling
+        
       })
       .catch((err) => {
-        // Reverter atualização otimista em caso de erro
-        updateCluster(clusterId, { 
-          status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running' 
+        
+        updateCluster(clusterId, {
+          status: action === 'start' ? 'stopped' : action === 'stop' ? 'running' : 'running'
         });
         toast.error(`Erro ao ${action === 'start' ? 'iniciar' : action === 'stop' ? 'parar' : 'reiniciar'} cluster`);
-        // Erro já tratado - não logar se for BackendOffline
+        
         if (!(err as any)?.name || (err as any).name !== 'BackendOffline') {
           console.error(`Error performing cluster action:`, err);
         }
@@ -248,7 +248,7 @@ export function ClientDashboard() {
       case 'failed':
         return 'Erro';
       default:
-        // Tentar exibir o status original se não for reconhecido
+        
         if (status) {
           const upperStatus = status.toUpperCase();
           if (['PENDING', 'ACTIVE', 'STOPPED', 'DELETED', 'ERROR'].includes(upperStatus)) {
@@ -267,16 +267,16 @@ export function ClientDashboard() {
   };
 
   return (
-    <div className="space-y-8 p-6 lg:p-8">
+    <div className="space-y-6 md:space-y-8 p-4 md:p-6 lg:p-8">
       <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-semibold">Dashboard do Cliente</h1>
-          <p className="text-muted-foreground">Visão geral dos seus serviços e clusters</p>
+        <div className="space-y-1 md:space-y-2">
+          <h1 className="text-2xl sm:text-3xl font-semibold">Dashboard do Cliente</h1>
+          <p className="text-sm md:text-base text-muted-foreground">Visão geral dos seus serviços e clusters</p>
         </div>
       </div>
 
-      {/* Resumo de Recursos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6 md:mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">CPU Total</CardTitle>
@@ -325,7 +325,7 @@ export function ClientDashboard() {
         </Card>
       </div>
 
-      {/* Gráfico de Uso de Recursos */}
+      {}
       <Card>
         <CardHeader>
           <CardTitle>Uso de Recursos</CardTitle>
@@ -344,7 +344,7 @@ export function ClientDashboard() {
         </CardContent>
       </Card>
 
-      {/* Lista de Clusters */}
+      {}
       <Card>
         <CardHeader>
           <CardTitle>Seus Clusters</CardTitle>
@@ -358,86 +358,99 @@ export function ClientDashboard() {
               <p className="text-sm mt-1">Entre em contato com o administrador para criar clusters</p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3 md:space-y-4">
               {clusters.map((cluster) => (
-                <div key={cluster.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <div className={`w-3 h-3 rounded-full ${getStatusColor(cluster.status)}`} />
-                    <div>
-                      <h3 className="font-medium">{cluster.name}</h3>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div key={cluster.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-lg gap-3 sm:gap-4">
+                  <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                    <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 sm:mt-0 ${getStatusColor(cluster.status)}`} />
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium truncate text-sm sm:text-base">{cluster.name}</h3>
+                      <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-xs sm:text-sm text-muted-foreground mt-1">
                         <span>{getStatusText(cluster.status)}</span>
-                        <span>•</span>
-                        <span>{cluster.lastUpdate}</span>
-                        <span>•</span>
-                        <span>{cluster.serviceType}</span>
+                        <span className="hidden sm:inline">•</span>
+                        <span className="truncate">{cluster.lastUpdate}</span>
+                        <span className="hidden sm:inline">•</span>
+                        <span className="truncate">{cluster.serviceType}</span>
+                      </div>
+                      {}
+                      <div className="sm:hidden text-xs text-muted-foreground mt-2">
+                        CPU: {cluster.cpu}% | RAM: {cluster.memory}% | Storage: {cluster.storage}%
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-4">
-                    <div className="text-sm text-muted-foreground">
-                      CPU: {cluster.cpu}% | RAM: {cluster.memory}% | Storage: {cluster.storage}%
-                    </div>
+                  {}
+                  <div className="hidden sm:block text-sm text-muted-foreground flex-shrink-0">
+                    CPU: {cluster.cpu}% | RAM: {cluster.memory}% | Storage: {cluster.storage}%
+                  </div>
 
-                    <div className="flex space-x-2">
-                      {cluster.status === 'stopped' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleClusterAction(cluster.id, 'start')}
-                          title="Iniciar cluster"
-                        >
-                          <Play className="h-4 w-4" />
-                        </Button>
-                      ) : cluster.status === 'running' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleClusterAction(cluster.id, 'stop')}
-                          title="Parar cluster"
-                        >
-                          <Square className="h-4 w-4" />
-                        </Button>
-                      ) : cluster.status === 'restarting' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled
-                          title="Reiniciando..."
-                        >
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled
-                          title="Ação indisponível"
-                        >
-                          <AlertCircle className="h-4 w-4" />
-                        </Button>
-                      )}
-
+                  {}
+                  <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                    {cluster.status === 'stopped' ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleClusterAction(cluster.id, 'restart')}
-                        disabled={cluster.status === 'restarting'}
-                        title="Reiniciar cluster"
+                        onClick={() => handleClusterAction(cluster.id, 'start')}
+                        title="Iniciar cluster"
+                        className="touch-target flex-1 sm:flex-none"
                       >
-                        <RotateCw className={`h-4 w-4 ${cluster.status === 'restarting' ? 'animate-spin' : ''}`} />
+                        <Play className="h-4 w-4" />
+                        <span className="sm:hidden ml-2">Iniciar</span>
                       </Button>
-
+                    ) : cluster.status === 'running' ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleViewCluster(cluster.id)}
-                        title="Ver detalhes"
+                        onClick={() => handleClusterAction(cluster.id, 'stop')}
+                        title="Parar cluster"
+                        className="touch-target flex-1 sm:flex-none"
                       >
-                        <Eye className="h-4 w-4" />
+                        <Square className="h-4 w-4" />
+                        <span className="sm:hidden ml-2">Parar</span>
                       </Button>
-                    </div>
+                    ) : cluster.status === 'restarting' ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        title="Reiniciando..."
+                        className="touch-target flex-1 sm:flex-none"
+                      >
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="sm:hidden ml-2">Reiniciando</span>
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        title="Ação indisponível"
+                        className="touch-target flex-1 sm:flex-none"
+                      >
+                        <AlertCircle className="h-4 w-4" />
+                      </Button>
+                    )}
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleClusterAction(cluster.id, 'restart')}
+                      disabled={cluster.status === 'restarting'}
+                      title="Reiniciar cluster"
+                      className="touch-target"
+                    >
+                      <RotateCw className={`h-4 w-4 ${cluster.status === 'restarting' ? 'animate-spin' : ''}`} />
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleViewCluster(cluster.id)}
+                      title="Ver detalhes"
+                      className="touch-target"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
               ))}

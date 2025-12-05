@@ -16,7 +16,7 @@ export default function ClientClusterCreationPage() {
   const handleSubmit = (clusterData: ClusterData) => {
     console.log("Client Cluster Data Submitted:", clusterData);
     addCluster(clusterData);
-    router.push('/client/dashboard'); // Redirect after submission
+    router.push('/client/dashboard'); 
   };
 
   return (

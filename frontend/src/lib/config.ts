@@ -1,6 +1,4 @@
-/**
- * Configurações da aplicação
- */
+
 
 import { STORAGE_KEYS } from '@/constants';
 import { TIMEOUTS } from '@/constants';
