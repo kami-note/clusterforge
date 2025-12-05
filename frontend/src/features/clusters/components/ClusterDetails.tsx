@@ -765,8 +765,15 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
 
 
   useEffect(() => {
-    if (!cluster || !cluster.containerId || status !== 'running' || isLogsPaused) {
-      if (status !== 'running' && cluster) {
+    if (!cluster || !cluster.containerId) {
+      return;
+    }
+
+    // Check if container is in a running state (backend uses 'ACTIVE', which becomes 'active' after toLowerCase)
+    const isContainerRunning = status === 'running' || status === 'active';
+
+    if (!isContainerRunning || isLogsPaused) {
+      if (!isContainerRunning && cluster) {
         setConsoleOutput('Container não está em execução. Inicie o container para ver os logs.');
       }
       return;
