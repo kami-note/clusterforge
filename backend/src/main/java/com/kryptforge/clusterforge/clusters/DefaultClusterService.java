@@ -1,6 +1,7 @@
 package com.kryptforge.clusterforge.clusters;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -151,6 +152,8 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	@Transactional
 	public ClusterInstance updateStatus(UUID id, ClusterStatus status) {
+		Objects.requireNonNull(id, "Cluster ID é obrigatório");
+
 		User user = currentUser.getCurrentUser()
 				.orElseThrow(() -> ForbiddenException.accessDenied());
 
@@ -166,6 +169,8 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	@Transactional
 	public ClusterInstance updateParams(UUID id, ClusterParams params) {
+		Objects.requireNonNull(id, "Cluster ID é obrigatório");
+
 		User user = currentUser.getCurrentUser()
 				.orElseThrow(() -> ForbiddenException.accessDenied());
 
@@ -189,6 +194,8 @@ public class DefaultClusterService implements ClusterService {
 	@Override
 	@Transactional
 	public ClusterInstance updateOwner(UUID id, UUID ownerId) {
+		Objects.requireNonNull(id, "Cluster ID é obrigatório");
+
 		User user = currentUser.getCurrentUser()
 				.orElseThrow(() -> ForbiddenException.accessDenied());
 
@@ -229,6 +236,8 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public ClusterInstance syncStatus(UUID id) {
+		Objects.requireNonNull(id, "Cluster ID é obrigatório");
+
 		// 1. Buscar dados em transação de leitura
 		ContainerInfo info = getContainerInfoReadOnly(id);
 
@@ -274,6 +283,8 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public ClusterInstance startContainer(UUID id) {
+		Objects.requireNonNull(id, "Cluster ID é obrigatório");
+
 		// 1. Buscar dados em transação de leitura
 		ContainerInfo info = getContainerInfoReadOnly(id);
 
@@ -312,6 +323,8 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public ClusterInstance stopContainer(UUID id, int timeoutSeconds) {
+		Objects.requireNonNull(id, "Cluster ID é obrigatório");
+
 		// 1. Buscar dados em transação de leitura
 		ContainerInfo info = getContainerInfoReadOnly(id);
 
@@ -347,6 +360,8 @@ public class DefaultClusterService implements ClusterService {
 
 	@Override
 	public ClusterInstance restartContainer(UUID id, int timeoutSeconds) {
+		Objects.requireNonNull(id, "Cluster ID é obrigatório");
+
 		// 1. Buscar dados em transação de leitura
 		ContainerInfo info = getContainerInfoReadOnly(id);
 
