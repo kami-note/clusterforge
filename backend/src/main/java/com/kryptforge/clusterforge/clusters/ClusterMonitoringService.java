@@ -12,10 +12,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.kryptforge.clusterforge.monitoring.ClusterLog;
 import com.kryptforge.clusterforge.monitoring.ClusterLogRepository;
-import com.kryptforge.clusterforge.monitoring.ClusterMetric;
 import com.kryptforge.clusterforge.monitoring.ClusterMetricRepository;
+import com.kryptforge.clusterforge.monitoring.dto.ClusterLogResponse;
+import com.kryptforge.clusterforge.monitoring.dto.ClusterMetricResponse;
 
 /**
  * Serviço para acesso a histórico de logs e métricas de clusters.
@@ -29,8 +29,8 @@ import com.kryptforge.clusterforge.monitoring.ClusterMetricRepository;
  * Responsabilidades:
  * </p>
  * <ul>
- * <li>Fornecer histórico de logs paginado</li>
- * <li>Fornecer histórico de métricas paginado</li>
+ * <li>Fornecer histórico de logs paginado (como DTOs)</li>
+ * <li>Fornecer histórico de métricas paginado (como DTOs)</li>
  * <li>Calcular estatísticas de monitoramento</li>
  * <li>Validar existência de cluster</li>
  * </ul>
@@ -53,17 +53,17 @@ public class ClusterMonitoringService {
     }
 
     /**
-     * Obtém histórico de logs de um cluster.
+     * Obtém histórico de logs de um cluster como DTOs.
      * 
      * @param clusterId ID do cluster
      * @param page      número da página (0-indexed)
      * @param size      tamanho da página
      * @param startTime data/hora inicial (opcional)
      * @param endTime   data/hora final (opcional)
-     * @return página de logs
+     * @return página de logs (DTOs)
      * @throws ResponseStatusException se cluster não encontrado
      */
-    public Page<ClusterLog> getLogsHistory(
+    public Page<ClusterLogResponse> getLogsHistory(
             UUID clusterId,
             int page,
             int size,
@@ -71,29 +71,30 @@ public class ClusterMonitoringService {
             Instant endTime) {
 
         validateClusterExists(clusterId);
-
         Pageable pageable = PageRequest.of(page, size);
 
         if (startTime != null && endTime != null) {
             return logRepository.findByClusterIdAndTimestampBetween(
-                    clusterId, startTime, endTime, pageable);
+                    clusterId, startTime, endTime, pageable)
+                    .map(ClusterLogResponse::from);
         } else {
-            return logRepository.findByClusterIdOrderByTimestampDesc(clusterId, pageable);
+            return logRepository.findByClusterIdOrderByTimestampDesc(clusterId, pageable)
+                    .map(ClusterLogResponse::from);
         }
     }
 
     /**
-     * Obtém histórico de métricas de um cluster.
+     * Obtém histórico de métricas de um cluster como DTOs.
      * 
      * @param clusterId ID do cluster
      * @param page      número da página (0-indexed)
      * @param size      tamanho da página
      * @param startTime data/hora inicial (opcional)
      * @param endTime   data/hora final (opcional)
-     * @return página de métricas
+     * @return página de métricas (DTOs)
      * @throws ResponseStatusException se cluster não encontrado
      */
-    public Page<ClusterMetric> getMetricsHistory(
+    public Page<ClusterMetricResponse> getMetricsHistory(
             UUID clusterId,
             int page,
             int size,
@@ -101,14 +102,15 @@ public class ClusterMonitoringService {
             Instant endTime) {
 
         validateClusterExists(clusterId);
-
         Pageable pageable = PageRequest.of(page, size);
 
         if (startTime != null && endTime != null) {
             return metricRepository.findByClusterIdAndTimestampBetween(
-                    clusterId, startTime, endTime, pageable);
+                    clusterId, startTime, endTime, pageable)
+                    .map(ClusterMetricResponse::from);
         } else {
-            return metricRepository.findByClusterIdOrderByTimestampDesc(clusterId, pageable);
+            return metricRepository.findByClusterIdOrderByTimestampDesc(clusterId, pageable)
+                    .map(ClusterMetricResponse::from);
         }
     }
 

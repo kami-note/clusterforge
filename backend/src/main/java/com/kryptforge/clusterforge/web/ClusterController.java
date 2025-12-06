@@ -29,8 +29,8 @@ import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterOwnerUpdateRe
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterResponse;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterStatusUpdateRequest;
 import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterUpdateParamsRequest;
-import com.kryptforge.clusterforge.monitoring.ClusterLog;
-import com.kryptforge.clusterforge.monitoring.ClusterMetric;
+import com.kryptforge.clusterforge.monitoring.dto.ClusterLogResponse;
+import com.kryptforge.clusterforge.monitoring.dto.ClusterMetricResponse;
 
 /**
  * Controller REST para gerenciamento de clusters.
@@ -229,7 +229,7 @@ public class ClusterController {
 	 * @return página de logs
 	 */
 	@GetMapping("/{id}/logs/history")
-	public Page<ClusterLog> getLogsHistory(
+	public Page<ClusterLogResponse> getLogsHistory(
 			@PathVariable("id") UUID id,
 			@RequestParam(name = "page", defaultValue = "0") int page,
 			@RequestParam(name = "size", defaultValue = "100") int size,
@@ -250,7 +250,7 @@ public class ClusterController {
 	 * @return página de métricas
 	 */
 	@GetMapping("/{id}/metrics/history")
-	public Page<ClusterMetric> getMetricsHistory(
+	public Page<ClusterMetricResponse> getMetricsHistory(
 			@PathVariable("id") UUID id,
 			@RequestParam(name = "page", defaultValue = "0") int page,
 			@RequestParam(name = "size", defaultValue = "100") int size,
