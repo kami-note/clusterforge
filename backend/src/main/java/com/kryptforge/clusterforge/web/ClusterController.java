@@ -25,10 +25,10 @@ import com.kryptforge.clusterforge.clusters.ClusterEnrichmentService;
 import com.kryptforge.clusterforge.clusters.ClusterInstance;
 import com.kryptforge.clusterforge.clusters.ClusterMonitoringService;
 import com.kryptforge.clusterforge.clusters.ClusterService;
-import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterOwnerUpdateRequest;
-import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterResponse;
-import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterStatusUpdateRequest;
-import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterUpdateParamsRequest;
+import com.kryptforge.clusterforge.clusters.dto.ClusterOwnerUpdateRequest;
+import com.kryptforge.clusterforge.clusters.dto.ClusterResponse;
+import com.kryptforge.clusterforge.clusters.dto.ClusterStatusUpdateRequest;
+import com.kryptforge.clusterforge.clusters.dto.ClusterUpdateParamsRequest;
 import com.kryptforge.clusterforge.monitoring.dto.ClusterLogResponse;
 import com.kryptforge.clusterforge.monitoring.dto.ClusterMetricResponse;
 

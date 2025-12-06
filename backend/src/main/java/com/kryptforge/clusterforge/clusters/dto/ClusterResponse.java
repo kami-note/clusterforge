@@ -1,0 +1,62 @@
+package com.kryptforge.clusterforge.clusters.dto;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import com.kryptforge.clusterforge.clusters.ClusterInstance;
+import com.kryptforge.clusterforge.clusters.ClusterStatus;
+
+/**
+ * DTO para resposta de cluster.
+ */
+public record ClusterResponse(
+        UUID id,
+        String name,
+        String templateName,
+        ClusterStatus status,
+        Instant createdAt,
+        Instant updatedAt,
+        Map<String, String> env,
+        List<Integer> ports,
+        List<String> volumes,
+        String containerId,
+        AccessInfo ftp,
+        AccessInfo webDav,
+        UUID ownerId,
+        String ownerUsername,
+        Integer cpuLimitPercent,
+        Long memoryLimit,
+        Integer diskLimit,
+        Integer networkLimit) {
+    public static ClusterResponse from(ClusterInstance c) {
+        return from(c, c.getStatus(), null);
+    }
+
+    public static ClusterResponse from(ClusterInstance c, ClusterStatus status) {
+        return from(c, status, null);
+    }
+
+    public static ClusterResponse from(ClusterInstance c, ClusterStatus status, String ownerUsername) {
+        return new ClusterResponse(
+                c.getId(),
+                c.getName(),
+                c.getTemplateName(),
+                status,
+                c.getCreatedAt(),
+                c.getUpdatedAt(),
+                c.getEnv(),
+                c.getPorts(),
+                c.getVolumes(),
+                c.getContainerId(),
+                new AccessInfo(c.getFtpContainerId(), c.getFtpPort(), c.getFtpUser(), c.getFtpPassword()),
+                new AccessInfo(c.getWebDavContainerId(), c.getWebDavPort(), c.getWebDavUser(), c.getWebDavPassword()),
+                c.getOwnerId(),
+                ownerUsername,
+                c.getCpuLimitPercent(),
+                c.getMemoryLimitMb(),
+                c.getDiskLimitGb(),
+                c.getNetworkLimitMbps());
+    }
+}

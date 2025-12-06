@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.github.dockerjava.api.exception.NotFoundException;
-import com.kryptforge.clusterforge.clusters.dto.ClusterDtos.ClusterResponse;
+import com.kryptforge.clusterforge.clusters.dto.ClusterResponse;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.util.DockerStatusMapper;
 import com.kryptforge.clusterforge.users.User;
