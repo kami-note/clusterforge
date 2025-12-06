@@ -162,6 +162,26 @@ public class GlobalExceptionHandler {
     /**
      * Trata exceções genéricas não tratadas.
      */
+    /**
+     * Trata erros de concorrência (Optimistic Locking).
+     */
+    @ExceptionHandler(org.springframework.dao.OptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLockingFailureException(
+            org.springframework.dao.OptimisticLockingFailureException ex, WebRequest request) {
+
+        String path = extractPath(request);
+        ErrorResponse response = ErrorResponse.of(
+                ErrorCode.INVALID_STATE,
+                "O recurso foi modificado por outro usuário. Por favor, recarregue e tente novamente.",
+                path);
+
+        log.warn("Disputa de concorrência detectada: {} - Path: {}", ex.getMessage(), path);
+
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(response);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(
             Exception ex, WebRequest request) {

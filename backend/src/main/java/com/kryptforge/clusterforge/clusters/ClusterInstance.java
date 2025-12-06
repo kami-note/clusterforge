@@ -24,6 +24,8 @@ import jakarta.persistence.Table;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.kryptforge.clusterforge.security.EncryptedStringConverter;
 
+import jakarta.persistence.Version;
+
 @Entity
 @Table(name = "clusters", indexes = {
 		@Index(name = "ux_clusters_name", columnList = "name", unique = true)
@@ -52,6 +54,9 @@ public class ClusterInstance {
 
 	@Column(nullable = false)
 	private Instant updatedAt;
+
+	@Version
+	private Long version;
 
 	@Column(columnDefinition = "TEXT")
 	@Convert(converter = EnvConverter.class)
