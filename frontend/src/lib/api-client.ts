@@ -11,6 +11,7 @@ export interface ApiError {
   message: string;
   status?: number;
   errors?: Record<string, string[]>;
+  details?: string;
 }
 
 export class HttpClient {
@@ -442,6 +443,12 @@ export class HttpClient {
           const errorData = JSON.parse(text);
           errorMessage = errorData.message || errorData.error || errorMessage;
           errorDetails = errorData.errors;
+          // Capture detailed message from backend if available
+          if (errorData.details) {
+            errorMessage = errorData.message || errorMessage;
+            // storing details in a way we can access later, extending ApiError interface below
+            (errorDetails as any) = { ...errorDetails, _details: errorData.details };
+          }
         } catch (parseError) {
 
           errorMessage = text || this.getErrorMessage(response.status);
@@ -460,7 +467,13 @@ export class HttpClient {
       message: errorMessage,
       status: response.status,
       errors: errorDetails,
+      details: (errorDetails as any)?._details,
     };
+
+    // Clean up internal _details if present in errors
+    if (error.errors && (error.errors as any)._details) {
+      delete (error.errors as any)._details;
+    }
 
 
 

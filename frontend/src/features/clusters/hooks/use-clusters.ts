@@ -65,7 +65,10 @@ export const useClusterActionMutation = () => {
             toast.success(`Cluster ${actionMap[action]} com sucesso`);
         },
         onError: (error: Error, { action }) => {
-            toast.error(`Erro ao executar ação ${action}: ${error.message || 'Erro desconhecido'}`);
+            const apiError = error as import('@/lib/api-client').ApiError;
+            toast.error(`Erro ao executar ação ${action}: ${error.message || 'Erro desconhecido'}`, {
+                description: apiError.details
+            });
         }
     });
 };
@@ -82,7 +85,10 @@ export const useUpdateClusterLimitsMutation = () => {
             toast.success('Limites do cluster atualizados com sucesso');
         },
         onError: (error: Error) => {
-            toast.error(`Erro ao carregar clusters: ${error.message}`);
+            const apiError = error as import('@/lib/api-client').ApiError;
+            toast.error(`Erro ao atualizar limites: ${error.message}`, {
+                description: apiError.details
+            });
         },
     });
 };
@@ -99,7 +105,10 @@ export const useUpdateClusterOwnerMutation = () => {
             toast.success('Dono do cluster atualizado com sucesso');
         },
         onError: (error: Error) => {
-            toast.error(`Erro ao executar ação: ${error.message}`);
+            const apiError = error as import('@/lib/api-client').ApiError;
+            toast.error(`Erro ao executar ação: ${error.message}`, {
+                description: apiError.details
+            });
         },
     });
 };

@@ -1390,19 +1390,13 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
       </Card>
 
       {activeSection === 'files' ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Gerenciador de Arquivos</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ClusterFileManager
-              clusterName={cluster.name}
-              clusterId={cluster.id}
-              webDavCredentials={cluster.webDav}
-              endpointHint={webDavCredentials?.url}
-            />
-          </CardContent>
-        </Card>
+        <div className="h-[calc(100vh-200px)] min-h-[500px] border rounded-lg bg-background shadow-sm">
+          <ClusterFileManager
+            clusterId={cluster.id}
+            webDavCredentials={cluster.webDav}
+            endpointHint={webDavCredentials?.url}
+          />
+        </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           { }

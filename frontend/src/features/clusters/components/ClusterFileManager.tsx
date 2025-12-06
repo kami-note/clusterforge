@@ -1,4 +1,4 @@
-import { ReactNode, useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,10 +66,17 @@ interface FileNode {
   path: string;
   children?: FileNode[];
   extension?: string;
+  rawSize?: number;
+  rawModified?: number;
 }
 
+type SortableFileNodeKey = Exclude<keyof FileNode, "children">;
+
+
+
+
+
 interface ClusterFileManagerProps {
-  clusterName: string;
   clusterId: string;
   webDavCredentials?: ClusterAccessInfo;
   endpointHint?: string;
@@ -85,21 +92,21 @@ const formatFileSize = (bytes: number): string => {
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
 };
 
-const extensionIcon = (extension?: string) => {
-  if (!extension) return <File className="h-4 w-4 text-blue-500" />;
+const extensionIcon = (extension?: string, className: string = "h-4 w-4") => {
+  if (!extension) return <File className={`${className} text-blue-500`} />;
   if (["yml", "yaml", "json", "env"].includes(extension)) {
-    return <FileText className="h-4 w-4 text-rose-500" />;
+    return <FileText className={`${className} text-rose-500`} />;
   }
   if (["html", "css", "js", "ts", "tsx"].includes(extension)) {
-    return <FileText className="h-4 w-4 text-amber-500" />;
+    return <FileText className={`${className} text-amber-500`} />;
   }
   if (["docker"].includes(extension)) {
-    return <Cloud className="h-4 w-4 text-sky-500" />;
+    return <Cloud className={`${className} text-sky-500`} />;
   }
-  return <File className="h-4 w-4 text-blue-500" />;
+  return <File className={`${className} text-blue-500`} />;
 };
 
-export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, endpointHint }: ClusterFileManagerProps) {
+export function ClusterFileManager({ clusterId, webDavCredentials, endpointHint }: ClusterFileManagerProps) {
   const [currentPath, setCurrentPath] = useState<string>(ROOT_PATH);
   const [files, setFiles] = useState<WebDavFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -110,6 +117,8 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingFile, setEditingFile] = useState<{ path: string; name: string } | null>(null);
 
+
+  const [sortConfig, setSortConfig] = useState<{ key: SortableFileNodeKey; direction: "asc" | "desc" } | null>(null);
 
   const loadDirectory = useCallback(async (path: string) => {
     if (!webDavService.isConnected()) {
@@ -241,17 +250,70 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
         modifiedAt: file.lastmod ? new Date(file.lastmod).toLocaleString("pt-BR") : "",
         path: normalizePath(file.filename),
         extension,
+        rawSize: file.size,
+        rawModified: file.lastmod ? new Date(file.lastmod).getTime() : 0,
       };
     });
   }, [files]);
 
 
   const filteredFiles = useMemo(() => {
-    if (!searchTerm) return fileNodes;
-    return fileNodes.filter(file =>
-      file.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [fileNodes, searchTerm]);
+    let result = [...fileNodes];
+
+    if (searchTerm) {
+      result = result.filter(file =>
+        file.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    if (sortConfig) {
+      result.sort((a, b) => {
+        // Always put folders first if not sorting by explicit fields that might act differently,
+        // but typically standard OS behavior is folders first. Let's keep folders first for Name.
+        if (sortConfig.key === 'name') {
+          if (a.type !== b.type) {
+            return a.type === 'folder' ? -1 : 1;
+          }
+        }
+
+        let aValue: string | number | undefined = a[sortConfig.key];
+        let bValue: string | number | undefined = b[sortConfig.key];
+
+        // Custom sorting for specific fields
+        if (sortConfig.key === 'size') {
+          // For size, use raw bytes if available, folders assume 0 or -1 to stay at top/bottom?
+          // Actually, usually folders have no size. Let's treat them as smaller than any file or separate.
+          // If we want folders first always:
+          if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+          aValue = a.rawSize ?? 0;
+          bValue = b.rawSize ?? 0;
+        } else if (sortConfig.key === 'modifiedAt') {
+          aValue = a.rawModified ?? 0;
+          bValue = b.rawModified ?? 0;
+        }
+
+        if (aValue === undefined && bValue === undefined) return 0;
+        if (aValue === undefined) return 1;
+        if (bValue === undefined) return -1;
+
+        if (aValue < bValue) {
+          return sortConfig.direction === 'asc' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    } else {
+      // Default sort: Folders first, then files by name
+      result.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    return result;
+  }, [fileNodes, searchTerm, sortConfig]);
 
 
   const breadcrumb = useMemo(() => {
@@ -283,36 +345,45 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
     return items;
   }, [currentPath]);
 
+  const requestSort = (key: SortableFileNodeKey) => {
+    let direction: "asc" | "desc" = "asc";
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === "asc") {
+      direction = "desc";
+    }
+    setSortConfig({ key, direction });
+  };
+
   const statusText = `${filteredFiles.length} item${filteredFiles.length === 1 ? "" : "s"}`;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full bg-background">
+      <div className="border-b px-4 py-3 flex items-center justify-between bg-muted/30">
         <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="uppercase tracking-wide">
+          <Badge variant="secondary" className="uppercase tracking-wide text-xs">
             WebDAV
           </Badge>
-          <span className="text-sm text-muted-foreground">
-            Montado como `W:` – pronto para sincronizar arquivos do cluster
+          <span className="text-xs text-muted-foreground hidden sm:inline-block">
+            Montado como `W:`
           </span>
         </div>
         <div className="flex items-center gap-2">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => loadDirectory(currentPath)}
             disabled={loading || !connected}
+            className="h-8"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-3.5 w-3.5 mr-2 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Carregando..." : "Atualizar"}
           </Button>
           {connected ? (
-            <Badge variant="default" className="bg-green-500">
+            <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
               <Cloud className="h-3 w-3 mr-1" />
               Conectado
             </Badge>
           ) : (
-            <Badge variant="destructive">
+            <Badge variant="destructive" className="text-xs">
               <AlertCircle className="h-3 w-3 mr-1" />
               Desconectado
             </Badge>
@@ -320,58 +391,60 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 px-4 py-2 border-b">
         <div className="flex items-center gap-1">
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
             onClick={navigateUp}
             disabled={currentPath === ROOT_PATH || loading}
             title="Voltar"
+            className="h-8 w-8"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon" disabled title="Avançar">
+          <Button variant="ghost" size="icon" disabled title="Avançar" className="h-8 w-8">
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
-        <div className="flex-1 flex items-center gap-2 bg-muted rounded-lg px-2 py-1 border">
+        <div className="flex-1 flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5 border text-sm">
           <HardDrive className="h-4 w-4 text-muted-foreground" />
-          <div className="flex items-center flex-wrap gap-1 text-sm">
+          <div className="flex items-center flex-wrap gap-1">
             {breadcrumb.map((node, index) => (
               <div key={node.id} className="flex items-center gap-1">
                 <button
-                  className="hover:underline"
+                  className="hover:text-primary hover:underline transition-colors"
                   onClick={() => node.type === "folder" && navigateToFolder(node.path)}
                   disabled={loading}
                 >
                   {node.name}
                 </button>
-                {index < breadcrumb.length - 1 && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                {index < breadcrumb.length - 1 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />}
               </div>
             ))}
           </div>
         </div>
-        <div className="w-64 relative">
+        <div className="w-56 lg:w-72 relative">
           <Input
-            placeholder="Pesquisar arquivos..."
+            placeholder="Pesquisar..."
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            className="pr-10"
+            className="pr-8 h-9 text-sm"
           />
-          <Search className="h-4 w-4 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <Search className="h-4 w-4 text-muted-foreground absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
       </div>
 
-      <div className="flex justify-between items-center bg-muted rounded-lg px-3 py-2 border">
-        <div className="flex items-center gap-2">
+      <div className="px-4 py-2 border-b flex justify-between items-center bg-muted/10">
+        <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
             onClick={handleCreateFolder}
             disabled={!connected || loading}
+            className="h-8 text-xs sm:text-sm"
           >
-            <FolderPlus className="h-4 w-4 mr-2" />
+            <FolderPlus className="h-4 w-4 mr-2 text-blue-500" />
             Nova pasta
           </Button>
           <Button
@@ -379,8 +452,9 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
             size="sm"
             onClick={handleCreateFile}
             disabled={!connected || loading}
+            className="h-8 text-xs sm:text-sm"
           >
-            <FilePlus className="h-4 w-4 mr-2" />
+            <FilePlus className="h-4 w-4 mr-2 text-green-500" />
             Novo arquivo
           </Button>
           <Button
@@ -388,8 +462,9 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
             size="sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={!connected || loading}
+            className="h-8 text-xs sm:text-sm"
           >
-            <Upload className="h-4 w-4 mr-2" />
+            <Upload className="h-4 w-4 mr-2 text-indigo-500" />
             Upload
           </Button>
           <input
@@ -399,138 +474,147 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
             onChange={handleUpload}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 bg-muted/50 p-0.5 rounded-md border">
           <Button
-            variant={viewMode === "list" ? "default" : "ghost"}
+            variant={viewMode === "list" ? "secondary" : "ghost"}
             size="icon"
             onClick={() => setViewMode("list")}
+            className="h-7 w-7"
           >
-            <List className="h-4 w-4" />
+            <List className="h-3.5 w-3.5" />
           </Button>
           <Button
-            variant={viewMode === "grid" ? "default" : "ghost"}
+            variant={viewMode === "grid" ? "secondary" : "ghost"}
             size="icon"
             onClick={() => setViewMode("grid")}
+            className="h-7 w-7"
           >
-            <Columns3 className="h-4 w-4" />
+            <Columns3 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center justify-between mx-4 mt-4">
           <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
             <AlertCircle className="h-4 w-4" />
             {error}
           </p>
+          <Button variant="ghost" size="sm" onClick={() => setError(null)} className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-100">
+            <span className="sr-only">Fechar</span>
+            <span className="text-lg">×</span>
+          </Button>
         </div>
       )}
 
-      <div className="grid grid-cols-12 gap-4">
-        <CardLikePanel
-          title={`Conteúdo de ${currentPath === "/" ? "Raiz" : currentPath.split("/").pop()}`}
-          className="col-span-12 min-h-[320px]"
-        >
-          {viewMode === "list" ? (
-            <div className="rounded-lg border bg-background">
-              <div className="grid grid-cols-12 px-4 py-2 border-b text-xs text-muted-foreground">
-                <span className="col-span-5">Nome</span>
-                <span className="col-span-3">Tipo</span>
-                <span className="col-span-2">Modificado em</span>
-                <span className="col-span-2 text-right">Tamanho</span>
+      <div className="flex-1 overflow-hidden relative min-h-0">
+        {viewMode === "list" ? (
+          <div className="h-full flex flex-col min-h-0">
+            <div className="grid grid-cols-12 px-6 py-2 border-b text-xs font-medium text-muted-foreground bg-muted/20">
+              <div className="col-span-6 cursor-pointer hover:text-foreground flex items-center gap-1" onClick={() => requestSort('name')}>
+                Nome {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </div>
-              <ScrollArea className="h-[240px]">
+              <div className="col-span-2 cursor-pointer hover:text-foreground flex items-center gap-1" onClick={() => requestSort('extension')}>
+                Tipo {sortConfig?.key === 'extension' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </div>
+              <div className="col-span-2 cursor-pointer hover:text-foreground flex items-center gap-1" onClick={() => requestSort('modifiedAt')}>
+                Modificado em {sortConfig?.key === 'modifiedAt' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </div>
+              <div className="col-span-2 text-right cursor-pointer hover:text-foreground flex items-center justify-end gap-1" onClick={() => requestSort('size')}>
+                Tamanho {sortConfig?.key === 'size' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </div>
+            </div>
+            <div className="flex-1 relative min-h-0">
+              <ScrollArea className="h-full w-full absolute inset-0">
                 {loading ? (
-                  <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <div className="flex flex-col items-center justify-center p-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                    <p className="text-sm text-muted-foreground">Listando arquivos...</p>
                   </div>
                 ) : filteredFiles.length === 0 ? (
-                  <div className="text-sm text-muted-foreground px-4 py-6">
-                    {searchTerm
-                      ? "Nenhum item encontrado com esse termo."
-                      : "Diretório vazio. Utilize o botão Upload ou crie uma nova pasta."}
+                  <div className="flex flex-col items-center justify-center p-12 text-muted-foreground">
+                    <Folder className="h-12 w-12 mb-4 text-muted-foreground/30" />
+                    <p className="text-lg font-medium text-foreground">Diretório vazio</p>
+                    <p className="text-sm">Utilize os botões acima para adicionar conteúdo.</p>
                   </div>
                 ) : (
-                  filteredFiles.map((item) => (
-                    <div
-                      key={item.id}
-                      className="grid grid-cols-12 items-center px-4 py-2 text-sm hover:bg-muted/70 group"
-                    >
-                      <button
-                        className="col-span-5 flex items-center gap-2 text-left"
-                        onClick={() => item.type === "folder" && navigateToFolder(item.path)}
-                        disabled={loading}
+                  <div className="pb-24">
+                    {filteredFiles.map((item) => (
+                      <div
+                        key={item.id}
+                        className="grid grid-cols-12 items-center px-6 py-2.5 text-sm hover:bg-muted/50 border-b border-border/40 group transition-colors cursor-pointer"
+                        onClick={() => item.type === "folder" ? navigateToFolder(item.path) : null}
                       >
-                        {item.type === "folder" ? (
-                          <Folder className="h-4 w-4 text-primary" />
-                        ) : (
-                          extensionIcon(item.extension)
-                        )}
-                        {item.name}
-                      </button>
-                      <span className="col-span-3">{item.type === "folder" ? "Pasta" : item.extension?.toUpperCase() || "Arquivo"}</span>
-                      <span className="col-span-2">{item.modifiedAt || "-"}</span>
-                      <div className="col-span-2 flex items-center justify-end gap-2">
-                        <span className="text-right">{item.type === "folder" ? "-" : item.size ?? "-"}</span>
-                        {item.type === "file" && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => {
-                              e.stopPropagation();
-
-                              const filePath = item.path ? normalizePath(item.path) : joinPath(currentPath, item.name);
-                              setEditingFile({ path: filePath, name: item.name });
-                            }}
-                            title="Editar arquivo"
-                          >
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                        )}
+                        <div className="col-span-6 flex items-center gap-3 overflow-hidden">
+                          {item.type === "folder" ? (
+                            <Folder className="h-5 w-5 text-blue-500 fill-blue-500/20" />
+                          ) : (
+                            extensionIcon(item.extension, "h-5 w-5")
+                          )}
+                          <span className="truncate font-medium text-foreground">{item.name}</span>
+                        </div>
+                        <span className="col-span-2 text-muted-foreground text-xs uppercase">{item.type === "folder" ? "Pasta" : item.extension || "Arquivo"}</span>
+                        <span className="col-span-2 text-muted-foreground text-xs">{item.modifiedAt || "-"}</span>
+                        <div className="col-span-2 flex items-center justify-end gap-3">
+                          <span className="text-muted-foreground font-mono text-xs">{item.type === "folder" ? "-" : item.size ?? "-"}</span>
+                          {item.type === "file" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const filePath = item.path ? normalizePath(item.path) : joinPath(currentPath, item.name);
+                                setEditingFile({ path: filePath, name: item.name });
+                              }}
+                              title="Editar arquivo"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </ScrollArea>
             </div>
-          ) : (
-            <ScrollArea className="h-[280px]">
+          </div>
+        ) : (
+          <div className="flex-1 relative min-h-0">
+            <ScrollArea className="h-full w-full absolute inset-0">
               {loading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <div className="flex flex-col items-center justify-center p-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-4 pr-2">
+                <div className="p-6 pb-24 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                   {filteredFiles.map((item) => (
                     <div
                       key={item.id}
-                      className="border rounded-lg p-3 text-left hover:border-primary relative group"
+                      className="border rounded-xl p-4 flex flex-col items-center text-center gap-3 hover:bg-muted/50 hover:border-primary/50 cursor-pointer transition-all group relative aspect-square justify-center"
+                      onClick={() => item.type === "folder" && navigateToFolder(item.path)}
                     >
-                      <button
-                        className="w-full"
-                        onClick={() => item.type === "folder" && navigateToFolder(item.path)}
-                        disabled={loading}
-                      >
-                        <div className="flex items-center gap-3">
-                          {item.type === "folder" ? (
-                            <Folder className="h-10 w-10 text-primary" />
-                          ) : (
-                            extensionIcon(item.extension)
-                          )}
-                          <div className="flex-1">
-                            <p className="font-medium">{item.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {item.type === "folder" ? "Pasta" : `${item.extension?.toUpperCase() || "Arquivo"} • ${item.size || "-"}`}
-                            </p>
-                          </div>
+                      {item.type === "folder" ? (
+                        <Folder className="h-12 w-12 text-blue-500 fill-blue-500/20" />
+                      ) : (
+                        <div className="h-12 w-12 flex items-center justify-center">
+                          {extensionIcon(item.extension, "h-10 w-10")}
                         </div>
-                      </button>
+                      )}
+
+                      <div className="w-full">
+                        <p className="font-medium text-sm truncate w-full" title={item.name}>{item.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {item.type === "folder" ? "Pasta" : item.size || "-"}
+                        </p>
+                      </div>
+
                       {item.type === "file" && (
                         <Button
-                          variant="ghost"
+                          variant="secondary"
                           size="icon"
-                          className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
                           onClick={(e) => {
                             e.stopPropagation();
                             const filePath = item.path ? normalizePath(item.path) : joinPath(currentPath, item.name);
@@ -538,33 +622,31 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
                           }}
                           title="Editar arquivo"
                         >
-                          <Edit className="h-3 w-3" />
+                          <Edit className="h-3.5 w-3.5" />
                         </Button>
                       )}
                     </div>
                   ))}
-                  {filteredFiles.length === 0 && (
-                    <div className="text-sm text-muted-foreground px-4 py-6 col-span-3">
-                      {searchTerm
-                        ? "Nenhum item encontrado com esse termo."
-                        : "Diretório vazio. Utilize o botão Upload ou crie uma nova pasta."}
+                  {filteredFiles.length === 0 && !loading && (
+                    <div className="col-span-full flex flex-col items-center justify-center p-12 text-muted-foreground">
+                      <Folder className="h-12 w-12 mb-4 text-muted-foreground/30" />
+                      <p className="text-lg font-medium text-foreground">Diretório vazio</p>
                     </div>
                   )}
                 </div>
               )}
             </ScrollArea>
-          )}
-        </CardLikePanel>
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center justify-between text-xs text-muted-foreground border rounded-md px-3 py-2 bg-muted/50">
+      <div className="border-t px-4 py-2 bg-muted/20 text-xs text-muted-foreground flex justify-between items-center">
         <span>{statusText}</span>
-        <span>
-          Conectado como <strong>{clusterName}</strong> via {endpointHint ?? "webdav://clusterforge.local"}
+        <span className="truncate max-w-[300px]" title={endpointHint ?? "webdav://clusterforge.local"}>
+          {endpointHint ?? "webdav://clusterforge.local"}
         </span>
       </div>
 
-      { }
       {editingFile && (
         <FileEditor
           filePath={editingFile.path}
@@ -572,7 +654,6 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
           isOpen={!!editingFile}
           onClose={() => setEditingFile(null)}
           onSave={() => {
-
             loadDirectory(currentPath);
           }}
         />
@@ -581,16 +662,7 @@ export function ClusterFileManager({ clusterName, clusterId, webDavCredentials, 
   );
 }
 
-function CardLikePanel({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
-  return (
-    <div className={`border rounded-lg bg-background shadow-sm ${className ?? ""}`}>
-      <div className="border-b px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {title}
-      </div>
-      <div className="p-3">{children}</div>
-    </div>
-  );
-}
+
 
 
 

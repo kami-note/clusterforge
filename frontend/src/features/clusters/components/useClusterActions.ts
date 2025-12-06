@@ -214,7 +214,11 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                         }
                     });
                 } else {
-                    toast.error('Erro ao iniciar cluster: ' + errorMessage, { id: toastId });
+                    const apiError = error as import('@/lib/api-client').ApiError;
+                    toast.error('Erro ao iniciar cluster: ' + errorMessage, {
+                        id: toastId,
+                        description: apiError.details
+                    });
                 }
                 setProcessing(clusterId, false);
             });
@@ -241,7 +245,11 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                     return;
                 }
 
-                toast.error('Não foi possível parar o cluster. Tente novamente em alguns instantes.', { id: String(toastId) });
+                const apiError = error as import('@/lib/api-client').ApiError;
+                toast.error('Não foi possível parar o cluster. Tente novamente em alguns instantes.', {
+                    id: String(toastId),
+                    description: apiError.details
+                });
                 setProcessing(clusterId, false);
             });
     }, [pollClusterStopStatus, setProcessing]);
@@ -268,7 +276,12 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                             {
                                 loading: 'Reiniciando cluster...',
                                 success: 'Cluster reiniciado com sucesso!',
-                                error: 'Erro ao reiniciar cluster'
+                                error: (error: any) => {
+                                    const apiError = error as import('@/lib/api-client').ApiError;
+                                    return apiError.details
+                                        ? `Erro ao reiniciar cluster: ${apiError.details}`
+                                        : 'Erro ao reiniciar cluster';
+                                }
                             }
                         );
                     } finally {
@@ -288,7 +301,12 @@ export const useClusterActions = ({ onClusterUpdate }: UseClusterActionsProps) =
                             {
                                 loading: 'Excluindo cluster...',
                                 success: 'Cluster excluído com sucesso!',
-                                error: 'Erro ao excluir cluster'
+                                error: (error: any) => {
+                                    const apiError = error as import('@/lib/api-client').ApiError;
+                                    return apiError.details
+                                        ? `Erro ao excluir cluster: ${apiError.details}`
+                                        : 'Erro ao excluir cluster';
+                                }
                             }
                         );
                     } finally {
