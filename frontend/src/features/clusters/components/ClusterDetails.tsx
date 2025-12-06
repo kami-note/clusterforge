@@ -1311,7 +1311,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
             </Button>
           )}
 
-          {status === 'running' && (
+          {(status === 'running' || status === 'active') && (
             <Button variant="outline" onClick={() => handleAction('stop')} className="w-full sm:w-auto min-w-[100px] col-span-1">
               <Square className="h-4 w-4 mr-2" />
               Desligar
