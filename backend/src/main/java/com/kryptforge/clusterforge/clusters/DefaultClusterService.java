@@ -14,6 +14,10 @@ import org.springframework.util.StringUtils;
 import com.kryptforge.clusterforge.docker.DockerEngineService;
 import com.kryptforge.clusterforge.docker.PortManager;
 import com.kryptforge.clusterforge.docker.util.DockerStatusMapper;
+import com.kryptforge.clusterforge.exception.ConflictException;
+import com.kryptforge.clusterforge.exception.ForbiddenException;
+import com.kryptforge.clusterforge.exception.NotFoundException;
+import com.kryptforge.clusterforge.exception.ValidationException;
 import com.kryptforge.clusterforge.ftp.FtpService;
 import com.kryptforge.clusterforge.templates.TemplateService;
 import com.kryptforge.clusterforge.users.CurrentUser;
@@ -77,23 +81,23 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional
 	public ClusterInstance create(String name, String templateName, ClusterParams params) {
 		if (!StringUtils.hasText(name)) {
-			throw new IllegalArgumentException("name vazio");
+			throw ValidationException.requiredField("name");
 		}
 		if (!StringUtils.hasText(templateName)) {
-			throw new IllegalArgumentException("templateName vazio");
+			throw ValidationException.requiredField("templateName");
 		}
 		if (repository.existsByName(name)) {
-			throw new IllegalArgumentException("name já utilizado");
+			throw ConflictException.nameAlreadyUsed(name);
 		}
 		// valida existência do template
 		try {
 			templateService.getTemplate(templateName);
 		} catch (Exception e) {
-			throw new IllegalArgumentException("templateName inexistente: " + templateName, e);
+			throw NotFoundException.template(templateName);
 		}
 
 		User user = currentUser.getCurrentUser()
-				.orElseThrow(() -> new IllegalStateException("usuário não autenticado"));
+				.orElseThrow(() -> ForbiddenException.accessDenied());
 
 		ClusterInstance c = new ClusterInstance();
 		c.setName(name);
@@ -113,7 +117,7 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional(readOnly = true)
 	public List<ClusterInstance> list() {
 		User user = currentUser.getCurrentUser()
-				.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
+				.orElseThrow(() -> ForbiddenException.accessDenied());
 
 		if (user.getRole() == Role.ADMIN) {
 			return repository.findAll();
@@ -126,7 +130,7 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional(readOnly = true)
 	public Optional<ClusterInstance> get(UUID id) {
 		User user = currentUser.getCurrentUser()
-				.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
+				.orElseThrow(() -> ForbiddenException.accessDenied());
 
 		Optional<ClusterInstance> cluster = repository.findById(id);
 
@@ -148,10 +152,10 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional
 	public ClusterInstance updateStatus(UUID id, ClusterStatus status) {
 		User user = currentUser.getCurrentUser()
-				.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
+				.orElseThrow(() -> ForbiddenException.accessDenied());
 
 		ClusterInstance c = repository.findById(id)
-				.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
+				.orElseThrow(() -> NotFoundException.cluster(id));
 
 		checkOwnership(user, c);
 
@@ -163,10 +167,10 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional
 	public ClusterInstance updateParams(UUID id, ClusterParams params) {
 		User user = currentUser.getCurrentUser()
-				.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
+				.orElseThrow(() -> ForbiddenException.accessDenied());
 
 		ClusterInstance c = repository.findById(id)
-				.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
+				.orElseThrow(() -> NotFoundException.cluster(id));
 
 		checkOwnership(user, c);
 
@@ -186,20 +190,20 @@ public class DefaultClusterService implements ClusterService {
 	@Transactional
 	public ClusterInstance updateOwner(UUID id, UUID ownerId) {
 		User user = currentUser.getCurrentUser()
-				.orElseThrow(() -> new IllegalStateException(ERROR_USER_NOT_AUTHENTICATED));
+				.orElseThrow(() -> ForbiddenException.accessDenied());
 
 		if (user.getRole() != Role.ADMIN) {
-			throw new IllegalArgumentException(ERROR_ONLY_ADMIN_CAN_CHANGE_OWNER);
+			throw ForbiddenException.adminOnly();
 		}
 
 		ClusterInstance cluster = repository.findById(id)
-				.orElseThrow(() -> new IllegalArgumentException(ERROR_CLUSTER_NOT_FOUND));
+				.orElseThrow(() -> NotFoundException.cluster(id));
 
 		if (ownerId == null) {
 			cluster.setOwnerId(null);
 		} else {
 			User newOwner = userRepository.findById(ownerId)
-					.orElseThrow(() -> new IllegalArgumentException(ERROR_USER_NOT_FOUND));
+					.orElseThrow(() -> NotFoundException.user(ownerId));
 			cluster.setOwnerId(newOwner.getId());
 		}
 
@@ -278,7 +282,6 @@ public class DefaultClusterService implements ClusterService {
 		}
 
 		// 2. Operação Docker FORA da transação
-		boolean alreadyRunning = false;
 		boolean containerNotFound = false;
 		Exception dockerError = null;
 
@@ -286,7 +289,7 @@ public class DefaultClusterService implements ClusterService {
 			dockerEngineService.startContainer(info.containerId);
 			log.info("Container {} iniciado para instância '{}'", info.containerId, info.instanceName);
 		} catch (com.github.dockerjava.api.exception.NotModifiedException e) {
-			alreadyRunning = true;
+			// Container já está rodando - não é erro
 			log.info("Container {} já está rodando para instância '{}'", info.containerId, info.instanceName);
 		} catch (com.github.dockerjava.api.exception.NotFoundException e) {
 			containerNotFound = true;
