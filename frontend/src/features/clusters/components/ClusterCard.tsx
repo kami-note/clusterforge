@@ -50,10 +50,10 @@ export const ClusterCard = memo(({
     onAction,
     onViewDetails
 }: ClusterCardProps) => {
-    
-    
-    
-    
+
+
+
+
     const cpuPercentage = cluster.realtimeMetrics?.cpuUsagePercent != null
         ? (isNaN(cluster.realtimeMetrics.cpuUsagePercent) ? 0 : cluster.realtimeMetrics.cpuUsagePercent)
         : getResourcePercentage(cluster.resources.cpu.used, cluster.resources.cpu.limit);
@@ -66,10 +66,10 @@ export const ClusterCard = memo(({
         ? (isNaN(cluster.realtimeMetrics.diskUsagePercent) ? 0 : cluster.realtimeMetrics.diskUsagePercent)
         : getResourcePercentage(cluster.resources.disk.used, cluster.resources.disk.limit);
 
-    
+
     const isProcessingStopping = isProcessing && cluster.status === 'active';
     const isProcessingStarting = isProcessing && cluster.status === 'stopped';
-    
+
     const isProcessingRestarting = isProcessing && !isProcessingStopping && !isProcessingStarting;
 
     const handleRetry = () => {
@@ -101,7 +101,7 @@ export const ClusterCard = memo(({
             >
                 <CardContent className="p-3">
                     <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-                        {}
+                        { }
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                             <div className="flex-shrink-0">
                                 {isProcessingStopping ? (
@@ -147,8 +147,8 @@ export const ClusterCard = memo(({
                             </div>
                         </div>
 
-                        {}
-                        <div className="flex items-center gap-3 lg:gap-4 flex-shrink-0 flex-wrap lg:flex-nowrap">
+                        { }
+                        <div className="grid grid-cols-3 gap-2 w-full lg:w-auto lg:flex lg:items-center lg:gap-4 flex-shrink-0">
                             <CompactMetric
                                 label="CPU"
                                 icon={Cpu}
@@ -169,15 +169,15 @@ export const ClusterCard = memo(({
                             />
                         </div>
 
-                        {}
-                        <div className="flex items-center gap-1 flex-shrink-0 justify-end lg:justify-start">
+                        { }
+                        <div className="flex items-center gap-1 flex-shrink-0 justify-end w-full lg:w-auto lg:justify-start">
                             {cluster.status === 'stopped' ? (
                                 <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => onAction(cluster.id, 'start')}
                                     title="Iniciar"
-                                    className="h-7 w-7 p-0"
+                                    className="h-8 w-8 p-0"
                                     disabled={isProcessing}
                                 >
                                     <Play className="h-3.5 w-3.5" />
@@ -188,7 +188,7 @@ export const ClusterCard = memo(({
                                     size="sm"
                                     onClick={() => onAction(cluster.id, 'stop')}
                                     title="Parar"
-                                    className="h-7 w-7 p-0"
+                                    className="h-8 w-8 p-0"
                                     disabled={isProcessing}
                                 >
                                     {isProcessing ? (
@@ -203,7 +203,7 @@ export const ClusterCard = memo(({
                                 size="sm"
                                 onClick={() => onAction(cluster.id, 'edit')}
                                 title="Editar Limites"
-                                className="h-7 w-7 p-0"
+                                className="h-8 w-8 p-0"
                                 disabled={isProcessing}
                             >
                                 <Edit className="h-3.5 w-3.5" />
@@ -214,7 +214,7 @@ export const ClusterCard = memo(({
                                 onClick={() => onAction(cluster.id, 'restart')}
                                 disabled={isProcessing}
                                 title="Reiniciar"
-                                className="h-7 w-7 p-0"
+                                className="h-8 w-8 p-0"
                             >
                                 <RotateCw className={`h-3.5 w-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
                             </Button>
@@ -223,7 +223,7 @@ export const ClusterCard = memo(({
                                 size="sm"
                                 onClick={() => onViewDetails(cluster.id)}
                                 title="Ver Detalhes"
-                                className="h-7 w-7 p-0"
+                                className="h-8 w-8 p-0"
                                 disabled={isProcessing}
                             >
                                 <Eye className="h-3.5 w-3.5" />
@@ -233,7 +233,7 @@ export const ClusterCard = memo(({
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                                         title="Excluir"
                                         disabled={isProcessing}
                                     >

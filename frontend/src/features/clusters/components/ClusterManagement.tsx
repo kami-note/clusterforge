@@ -218,7 +218,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       { }
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
             <h1>Gerenciamento de Clusters</h1>
@@ -241,7 +241,7 @@ export function ClusterManagement({ onCreateCluster }: ClusterManagementProps) {
             {isPending && ' • Filtrando...'}
           </p>
         </div>
-        <Button className="flex items-center space-x-2" onClick={handleCreateCluster}>
+        <Button className="flex items-center space-x-2 w-full sm:w-auto justify-center" onClick={handleCreateCluster}>
           <Plus className="h-4 w-4" />
           <span>Novo Cluster</span>
         </Button>

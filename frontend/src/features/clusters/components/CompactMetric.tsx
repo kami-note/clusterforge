@@ -11,7 +11,7 @@ interface CompactMetricProps {
 }
 
 export const CompactMetric = memo(({ label, icon: Icon, percentage, realtime }: CompactMetricProps) => {
-    
+
     const safePercentage = percentage != null && !isNaN(percentage)
         ? Math.max(0, Math.min(100, percentage))
         : 0;

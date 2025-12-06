@@ -1271,123 +1271,100 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     : [0, 100] as [number, number];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       { }
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="flex items-center space-x-4">
-              <Button variant="outline" onClick={onBack}>
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
+        <div className="flex items-center space-x-4">
+          <Button variant="ghost" size="icon" onClick={onBack} className="shrink-0">
+            <ArrowLeft className="h-6 w-6" />
+          </Button>
 
-              <div className="flex items-center space-x-3">
-                <Server className="h-8 w-8 text-primary" />
-                <div>
-                  <h1>{cluster.name}</h1>
-                  <div className="flex items-center space-x-4 mt-1 text-sm text-muted-foreground">
-                    <div className="flex items-center space-x-2">
-                      <div className={`w-3 h-3 rounded-full ${getStatusColor(status)}`} />
-                      <span>{getStatusText(status)}</span>
-                    </div>
-                    <span>•</span>
-                    <span>Uptime: {currentMetrics?.containerUptimeSeconds ? `${Math.floor(currentMetrics.containerUptimeSeconds / 3600)}h` : 'N/A'}</span>
-                    <span>•</span>
-                    <span>{cluster.templateName || 'Custom'}</span>
-                  </div>
-                </div>
-              </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{cluster.name}</h1>
+              <div className={`w-3 h-3 rounded-full ${getStatusColor(status)} shadow-sm shrink-0`} title={getStatusText(status)} />
             </div>
-
-            { }
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:space-x-3">
-              <Button
-                size="lg"
-                variant={activeSection === 'files' ? 'default' : 'outline'}
-                className="h-12 px-6"
-                onClick={() => setActiveSection(prev => prev === 'files' ? 'overview' : 'files')}
-              >
-                <FolderTree className="h-5 w-5 mr-2" />
-                {activeSection === 'files' ? 'Voltar para Monitoramento' : 'Gerenciador de Arquivos'}
-              </Button>
-              {status === 'stopped' ? (
-                <Button
-                  size="lg"
-                  onClick={() => handleAction('start')}
-                  className="h-12 px-6"
-                >
-                  <Play className="h-5 w-5 mr-2" />
-                  Ligar
-                </Button>
-              ) : status === 'running' ? (
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => handleAction('stop')}
-                  className="h-12 px-6"
-                >
-                  <Square className="h-5 w-5 mr-2" />
-                  Desligar
-                </Button>
-              ) : null}
-
-              <div className="flex space-x-3">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => handleAction('restart')}
-                  disabled={status === 'restarting'}
-                  className="h-12 px-6"
-                >
-                  <RotateCw className={`h-5 w-5 mr-2 ${status === 'restarting' ? 'animate-spin' : ''}`} />
-                  Reiniciar
-                </Button>
-
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => handleAction('reinstall')}
-                  className="h-12 px-6"
-                >
-                  <RefreshCw className="h-5 w-5 mr-2" />
-                  Reinstalar
-                </Button>
-
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      className="h-12 px-6 text-destructive hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="h-5 w-5 mr-2" />
-                      Apagar
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Tem certeza que deseja excluir o cluster <strong>{cluster?.name}</strong>?
-                        Esta ação não pode ser desfeita e todos os dados serão perdidos.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={handleDelete}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      >
-                        Excluir
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
+            <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-muted-foreground flex-wrap">
+              <span>{getStatusText(status)}</span>
+              <span>•</span>
+              <span className="font-mono">{cluster.templateName || 'Custom'}</span>
+              <span>•</span>
+              <span>Uptime: {currentMetrics?.containerUptimeSeconds ? `${Math.floor(currentMetrics.containerUptimeSeconds / 3600)}h` : 'N/A'}</span>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="grid grid-cols-2 w-full sm:w-auto sm:flex gap-2 sm:gap-2">
+          <Button
+            variant={activeSection === 'files' ? 'default' : 'outline'}
+            onClick={() => setActiveSection(prev => prev === 'files' ? 'overview' : 'files')}
+            className="w-full sm:w-auto col-span-1"
+          >
+            <FolderTree className="h-4 w-4 mr-2" />
+            {activeSection === 'files' ? 'Monitoramento' : 'Arquivos'}
+          </Button>
+
+          {status === 'stopped' && (
+            <Button onClick={() => handleAction('start')} className="w-full sm:w-auto min-w-[100px] col-span-1">
+              <Play className="h-4 w-4 mr-2" />
+              Ligar
+            </Button>
+          )}
+
+          {status === 'running' && (
+            <Button variant="outline" onClick={() => handleAction('stop')} className="w-full sm:w-auto min-w-[100px] col-span-1">
+              <Square className="h-4 w-4 mr-2" />
+              Desligar
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            onClick={() => handleAction('restart')}
+            disabled={status === 'restarting'}
+            className="w-full sm:w-auto col-span-1"
+          >
+            <RotateCw className={`h-4 w-4 mr-2 ${status === 'restarting' ? 'animate-spin' : ''}`} />
+            Reiniciar
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={() => handleAction('reinstall')}
+            className="w-full sm:w-auto col-span-1"
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span className="sm:hidden ml-2">Reinstalar</span>
+          </Button>
+
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="w-full sm:w-auto text-destructive hover:text-destructive hover:bg-destructive/10 col-span-2 sm:col-span-1">
+                <Trash2 className="h-4 w-4" />
+                <span className="sm:hidden ml-2">Excluir Cluster</span>
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Tem certeza que deseja excluir o cluster <strong>{cluster?.name}</strong>?
+                  Esta ação não pode ser desfeita e todos os dados serão perdidos.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Excluir
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
 
       {activeSection === 'files' ? (
         <div className="h-[calc(100vh-200px)] min-h-[500px] border rounded-lg bg-background shadow-sm">
@@ -1398,519 +1375,546 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          { }
-          <div className="xl:col-span-2 space-y-6">
-            { }
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Monitoramento de Recursos</CardTitle>
-                    <CardDescription>
-                      Consumo em tempo real dos recursos do cluster
-                      {visiblePoints < allResourceData.length && (
-                        <span className="ml-2 text-xs">
-                          • Mostrando últimos {visiblePoints} pontos (zoom automático ativo)
-                        </span>
-                      )}
-                    </CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setVisiblePoints(Math.max(5, visiblePoints - 5))}
-                      disabled={visiblePoints <= 5}
-                      title="Mais zoom (menos pontos)"
-                    >
-                      <ZoomIn className="h-4 w-4 mr-1" />
-                      Zoom
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setVisiblePoints(Math.min(allResourceData.length, visiblePoints + 5))}
-                      disabled={visiblePoints >= allResourceData.length}
-                      title="Menos zoom (mais pontos)"
-                    >
-                      <ZoomOut className="h-4 w-4 mr-1" />
-                      Zoom
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setVisiblePoints(allResourceData.length)}
-                      disabled={visiblePoints >= allResourceData.length}
-                      title="Mostrar todos os pontos"
-                    >
-                      <Maximize2 className="h-4 w-4 mr-1" />
-                      Ver Tudo
-                    </Button>
-                  </div>
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
+            <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+              <CardContent className="p-3 sm:p-4 flex items-center space-x-3 sm:space-x-4">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                  <Cpu className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                 </div>
-              </CardHeader>
-              <CardContent>
-                {metricsError && (
-                  <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                    <p className="text-sm text-red-600 dark:text-red-400">{metricsError}</p>
-                  </div>
-                )}
-                {!connected && (
-                  <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                    <p className="text-sm text-yellow-600 dark:text-yellow-400">
-                      SSE desconectado. Aguardando conexão para receber métricas em tempo real...
-                    </p>
-                  </div>
-                )}
-                {!currentMetrics && (
-                  <div className="mb-4 p-3 bg-muted rounded-lg text-center">
-                    <p className="text-sm text-muted-foreground">Aguardando métricas via SSE...</p>
-                  </div>
-                )}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                  <div className="text-center p-3 bg-muted rounded-lg">
-                    <Cpu className="h-6 w-6 mx-auto mb-2 text-chart-1" />
-                    <div className="text-2xl">{Math.round(currentResourceUsage.cpu)}%</div>
-                    <div className="text-xs text-muted-foreground">CPU</div>
-                  </div>
-                  <div className="text-center p-3 bg-muted rounded-lg">
-                    <MemoryStick className="h-6 w-6 mx-auto mb-2 text-chart-2" />
-                    <div className="text-2xl">{Math.round(currentResourceUsage.ram)}%</div>
-                    <div className="text-xs text-muted-foreground">RAM</div>
-                  </div>
-                  <div className="text-center p-3 bg-muted rounded-lg">
-                    <HardDrive className="h-6 w-6 mx-auto mb-2 text-chart-3" />
-                    <div className="text-2xl">{Math.round(currentResourceUsage.disk)}%</div>
-                    <div className="text-xs text-muted-foreground">Disco</div>
-                  </div>
-                  <div className="text-center p-3 bg-muted rounded-lg">
-                    <Network className="h-6 w-6 mx-auto mb-2 text-chart-4" />
-                    <div className="text-2xl">{currentResourceUsage.network.toFixed(2)} <span className="text-sm text-muted-foreground">MB/s</span></div>
-                    <div className="text-xs text-muted-foreground">Rede</div>
-                  </div>
-                  { }
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">CPU</p>
+                  <h3 className="text-2xl font-bold">{Math.round(currentResourceUsage.cpu)}%</h3>
                 </div>
-
-                <ResponsiveContainer width="100%" height={400}>
-                  {resourceData.length > 0 ? (
-                    <LineChart
-                      data={resourceData}
-                      margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
-                      onMouseEnter={() => {
-
-                        if (process.env.NODE_ENV === 'development') {
-                          console.log('📊 Dados do gráfico:', resourceData.slice(-5), {
-                            totalPontos: resourceData.length,
-                            cores: chartColors
-                          });
-                        }
-                      }}
-                    >
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        opacity={0.3}
-                        stroke={themeColors.mutedForeground}
-                      />
-                      <XAxis
-                        dataKey="time"
-                        tick={{
-                          fontSize: 12,
-                          fill: themeColors.foreground
-                        }}
-                        interval="preserveStartEnd"
-                        stroke={themeColors.mutedForeground}
-                      />
-                      <YAxis
-                        yAxisId="left"
-                        domain={percentageDomain}
-                        tick={{
-                          fontSize: 12,
-                          fill: themeColors.foreground
-                        }}
-                        label={{
-                          value: 'Uso (%)',
-                          angle: -90,
-                          position: 'insideLeft',
-                          style: { fill: themeColors.foreground }
-                        }}
-                        stroke={themeColors.mutedForeground}
-                      />
-                      <YAxis
-                        yAxisId="right"
-                        orientation="right"
-                        tick={{
-                          fontSize: 12,
-                          fill: themeColors.foreground
-                        }}
-                        label={{
-                          value: 'Rede (MB/s)',
-                          angle: 90,
-                          position: 'insideRight',
-                          style: { fill: themeColors.foreground }
-                        }}
-                        allowDecimals={true}
-                        stroke={themeColors.mutedForeground}
-                      />
-                      { }
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'hsl(var(--background))', border: '1px solid hsl(var(--border))' }}
-                        labelStyle={{ color: 'hsl(var(--foreground))' }}
-                      />
-                      <Legend
-                        wrapperStyle={{ paddingTop: '20px', paddingBottom: '10px' }}
-                        iconType="line"
-                        iconSize={16}
-                        formatter={(value) => <span style={{ color: 'hsl(var(--foreground))', fontSize: '14px' }}>{value}</span>}
-                        layout="horizontal"
-                        verticalAlign="bottom"
-                        align="center"
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="cpu"
-                        stroke={chartColors.chart1}
-                        strokeWidth={3}
-                        name="CPU"
-                        dot={false}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive={true}
-                        animationDuration={300}
-                        connectNulls={false}
-                        yAxisId="left"
-                        style={{ stroke: chartColors.chart1 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="ram"
-                        stroke={chartColors.chart2}
-                        strokeWidth={3}
-                        name="RAM"
-                        dot={false}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive={true}
-                        animationDuration={300}
-                        connectNulls={false}
-                        yAxisId="left"
-                        style={{ stroke: chartColors.chart2 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="disk"
-                        stroke={chartColors.chart3}
-                        strokeWidth={3}
-                        name="Disco"
-                        dot={false}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive={true}
-                        animationDuration={300}
-                        connectNulls={false}
-                        yAxisId="left"
-                        style={{ stroke: chartColors.chart3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="network"
-                        stroke={chartColors.chart4}
-                        strokeWidth={3}
-                        name="Rede (MB/s)"
-                        dot={false}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive={true}
-                        animationDuration={300}
-                        connectNulls={false}
-                        yAxisId="right"
-                        style={{ stroke: chartColors.chart4 }}
-                      />
-                      { }
-                    </LineChart>
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-muted-foreground">
-                      <p>Aguardando dados do SSE...</p>
-                    </div>
-                  )}
-                </ResponsiveContainer>
               </CardContent>
             </Card>
-
-            { }
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Terminal className="h-5 w-5" />
-                    <div>
-                      <CardTitle>Console de Controle</CardTitle>
-                      <CardDescription>Digite comandos e monitore a saída do servidor</CardDescription>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsLogsPaused(!isLogsPaused)}
-                    >
-                      <Pause className="h-4 w-4 mr-2" />
-                      {isLogsPaused ? 'Retomar' : 'Pausar'}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => copyToClipboard(consoleOutput)}>
-                      <Copy className="h-4 w-4 mr-2" />
-                      Copiar
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={downloadLogs}>
-                      <Download className="h-4 w-4 mr-2" />
-                      Baixar
-                    </Button>
-                  </div>
+            <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+              <CardContent className="p-3 sm:p-4 flex items-center space-x-3 sm:space-x-4">
+                <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                  <MemoryStick className="h-6 w-6 text-purple-600 dark:text-purple-400" />
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
                 <div>
-                  <label className="text-sm">Saída do Console</label>
-                  <div className="mt-2">
-                    <Textarea
-                      ref={consoleRef}
-                      value={consoleOutput}
-                      readOnly
-                      className="h-64 font-mono text-sm bg-black text-green-400 border-gray-700 resize-none"
-                      style={{
-                        backgroundColor: '#000000',
-                        color: '#00ff00',
-                        fontFamily: 'monospace'
-                      }}
-                    />
-                  </div>
+                  <p className="text-sm font-medium text-muted-foreground">RAM</p>
+                  <h3 className="text-2xl font-bold">{Math.round(currentResourceUsage.ram)}%</h3>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+              <CardContent className="p-3 sm:p-4 flex items-center space-x-3 sm:space-x-4">
+                <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
+                  <HardDrive className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Disco</p>
+                  <h3 className="text-2xl font-bold">{Math.round(currentResourceUsage.disk)}%</h3>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+              <CardContent className="p-3 sm:p-4 flex items-center space-x-3 sm:space-x-4">
+                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                  <Network className="h-6 w-6 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Rede</p>
+                  <h3 className="text-2xl font-bold">{currentResourceUsage.network.toFixed(2)} <span className="text-xs font-normal text-muted-foreground">MB/s</span></h3>
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          { }
-          <div className="space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             { }
-            <Card>
-              <CardHeader>
-                <CardTitle>Informações de Acesso</CardTitle>
-                <CardDescription>Detalhes para conexão ao seu serviço</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <label className="text-sm text-muted-foreground">Endereço do Servidor</label>
-                  <div className="flex items-center space-x-2 mt-1">
-                    <code className="flex-1 p-2 bg-muted rounded text-sm">
-                      {cluster.port ? `${resolvedAccessHost}:${cluster.port}` : 'N/A'}
-                    </code>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyToClipboard(cluster.port ? `${resolvedAccessHost}:${cluster.port}` : '')}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
+            <div className="xl:col-span-2 space-y-6">
+              { }
+              <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Monitoramento de Recursos</CardTitle>
+                      <CardDescription>
+                        Consumo em tempo real dos recursos do cluster
+                        {visiblePoints < allResourceData.length && (
+                          <span className="ml-2 text-xs">
+                            • Mostrando últimos {visiblePoints} pontos (zoom automático ativo)
+                          </span>
+                        )}
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setVisiblePoints(Math.max(5, visiblePoints - 5))}
+                        disabled={visiblePoints <= 5}
+                        title="Mais zoom (menos pontos)"
+                      >
+                        <ZoomIn className="h-4 w-4 mr-1" />
+                        Zoom
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setVisiblePoints(Math.min(allResourceData.length, visiblePoints + 5))}
+                        disabled={visiblePoints >= allResourceData.length}
+                        title="Menos zoom (mais pontos)"
+                      >
+                        <ZoomOut className="h-4 w-4 mr-1" />
+                        Zoom
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setVisiblePoints(allResourceData.length)}
+                        disabled={visiblePoints >= allResourceData.length}
+                        title="Mostrar todos os pontos"
+                      >
+                        <Maximize2 className="h-4 w-4 mr-1" />
+                        Ver Tudo
+                      </Button>
+                    </div>
                   </div>
-                </div>
-
-                <Separator />
-
-                <div>
-                  <label className="text-sm text-muted-foreground">Acesso FTP/SFTP</label>
-                  {accessLoading ? (
-                    <div className="mt-2 space-y-2">
-                      <Skeleton className="h-8 w-full" />
-                      <Skeleton className="h-8 w-full" />
-                      <Skeleton className="h-8 w-full" />
-                      <Skeleton className="h-8 w-full" />
-                    </div>
-                  ) : ftpCredentials ? (
-                    <div className="space-y-2 mt-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">Host:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.host}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(ftpCredentials.host)}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">URL:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.url}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(ftpCredentials.url)}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">Usuário:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.username}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(ftpCredentials.username)}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">Senha:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.password}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(ftpCredentials.password)}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">Porta:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.port}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(ftpCredentials.port.toString())}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      FTP não configurado para este cluster
+                </CardHeader>
+                <CardContent>
+                  {metricsError && (
+                    <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <p className="text-sm text-red-600 dark:text-red-400">{metricsError}</p>
                     </div>
                   )}
-                </div>
-
-                <Separator />
-
-                <div>
-                  <label className="text-sm text-muted-foreground">Acesso WebDAV</label>
-                  {accessLoading ? (
-                    <div className="mt-2 space-y-2">
-                      <Skeleton className="h-8 w-full" />
-                      <Skeleton className="h-8 w-full" />
-                      <Skeleton className="h-8 w-full" />
-                      <Skeleton className="h-8 w-full" />
-                    </div>
-                  ) : webDavCredentials ? (
-                    <div className="space-y-2 mt-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">URL:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.url}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(webDavCredentials.url)}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">Usuário:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.username}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(webDavCredentials.username)}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">Senha:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.password}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(webDavCredentials.password)}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs w-16">Porta:</span>
-                        <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.port}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(webDavCredentials.port.toString())}
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      WebDAV não configurado para este cluster
+                  {!connected && (
+                    <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                      <p className="text-sm text-yellow-600 dark:text-yellow-400">
+                        SSE desconectado. Aguardando conexão para receber métricas em tempo real...
+                      </p>
                     </div>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                  {!currentMetrics && (
+                    <div className="mb-4 p-3 bg-muted rounded-lg text-center">
+                      <p className="text-sm text-muted-foreground">Aguardando métricas via SSE...</p>
+                    </div>
+                  )}
+
+
+                  <ResponsiveContainer width="100%" height={400}>
+                    {resourceData.length > 0 ? (
+                      <LineChart
+                        data={resourceData}
+                        margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
+                        onMouseEnter={() => {
+
+                          if (process.env.NODE_ENV === 'development') {
+                            console.log('📊 Dados do gráfico:', resourceData.slice(-5), {
+                              totalPontos: resourceData.length,
+                              cores: chartColors
+                            });
+                          }
+                        }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          opacity={0.3}
+                          stroke={themeColors.mutedForeground}
+                        />
+                        <XAxis
+                          dataKey="time"
+                          tick={{
+                            fontSize: 12,
+                            fill: themeColors.foreground
+                          }}
+                          interval="preserveStartEnd"
+                          stroke={themeColors.mutedForeground}
+                        />
+                        <YAxis
+                          yAxisId="left"
+                          domain={percentageDomain}
+                          tick={{
+                            fontSize: 12,
+                            fill: themeColors.foreground
+                          }}
+                          label={{
+                            value: 'Uso (%)',
+                            angle: -90,
+                            position: 'insideLeft',
+                            style: { fill: themeColors.foreground }
+                          }}
+                          stroke={themeColors.mutedForeground}
+                        />
+                        <YAxis
+                          yAxisId="right"
+                          orientation="right"
+                          tick={{
+                            fontSize: 12,
+                            fill: themeColors.foreground
+                          }}
+                          label={{
+                            value: 'Rede (MB/s)',
+                            angle: 90,
+                            position: 'insideRight',
+                            style: { fill: themeColors.foreground }
+                          }}
+                          allowDecimals={true}
+                          stroke={themeColors.mutedForeground}
+                        />
+                        { }
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'hsl(var(--background))', border: '1px solid hsl(var(--border))' }}
+                          labelStyle={{ color: 'hsl(var(--foreground))' }}
+                        />
+                        <Legend
+                          wrapperStyle={{ paddingTop: '20px', paddingBottom: '10px' }}
+                          iconType="line"
+                          iconSize={16}
+                          formatter={(value) => <span style={{ color: 'hsl(var(--foreground))', fontSize: '14px' }}>{value}</span>}
+                          layout="horizontal"
+                          verticalAlign="bottom"
+                          align="center"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="cpu"
+                          stroke={chartColors.chart1}
+                          strokeWidth={3}
+                          name="CPU"
+                          dot={false}
+                          activeDot={{ r: 5 }}
+                          isAnimationActive={true}
+                          animationDuration={300}
+                          connectNulls={false}
+                          yAxisId="left"
+                          style={{ stroke: chartColors.chart1 }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="ram"
+                          stroke={chartColors.chart2}
+                          strokeWidth={3}
+                          name="RAM"
+                          dot={false}
+                          activeDot={{ r: 5 }}
+                          isAnimationActive={true}
+                          animationDuration={300}
+                          connectNulls={false}
+                          yAxisId="left"
+                          style={{ stroke: chartColors.chart2 }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="disk"
+                          stroke={chartColors.chart3}
+                          strokeWidth={3}
+                          name="Disco"
+                          dot={false}
+                          activeDot={{ r: 5 }}
+                          isAnimationActive={true}
+                          animationDuration={300}
+                          connectNulls={false}
+                          yAxisId="left"
+                          style={{ stroke: chartColors.chart3 }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="network"
+                          stroke={chartColors.chart4}
+                          strokeWidth={3}
+                          name="Rede (MB/s)"
+                          dot={false}
+                          activeDot={{ r: 5 }}
+                          isAnimationActive={true}
+                          animationDuration={300}
+                          connectNulls={false}
+                          yAxisId="right"
+                          style={{ stroke: chartColors.chart4 }}
+                        />
+                        { }
+                      </LineChart>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-muted-foreground">
+                        <p>Aguardando dados do SSE...</p>
+                      </div>
+                    )}
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              { }
+              <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Terminal className="h-5 w-5" />
+                      <div>
+                        <CardTitle>Console de Controle</CardTitle>
+                        <CardDescription>Digite comandos e monitore a saída do servidor</CardDescription>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsLogsPaused(!isLogsPaused)}
+                      >
+                        <Pause className="h-4 w-4 mr-2" />
+                        {isLogsPaused ? 'Retomar' : 'Pausar'}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => copyToClipboard(consoleOutput)}>
+                        <Copy className="h-4 w-4 mr-2" />
+                        Copiar
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={downloadLogs}>
+                        <Download className="h-4 w-4 mr-2" />
+                        Baixar
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-sm">Saída do Console</label>
+                    <div className="mt-2">
+                      <Textarea
+                        ref={consoleRef}
+                        value={consoleOutput}
+                        readOnly
+                        className="h-64 font-mono text-sm bg-black text-green-400 border-gray-700 resize-none"
+                        style={{
+                          backgroundColor: '#000000',
+                          color: '#00ff00',
+                          fontFamily: 'monospace'
+                        }}
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
             { }
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Database className="h-5 w-5" />
-                  <span>Banco de Dados</span>
-                </CardTitle>
-                <CardDescription>Gerencie os dados do seu cluster</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button className="w-full" variant="outline">
-                  <Database className="h-4 w-4 mr-2" />
-                  Acessar Banco de Dados
-                  <ExternalLink className="h-4 w-4 ml-2" />
-                </Button>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Será aberto o phpMyAdmin isolado para este cluster
-                </p>
-              </CardContent>
-            </Card>
+            <div className="space-y-6">
+              { }
+              <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+                <CardHeader>
+                  <CardTitle>Informações de Acesso</CardTitle>
+                  <CardDescription>Detalhes para conexão ao seu serviço</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-sm text-muted-foreground">Endereço do Servidor</label>
+                    <div className="flex items-center space-x-2 mt-1">
+                      <code className="flex-1 p-2 bg-muted rounded text-sm">
+                        {cluster.port ? `${resolvedAccessHost}:${cluster.port}` : 'N/A'}
+                      </code>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copyToClipboard(cluster.port ? `${resolvedAccessHost}:${cluster.port}` : '')}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
 
-            { }
-            <Card>
-              <CardHeader>
-                <CardTitle>Estatísticas</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Limites de CPU:</span>
-                  <span className="text-sm">{cluster.cpuLimitPercent}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Limites de RAM:</span>
-                  <span className="text-sm">{cluster.memoryLimit}GB</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Limites de Disco:</span>
-                  <span className="text-sm">{cluster.diskLimit}GB</span>
-                </div>
-                <Separator />
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Criado em:</span>
-                  <span className="text-sm">
-                    {(() => {
-                      try {
-                        const date = new Date(cluster.updatedAt || '');
-                        if (isNaN(date.getTime())) {
+                  <Separator />
+
+                  <div>
+                    <label className="text-sm text-muted-foreground">Acesso FTP/SFTP</label>
+                    {accessLoading ? (
+                      <div className="mt-2 space-y-2">
+                        <Skeleton className="h-8 w-full" />
+                        <Skeleton className="h-8 w-full" />
+                        <Skeleton className="h-8 w-full" />
+                        <Skeleton className="h-8 w-full" />
+                      </div>
+                    ) : ftpCredentials ? (
+                      <div className="space-y-2 mt-2">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">Host:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.host}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(ftpCredentials.host)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">URL:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.url}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(ftpCredentials.url)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">Usuário:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.username}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(ftpCredentials.username)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">Senha:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.password}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(ftpCredentials.password)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">Porta:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{ftpCredentials.port}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(ftpCredentials.port.toString())}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        FTP não configurado para este cluster
+                      </div>
+                    )}
+                  </div>
+
+                  <Separator />
+
+                  <div>
+                    <label className="text-sm text-muted-foreground">Acesso WebDAV</label>
+                    {accessLoading ? (
+                      <div className="mt-2 space-y-2">
+                        <Skeleton className="h-8 w-full" />
+                        <Skeleton className="h-8 w-full" />
+                        <Skeleton className="h-8 w-full" />
+                        <Skeleton className="h-8 w-full" />
+                      </div>
+                    ) : webDavCredentials ? (
+                      <div className="space-y-2 mt-2">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">URL:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.url}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(webDavCredentials.url)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">Usuário:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.username}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(webDavCredentials.username)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">Senha:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.password}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(webDavCredentials.password)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs w-16">Porta:</span>
+                          <code className="flex-1 p-1 bg-muted rounded text-xs">{webDavCredentials.port}</code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(webDavCredentials.port.toString())}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        WebDAV não configurado para este cluster
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              { }
+              <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Database className="h-5 w-5" />
+                    <span>Banco de Dados</span>
+                  </CardTitle>
+                  <CardDescription>Gerencie os dados do seu cluster</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button className="w-full" variant="outline">
+                    <Database className="h-4 w-4 mr-2" />
+                    Acessar Banco de Dados
+                    <ExternalLink className="h-4 w-4 ml-2" />
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Será aberto o phpMyAdmin isolado para este cluster
+                  </p>
+                </CardContent>
+              </Card>
+
+              { }
+              <Card className="border-0 shadow-none bg-transparent sm:border sm:shadow-sm sm:bg-card">
+                <CardHeader>
+                  <CardTitle>Estatísticas</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Limites de CPU:</span>
+                    <span className="text-sm">{cluster.cpuLimitPercent}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Limites de RAM:</span>
+                    <span className="text-sm">{cluster.memoryLimit}GB</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Limites de Disco:</span>
+                    <span className="text-sm">{cluster.diskLimit}GB</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Criado em:</span>
+                    <span className="text-sm">
+                      {(() => {
+                        try {
+                          const date = new Date(cluster.updatedAt || '');
+                          if (isNaN(date.getTime())) {
+                            return 'Desconhecido';
+                          }
+                          return date.toLocaleDateString('pt-BR');
+                        } catch {
                           return 'Desconhecido';
                         }
-                        return date.toLocaleDateString('pt-BR');
-                      } catch {
-                        return 'Desconhecido';
-                      }
-                    })()}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
+                      })()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </div>
       )}
