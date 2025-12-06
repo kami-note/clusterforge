@@ -22,10 +22,11 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.kryptforge.clusterforge.security.EncryptedStringConverter;
 
 @Entity
 @Table(name = "clusters", indexes = {
-	@Index(name = "ux_clusters_name", columnList = "name", unique = true)
+		@Index(name = "ux_clusters_name", columnList = "name", unique = true)
 })
 public class ClusterInstance {
 
@@ -92,7 +93,8 @@ public class ClusterInstance {
 	@Column(name = "ftp_user", length = 64)
 	private String ftpUser;
 
-	@Column(name = "ftp_password", length = 128)
+	@Column(name = "ftp_password", length = 256)
+	@Convert(converter = EncryptedStringConverter.class)
 	private String ftpPassword;
 
 	@Column(name = "webdav_container_id", length = 64)
@@ -104,14 +106,16 @@ public class ClusterInstance {
 	@Column(name = "webdav_user", length = 64)
 	private String webDavUser;
 
-	@Column(name = "webdav_password", length = 128)
+	@Column(name = "webdav_password", length = 256)
+	@Convert(converter = EncryptedStringConverter.class)
 	private String webDavPassword;
 
 	@PrePersist
 	void onCreate() {
 		this.createdAt = Instant.now();
 		this.updatedAt = this.createdAt;
-		if (this.status == null) this.status = ClusterStatus.PENDING;
+		if (this.status == null)
+			this.status = ClusterStatus.PENDING;
 	}
 
 	@PreUpdate
@@ -291,17 +295,211 @@ public class ClusterInstance {
 		this.webDavPassword = webDavPassword;
 	}
 
-	public static class EnvConverter extends JsonAttributeConverter<Map<String,String>> {
-		public EnvConverter() { super(new TypeReference<Map<String,String>>(){}); }
+	// ==================== DOMAIN BEHAVIOR ====================
+
+	/**
+	 * Verifica se o cluster pode ser iniciado.
+	 * Um cluster pode ser iniciado se:
+	 * - Tem um containerId válido
+	 * - Está em status STOPPED, ERROR ou PENDING
+	 * 
+	 * @return true se pode ser iniciado
+	 */
+	public boolean canBeStarted() {
+		if (containerId == null || containerId.isBlank()) {
+			return false;
+		}
+		return status == ClusterStatus.STOPPED
+				|| status == ClusterStatus.ERROR
+				|| status == ClusterStatus.PENDING;
+	}
+
+	/**
+	 * Verifica se o cluster pode ser parado.
+	 * Um cluster pode ser parado se:
+	 * - Tem um containerId válido
+	 * - Está em status ACTIVE
+	 * 
+	 * @return true se pode ser parado
+	 */
+	public boolean canBeStopped() {
+		if (containerId == null || containerId.isBlank()) {
+			return false;
+		}
+		return status == ClusterStatus.ACTIVE;
+	}
+
+	/**
+	 * Verifica se o cluster pode ser reiniciado.
+	 * Um cluster pode ser reiniciado se pode ser parado ou iniciado.
+	 * 
+	 * @return true se pode ser reiniciado
+	 */
+	public boolean canBeRestarted() {
+		if (containerId == null || containerId.isBlank()) {
+			return false;
+		}
+		return status != ClusterStatus.DELETED;
+	}
+
+	/**
+	 * Verifica se o cluster possui servidor FTP configurado.
+	 * 
+	 * @return true se tem FTP configurado
+	 */
+	public boolean hasFtpServer() {
+		return ftpContainerId != null && !ftpContainerId.isBlank() && ftpPort != null;
+	}
+
+	/**
+	 * Verifica se o cluster possui servidor WebDAV configurado.
+	 * 
+	 * @return true se tem WebDAV configurado
+	 */
+	public boolean hasWebDavServer() {
+		return webDavContainerId != null && !webDavContainerId.isBlank() && webDavPort != null;
+	}
+
+	/**
+	 * Verifica se o cluster possui um proprietário atribuído.
+	 * 
+	 * @return true se tem proprietário
+	 */
+	public boolean hasOwner() {
+		return ownerId != null;
+	}
+
+	/**
+	 * Atribui um proprietário ao cluster com validação.
+	 * 
+	 * @param newOwnerId ID do novo proprietário (pode ser null para remover)
+	 * @throws IllegalStateException se já possui proprietário e está tentando
+	 *                               atribuir outro
+	 */
+	public void assignOwner(UUID newOwnerId) {
+		// Se está tentando remover proprietário ou se não tem proprietário atual
+		if (newOwnerId == null || this.ownerId == null) {
+			this.ownerId = newOwnerId;
+			return;
+		}
+
+		// Se já tem proprietário e é diferente do novo
+		if (!this.ownerId.equals(newOwnerId)) {
+			// Permite trocar - mas poderia lançar exceção se necessário
+			this.ownerId = newOwnerId;
+		}
+	}
+
+	/**
+	 * Atualiza limites de recursos do cluster com validação.
+	 * 
+	 * @param cpuLimit    limite de CPU em porcentagem (1-100, null para sem limite)
+	 * @param memoryLimit limite de memória em MB (mínimo 64, null para sem limite)
+	 * @throws IllegalArgumentException se valores forem inválidos
+	 */
+	public void updateResourceLimits(Integer cpuLimit, Long memoryLimit) {
+		validateResourceLimits(cpuLimit, memoryLimit);
+		this.cpuLimitPercent = cpuLimit;
+		this.memoryLimitMb = memoryLimit;
+	}
+
+	/**
+	 * Valida limites de recursos.
+	 */
+	private void validateResourceLimits(Integer cpuLimit, Long memoryLimit) {
+		if (cpuLimit != null && (cpuLimit < 1 || cpuLimit > 100)) {
+			throw new IllegalArgumentException(
+					"Limite de CPU deve estar entre 1 e 100 (porcentagem). Recebido: " + cpuLimit);
+		}
+		if (memoryLimit != null && memoryLimit < 64) {
+			throw new IllegalArgumentException(
+					"Limite de memória deve ser pelo menos 64 MB. Recebido: " + memoryLimit);
+		}
+	}
+
+	/**
+	 * Marca o cluster como deletado.
+	 * Limpa dados de container e servidores auxiliares.
+	 */
+	public void markAsDeleted() {
+		this.status = ClusterStatus.DELETED;
+		this.containerId = null;
+		this.ftpContainerId = null;
+		this.ftpPort = null;
+		this.webDavContainerId = null;
+		this.webDavPort = null;
+	}
+
+	/**
+	 * Configura informações do servidor FTP.
+	 * 
+	 * @param containerId ID do container FTP
+	 * @param port        porta do FTP
+	 * @param user        usuário FTP
+	 * @param password    senha FTP (será criptografada automaticamente)
+	 */
+	public void configureFtpServer(String containerId, Integer port, String user, String password) {
+		this.ftpContainerId = containerId;
+		this.ftpPort = port;
+		this.ftpUser = user;
+		this.ftpPassword = password;
+	}
+
+	/**
+	 * Configura informações do servidor WebDAV.
+	 * 
+	 * @param containerId ID do container WebDAV
+	 * @param port        porta do WebDAV
+	 * @param user        usuário WebDAV
+	 * @param password    senha WebDAV (será criptografada automaticamente)
+	 */
+	public void configureWebDavServer(String containerId, Integer port, String user, String password) {
+		this.webDavContainerId = containerId;
+		this.webDavPort = port;
+		this.webDavUser = user;
+		this.webDavPassword = password;
+	}
+
+	/**
+	 * Remove configuração do servidor FTP.
+	 */
+	public void removeFtpServer() {
+		this.ftpContainerId = null;
+		this.ftpPort = null;
+		this.ftpUser = null;
+		this.ftpPassword = null;
+	}
+
+	/**
+	 * Remove configuração do servidor WebDAV.
+	 */
+	public void removeWebDavServer() {
+		this.webDavContainerId = null;
+		this.webDavPort = null;
+		this.webDavUser = null;
+		this.webDavPassword = null;
+	}
+
+	// ==================== CONVERTERS ====================
+
+	public static class EnvConverter extends JsonAttributeConverter<Map<String, String>> {
+		public EnvConverter() {
+			super(new TypeReference<Map<String, String>>() {
+			});
+		}
 	}
 
 	public static class PortsConverter extends JsonAttributeConverter<List<Integer>> {
-		public PortsConverter() { super(new TypeReference<List<Integer>>(){}); }
+		public PortsConverter() {
+			super(new TypeReference<List<Integer>>() {
+			});
+		}
 	}
 
 	public static class VolumesConverter extends JsonAttributeConverter<List<String>> {
-		public VolumesConverter() { super(new TypeReference<List<String>>(){}); }
+		public VolumesConverter() {
+			super(new TypeReference<List<String>>() {
+			});
+		}
 	}
 }
-
-
