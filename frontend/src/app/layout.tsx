@@ -7,6 +7,7 @@ import ClientLayout from "./ClientLayout";
 import { STORAGE_KEYS } from "@/constants";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ReactQueryProvider from "@/providers/react-query-provider";
+import { ConfigProvider } from "@/context/ConfigContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -153,7 +154,9 @@ export default function RootLayout({
           <ThemeProvider>
             <AuthProvider>
               <ReactQueryProvider>
-                <ClientLayout>{children}</ClientLayout>
+                <ConfigProvider>
+                  <ClientLayout>{children}</ClientLayout>
+                </ConfigProvider>
               </ReactQueryProvider>
             </AuthProvider>
           </ThemeProvider>

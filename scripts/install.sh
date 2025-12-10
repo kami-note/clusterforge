@@ -149,18 +149,21 @@ parse_args() {
 			--status)
 				STATUS_ONLY=1
 				;;
+			--install-app)
+				MODE="install-app"
+				;;
 			*)
 				echo "Parâmetro não reconhecido: $1" >&2
-				echo "Uso: $0 [--mode socket|tcp-local] [--status]" >&2
+				echo "Uso: $0 [--mode socket|tcp-local] [--status] [--install-app]" >&2
 				exit 2
 				;;
 		esac
 		shift || true
 	done
 	case "$MODE" in
-		socket|tcp-local) ;;
+		socket|tcp-local|install-app) ;;
 		*)
-			echo "Valor inválido para --mode: $MODE (use socket|tcp-local)" >&2
+			echo "Valor inválido para --mode: $MODE (use socket|tcp-local|install-app)" >&2
 			exit 2
 			;;
 	esac
@@ -311,6 +314,218 @@ configure_docker_api_tcp_local() {
 	echo "Nota de segurança: porta acessível apenas localmente. Para acesso remoto, use TLS em 2376."
 }
 
+ensure_build_dependencies() {
+	echo "Verificando dependências de build..."
+	
+	# Update apt only once if needed
+	local apt_updated=0
+	ensure_apt_update() {
+		if [ $apt_updated -eq 0 ]; then
+			if command -v apt-get >/dev/null 2>&1; then
+				echo "Atualizando repositórios..."
+				apt-get update -y
+				apt_updated=1
+			fi
+		fi
+	}
+
+	# 1. Java 21 (JDK)
+	if ! command -v javac >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "21"; then
+		echo "Java 21 (JDK) não encontrado. Tentando instalar..."
+		ensure_apt_update
+		if command -v apt-get >/dev/null 2>&1; then
+			DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-21-jdk
+		else
+			echo "Aviso: não foi possível instalar o Java 21. Instale manualmente."
+		fi
+	else
+		echo "Java disponível."
+	fi
+
+	# 2. Node.js & npm
+	if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+		echo "Node.js/npm não encontrados. Tentando instalar..."
+		ensure_apt_update
+		if command -v apt-get >/dev/null 2>&1; then
+			# Instala dependência para adicionar repositório se necessário
+			DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
+			# Instala Node.js 20.x (LTS)
+			mkdir -p /etc/apt/keyrings
+			curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+			echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
+			apt-get update -y
+			DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+		else
+			echo "Aviso: não foi possível instalar o Node.js. Instale manualmente."
+		fi
+	else
+		echo "Node.js disponível."
+	fi
+}
+
+ensure_mysql_container() {
+ 	local CONTAINER_NAME="clusterforge-mysql"
+ 	local DB_ROOT_PASSWORD="secret"
+ 	local DB_NAME="clusterforge"
+ 	local DB_PORT="3306"
+	
+ 	echo "Verificando container MySQL..."
+ 
+ 	if [ "$(docker ps -aq -f name=^/${CONTAINER_NAME}$)" ]; then
+ 		if [ "$(docker ps -aq -f status=exited -f name=^/${CONTAINER_NAME}$)" ]; then
+ 			echo "Iniciando MySQL existente..."
+ 			docker start $CONTAINER_NAME
+ 		else
+ 			echo "MySQL já está rodando."
+ 		fi
+ 	else
+ 		echo "Criando container MySQL..."
+ 		docker run -d \
+ 			--name $CONTAINER_NAME \
+ 			--restart always \
+ 			-e MYSQL_ROOT_PASSWORD=$DB_ROOT_PASSWORD \
+ 			-e MYSQL_DATABASE=$DB_NAME \
+ 			-p $DB_PORT:3306 \
+ 			mysql:8.0
+ 			
+ 		echo "Aguardando MySQL iniciar..."
+ 		sleep 10
+ 		echo "MySQL iniciado em porta $DB_PORT. Senha root: $DB_ROOT_PASSWORD"
+ 	fi
+}
+
+install_app() {
+	require_root
+	ensure_docker_installed
+	ensure_build_dependencies
+	
+	# Garante que serviço docker está rodando antes de tentar subir o banco
+	if ! service_active; then
+		systemctl enable --now docker
+	fi
+	
+	ensure_mysql_container
+	
+	local INSTALL_DIR="/opt/clusterforge"
+	local USER_NAME="clusterforge"
+	
+	echo "== Iniciando Instalação do ClusterForge em $INSTALL_DIR =="
+
+	# 1. Build Backend
+	echo "Buildando backend..."
+	if [ -f "./mvnw" ]; then # Se estiver na raiz do projeto (assume estrutura monorepo ou backend na raiz?)
+        # O usuário está rodando da raiz do projeto? 
+        # O script está em scripts/install.sh, então .. é a raiz
+		local PROJECT_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
+		cd "$PROJECT_ROOT"
+		
+		# Build JAR
+		if [ -d "backend" ]; then
+			cd backend
+			./mvnw clean package -DskipTests
+			cd ..
+		else
+			echo "Erro: pasta 'backend' não encontrada em $PROJECT_ROOT"
+			exit 1
+		fi
+    else
+         echo "Erro: não foi possível localizar a raiz do projeto."
+         exit 1
+    fi
+
+	# 2. Build Frontend
+	echo "Buildando frontend..."
+	if [ -d "frontend" ]; then
+		cd frontend
+		npm install
+		npm run build
+		cd ..
+	else
+		echo "Erro: pasta 'frontend' não encontrada"
+		exit 1
+	fi
+
+	# 3. Create Directories
+	echo "Criando diretórios..."
+	if ! id -u "$USER_NAME" >/dev/null 2>&1; then
+		useradd -r -s /bin/false "$USER_NAME"
+	fi
+	
+	mkdir -p "$INSTALL_DIR/data/templates"
+	mkdir -p "$INSTALL_DIR/data/volumes"
+	mkdir -p "$INSTALL_DIR/data/db"
+	mkdir -p "$INSTALL_DIR/frontend"
+
+	# 4. Copy Files
+	echo "Copiando arquivos..."
+	cp backend/target/clusterforge-*.jar "$INSTALL_DIR/clusterforge.jar"
+	
+	# Copia server.properties e ajusta para servir frontend
+	cp backend/server.properties "$INSTALL_DIR/server.properties"
+	
+	# Ativa o serving de arquivos estáticos externos no server.properties
+	if ! grep -q "spring.web.resources.static-locations" "$INSTALL_DIR/server.properties"; then
+		echo "" >> "$INSTALL_DIR/server.properties"
+		echo "# Servir Frontend Estático" >> "$INSTALL_DIR/server.properties"
+		echo "spring.web.resources.static-locations=file:./frontend/" >> "$INSTALL_DIR/server.properties"
+	fi
+	
+	# Configura conexão com o MySQL Container
+	echo "Configurando conexão MySQL no server.properties..."
+	# Comenta as linhas do H2
+	sed -i 's/^spring.datasource.url=jdbc:h2/# spring.datasource.url=jdbc:h2/g' "$INSTALL_DIR/server.properties"
+	sed -i 's/^spring.datasource.username=sa/# spring.datasource.username=sa/g' "$INSTALL_DIR/server.properties"
+	sed -i 's/^spring.datasource.password=/# spring.datasource.password=/g' "$INSTALL_DIR/server.properties"
+
+	# Adiciona/Descomenta configuração do MySQL
+	cat >> "$INSTALL_DIR/server.properties" <<EOF
+
+# --- Configuração Automática do MySQL (via install.sh) ---
+spring.datasource.url=jdbc:mysql://localhost:3306/clusterforge?allowPublicKeyRetrieval=true&useSSL=false
+spring.datasource.username=root
+spring.datasource.password=secret
+spring.jpa.hibernate.ddl-auto=update
+# ---------------------------------------------------------
+EOF
+
+	# Copia templates
+	cp -r backend/data/templates/* "$INSTALL_DIR/data/templates/"
+
+	# Copia frontend build (pasta 'out')
+	cp -r frontend/out/* "$INSTALL_DIR/frontend/"
+
+	# 5. Set Permissions
+	chown -R "$USER_NAME:$USER_NAME" "$INSTALL_DIR"
+	chmod 755 "$INSTALL_DIR"
+	chmod 644 "$INSTALL_DIR/clusterforge.jar"
+	chmod 644 "$INSTALL_DIR/server.properties"
+
+	# 6. Create Service
+	echo "Criando serviço systemd..."
+	cat > "/etc/systemd/system/clusterforge.service" <<EOF
+[Unit]
+Description=ClusterForge Server
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+User=$USER_NAME
+WorkingDirectory=$INSTALL_DIR
+ExecStart=/usr/bin/java -jar $INSTALL_DIR/clusterforge.jar
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	systemctl daemon-reload
+	echo "Instalação concluída!"
+	echo "Para iniciar: systemctl enable --now clusterforge"
+	echo "Configurações em: $INSTALL_DIR/server.properties"
+	echo "Frontend em: $INSTALL_DIR/frontend"
+}
+
 # Executa somente se chamado diretamente (não em source)
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 	parse_args "$@"
@@ -324,6 +539,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 			;;
 		tcp-local)
 			configure_docker_api_tcp_local
+			;;
+		install-app)
+			install_app
 			;;
 	esac
 fi

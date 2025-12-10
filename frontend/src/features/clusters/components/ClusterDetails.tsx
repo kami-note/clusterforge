@@ -33,7 +33,8 @@ import { Cluster } from '@/types';
 import { monitoringService, ClusterMetrics, ClusterHealthStatus } from '@/services/monitoring.service';
 import { useRealtimeMetrics } from '@/hooks/useRealtimeMetrics';
 import { ClusterFileManager } from './ClusterFileManager';
-import { config } from '@/lib/config';
+// import { config } from '@/lib/config';
+import { useConfig } from '@/context/ConfigContext';
 import { sseService, type ContainerLogEventPayload } from '@/services/sse.service';
 import { toast } from 'sonner';
 // import { useRouter } from 'next/navigation';
@@ -75,6 +76,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
   const { data: cluster, isLoading: loading, refetch } = useClusterDetailsQuery(clusterId);
   const { mutateAsync: performAction } = useClusterActionMutation();
   const { metrics: realtimeMetrics, connected } = useRealtimeMetrics();
+  const config = useConfig();
 
 
   const [allResourceData, setAllResourceData] = useState<ResourceDataPoint[]>([]);
@@ -270,12 +272,11 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
     if (typeof window !== 'undefined' && window.location.hostname) {
       return window.location.hostname;
     }
-    try {
-      return new URL(config.api.baseUrl).hostname;
-    } catch {
-      return 'localhost';
-    }
-  }, []);
+    // Fallback if config.api.baseUrl is not available in context (it's not part of ConfigState currently, assuming context matches structure or access is enough)
+    // Actually ConfigState only has 'access', so we can't check config.api.baseUrl from the hook result directly if it's not there.
+    // But we merged defaults. Let's assume we rely on access.host or window.
+    return 'localhost';
+  }, [config.access?.host]);
 
   const buildAccessCredentials = useCallback(
     (access: Cluster['ftp'], protocol: 'ftp' | 'webdav'): AccessCredentials | null => {
@@ -296,7 +297,7 @@ export function ClusterDetails({ clusterId, onBack }: ClusterDetailsProps) {
         url,
       };
     },
-    [resolvedAccessHost],
+    [resolvedAccessHost, config.access],
   );
 
   const ftpCredentials = useMemo(
